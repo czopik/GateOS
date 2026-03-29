@@ -1,0 +1,2488 @@
+﻿#include <Arduino.h>
+#include <LittleFS.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <ESPmDNS.h>
+#include <ArduinoOTA.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <map>
+#include <math.h>
+#include <esp_task_wdt.h>
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+
+#include "config_manager.h"
+#include "wifi_manager.h"
+#include "motor_controller.h"
+#include "gate_controller.h"
+#include "hcs301_receiver.h"
+#include "web_server.h"
+#include "mqtt_manager.h"
+#include "calibration_manager.h"
+#include "led_controller.h"
+#include "input_manager.h"
+#include "position_tracker.h"
+#include "MyLD2410.h"
+
+ConfigManager config;
+MotorController* motor = nullptr;
+GateController* gate = nullptr;
+HCS301Receiver* hcs = nullptr;
+WebServerManager webserver(&config);
+CalibrationManager calibration;
+
+MqttManager mqtt;
+LedController led;
+InputManager inputManager;
+PositionTracker positionTracker;
+
+struct RemoteSeen {
+  unsigned long encript = 0;
+  unsigned long lastMs = 0;
+
+  // Debounce "press" events from the remote (many frames per one click)
+  unsigned long lastActionMs = 0;
+  unsigned long lastActionEncript = 0;
+};
+
+struct LastRemote {
+  unsigned long serial = 0;
+  unsigned long encript = 0;
+  bool btnToggle = false;
+  bool btnGreen = false;
+  bool batteryLow = false;
+  unsigned long ts = 0;
+  bool known = false;
+  bool authorized = false;
+};
+
+struct EventEntry {
+  unsigned long ts = 0;
+  char level[8] = {0};
+  char code[16] = {0};
+  char message[64] = {0};
+};
+
+struct DebouncedInput {
+  int pin = -1;
+  bool invert = false;
+  unsigned long debounceMs = 30;
+  bool stableState = false;
+  bool lastRaw = false;
+  unsigned long lastChange = 0;
+
+  void begin(int pin_, bool invert_, unsigned long debounceMs_, int pullMode) {
+    pin = pin_;
+    invert = invert_;
+    debounceMs = debounceMs_;
+    if (pin >= 0) {
+      if (pullMode == 2) pinMode(pin, INPUT_PULLDOWN);
+      else if (pullMode == 1) pinMode(pin, INPUT_PULLUP);
+      else pinMode(pin, INPUT);
+    }
+    lastRaw = readRaw();
+    stableState = lastRaw;
+    lastChange = millis();
+  }
+
+  bool readRaw() const {
+    if (pin < 0) return false;
+    bool raw = digitalRead(pin) == HIGH;
+    return invert ? !raw : raw;
+  }
+
+  bool update() {
+    if (pin < 0) return false;
+    bool raw = readRaw();
+    if (raw != lastRaw) {
+      lastRaw = raw;
+      lastChange = millis();
+    }
+    if (stableState != lastRaw && millis() - lastChange >= debounceMs) {
+      stableState = lastRaw;
+      return true;
+    }
+    return false;
+  }
+
+  bool isActive() const { return stableState; }
+};
+
+static int parsePullMode(const String& mode) {
+  if (mode == "down") return 2;
+  if (mode == "none") return 0;
+  return 1;
+}
+
+struct Ld2410Status {
+  bool available = false;
+  bool present = false;
+  bool moving = false;
+  bool stationary = false;
+  int distanceCm = -1;
+  int movingDistanceCm = -1;
+  int stationaryDistanceCm = -1;
+  int movingSignal = -1;
+  int stationarySignal = -1;
+  unsigned long lastUpdateMs = 0;
+};
+
+static std::map<unsigned long, RemoteSeen> lastRemoteMap;
+static LastRemote lastRemote;
+static bool learnMode = false;
+static uint32_t learnModeUntilMs = 0;
+static constexpr uint32_t kLearnModeWindowMs = 30000;
+static const int kMaxEvents = 80;
+static EventEntry events[kMaxEvents];
+static int eventHead = 0;
+static int eventCount = 0;
+static unsigned long lastStatusMs = 0;
+static uint32_t fsTotalBytesCached = 0;
+static uint32_t fsUsedBytesCached = 0;
+static unsigned long fsLastStatsMs = 0;
+static QueueHandle_t eventQueue = nullptr;
+
+static DebouncedInput limitOpenInput;
+static DebouncedInput limitCloseInput;
+static DebouncedInput stopInput;
+static DebouncedInput obstacleInput;
+static DebouncedInput buttonInput;
+
+// Request one-shot resync of local position/hall counters when a limit is hit.
+static bool resyncAtOpenLimit = false;
+static bool resyncAtCloseLimit = false;
+
+static bool otaReady = false;
+static bool otaActive = false;
+static int otaProgress = -1;
+static char otaError[48] = {0};
+static bool otaNetDiagLogged = false;
+static unsigned long lastMqttPublish = 0;
+static unsigned long lastMqttTelemetryMs = 0;
+static bool mqttWasConnected = false;
+static unsigned long lastCalibWsMs = 0;
+static bool restartPending = false;
+static uint32_t restartAtMs = 0;
+static bool factoryResetPending = false;
+static uint32_t factoryResetAtMs = 0;
+
+static volatile long hallCount = 0;
+static portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
+static long hallCountLast = 0;
+static long hallPosition = 0;
+static volatile uint32_t hallLastIsrUs = 0;
+static volatile uint32_t hallDebounceUs = 0;
+static float hallPps = 0.0f;
+static unsigned long hallPpsLastMs = 0;
+static long hallPpsLastCount = 0;
+static int positionPercent = -1;
+static float positionMeters = 0.0f;
+static float positionMetersRaw = 0.0f;
+static float hoverOffsetMeters = 0.0f;
+static bool hoverOffsetValid = false;
+static float maxDistanceMeters = 0.0f;
+static GateState lastGateState = GATE_STOPPED;
+static unsigned long moveStartMs = 0;
+static float moveStartPosition = 0.0f;
+static int hallPinActive = -1;
+static bool hallAttached = false;
+static unsigned long lastPositionPersistMs = 0;
+static float lastPersistedPosition = -1.0f;
+static Ld2410Status ld2410Status;
+static HardwareSerial ld2410Serial(1);
+static MyLD2410 ld2410(ld2410Serial);
+static bool ld2410Active = false;
+static uint32_t ld2410CfgRevision = 0;
+static uint32_t ld2410LastRetryMs = 0;
+static uint32_t ld2410LastPollMs = 0;
+static bool ld2410TriggerArmed = true;
+static uint32_t ld2410TriggerCooldownUntilMs = 0;
+static bool ld2410ReversePending = false;
+static uint32_t ld2410ReverseAtMs = 0;
+static bool ld2410WasMoving = false;
+static int ld2410RxPin = -1;
+static int ld2410TxPin = -1;
+static int ld2410Baud = -1;
+static int ld2410MovingGate = -1;
+static int ld2410StationaryGate = -1;
+static int ld2410NoOneWindow = -1;
+static int ld2410MoveThresholds[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+static int ld2410StillThresholds[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+static String ld2410Mode = "";
+
+// Startup homing diagnostics/state
+static bool startupLimitRefDone = false;
+static bool homingChecked = false;
+static bool homingActive = false;
+static uint32_t homingStartMs = 0;
+static uint32_t homingReadySinceMs = 0;
+static bool startupHomingEnabled = true;
+static bool startupPositionCertain = false;
+static bool startupSafetyLocked = false;
+static constexpr float kStartupTempDistanceMeters = 0.100f;
+static bool startupUiUnknownPos10 = false;
+static uint32_t startupSyntheticUiLogMs = 0;
+static uint32_t startupBootMs = 0;
+static MotionAdvancedConfig normalMotionProfile;
+static bool homingProfileApplied = false;
+static bool homingSoftLimitsOverridden = false;
+static bool homingSoftLimitsPrev = true;
+static int homingForceCmd = 80;
+static char homingReason[24] = "none";
+static char homingResult[24] = "idle";
+static uint32_t homingLastChangeMs = 0;
+static char startupSafetyReason[32] = "boot_pending";
+
+
+static long readHallCountAtomic() {
+  long v;
+  portENTER_CRITICAL(&hallMux);
+  v = hallCount;
+  portEXIT_CRITICAL(&hallMux);
+  return v;
+}
+
+void updateFsStats(uint32_t nowMs) {
+  if (fsLastStatsMs != 0 && nowMs - fsLastStatsMs < 5000) return;
+  fsTotalBytesCached = LittleFS.totalBytes();
+  fsUsedBytesCached = LittleFS.usedBytes();
+  fsLastStatsMs = nowMs;
+}
+
+bool isSafeToSaveConfig() {
+  return !gate || !gate->isMoving();
+}
+
+void scheduleRestart(uint32_t delayMs) {
+  restartPending = true;
+  restartAtMs = millis() + delayMs;
+}
+
+void scheduleFactoryReset(uint32_t delayMs) {
+  factoryResetPending = true;
+  factoryResetAtMs = millis() + delayMs;
+}
+
+TaskHandle_t gateTaskHandle = NULL;
+
+void handleControlCmd(const char* action);
+void mqttPublishEvent(const char* level, const char* message);
+void mqttPublishLedState();
+void mqttPublishTelemetry();
+void mqttPublishPosition();
+void handleLedCmd(const char* payload);
+bool applyMaxDistance(float value, bool persist);
+bool handleGateCalibrate(const char* mode);
+void maybePersistPosition(uint32_t nowMs);
+bool isSafeToSaveConfig();
+void updateHallAttachment();
+void updatePositionPercent();
+void updateFsStats(uint32_t nowMs);
+void scheduleRestart(uint32_t delayMs);
+void scheduleFactoryReset(uint32_t delayMs);
+void handleLd2410Trigger(uint32_t nowMs);
+void onGateStatusChanged(const GateStatus& status, void* ctx);
+void fillDiagnostics(JsonObject& out);
+void syncLegacyPositionState();
+const char* resetReasonToString(esp_reset_reason_t reason);
+
+static void setHomingResult(const char* result, const char* reason) {
+  strncpy(homingResult, result ? result : "", sizeof(homingResult) - 1);
+  homingResult[sizeof(homingResult) - 1] = '\0';
+  strncpy(homingReason, reason ? reason : "", sizeof(homingReason) - 1);
+  homingReason[sizeof(homingReason) - 1] = '\0';
+  homingLastChangeMs = millis();
+}
+
+static void setStartupSafetyState(bool positionCertain, bool safetyLocked, const char* reason) {
+  const bool hadSyntheticUi = startupUiUnknownPos10;
+  startupPositionCertain = positionCertain;
+  startupSafetyLocked = safetyLocked;
+  if (positionCertain) {
+    startupUiUnknownPos10 = false;
+    if (hadSyntheticUi) {
+      Serial.printf("[HOMING_TMP_POS] clear reason=%s\n", reason ? reason : "position_certain");
+    }
+  }
+  strncpy(startupSafetyReason, reason ? reason : "", sizeof(startupSafetyReason) - 1);
+  startupSafetyReason[sizeof(startupSafetyReason) - 1] = '\0';
+}
+
+static void logStartupHomingDiag(const char* stage, uint32_t nowMs, const char* note = "") {
+  const bool openActive = inputManager.limitOpenActive(config);
+  const bool closeActive = inputManager.limitCloseActive(config);
+  const bool obstacle = config.sensorsConfig.photocell.enabled && inputManager.obstacleActive();
+  const bool gateExists = (gate != nullptr);
+  const bool motorExists = (motor != nullptr);
+  int gateState = gateExists ? (int)gate->getState() : -1;
+  int stopReason = gateExists ? (int)gate->getLastStopReason() : -1;
+  int errCode = gateExists ? (int)gate->getErrorCode() : -1;
+  bool moving = gateExists ? gate->isMoving() : false;
+  float targetPos = gateExists ? gate->getTargetPosition() : -1.0f;
+  float ctrlPos = gateExists ? gate->getControlPosition() : -1.0f;
+  int fault = -1;
+  int rpm = 0;
+  int armed = -1;
+  long telAge = -1;
+  bool telTimedOut = true;
+  bool telEnabled = false;
+  if (motorExists && motor->isHoverUart() && motor->hoverEnabled()) {
+    telEnabled = true;
+    const HoverTelemetry& tel = motor->hoverTelemetry();
+    fault = tel.fault;
+    rpm = tel.rpm;
+    armed = tel.armed ? 1 : 0;
+    telAge = (tel.lastTelMs == 0) ? -1 : (long)(nowMs - (uint32_t)tel.lastTelMs);
+    uint32_t tmo = config.gateConfig.telemetryTimeoutMs > 0 ? config.gateConfig.telemetryTimeoutMs : 1200;
+    telTimedOut = motor->hoverTelemetryTimedOut(nowMs, tmo);
+  }
+  Serial.printf("[HOMING_DIAG] stage=%s note=%s enabled=%d certain=%d lock=%d reason=%s active=%d reset=%s open=%d close=%d obstacle=%d fault=%d armed=%d telEnabled=%d telAge=%ld telTimeout=%d state=%d moving=%d stopReason=%d target=%.3f ctrl=%.3f\n",
+                stage ? stage : "",
+                note ? note : "",
+                startupHomingEnabled ? 1 : 0,
+                startupPositionCertain ? 1 : 0,
+                startupSafetyLocked ? 1 : 0,
+                startupSafetyReason,
+                homingActive ? 1 : 0,
+                resetReasonToString(esp_reset_reason()),
+                openActive ? 1 : 0,
+                closeActive ? 1 : 0,
+                obstacle ? 1 : 0,
+                fault,
+                armed,
+                telEnabled ? 1 : 0,
+                telAge,
+                telTimedOut ? 1 : 0,
+                gateState,
+                moving ? 1 : 0,
+                stopReason,
+                targetPos,
+                ctrlPos);
+}
+
+static bool hoverTelemetryHealthyForStartup(uint32_t nowMs) {
+  if (!motor || !motor->isHoverUart() || !motor->hoverEnabled()) return false;
+  const HoverTelemetry& tel = motor->hoverTelemetry();
+  uint32_t timeoutMs = config.gateConfig.telemetryTimeoutMs > 0 ? config.gateConfig.telemetryTimeoutMs : 1200;
+  if (tel.lastTelMs == 0) return false;
+  if (motor->hoverTelemetryTimedOut(nowMs, timeoutMs)) return false;
+  if (tel.fault != 0) return false;
+  if (abs(tel.rpm) > 8) return false;
+  return true;
+}
+
+static bool hoverTelemetryHealthyForHomingMotion(uint32_t nowMs) {
+  if (!motor || !motor->isHoverUart() || !motor->hoverEnabled()) return false;
+  const HoverTelemetry& tel = motor->hoverTelemetry();
+  uint32_t timeoutMs = config.gateConfig.telemetryTimeoutMs > 0 ? config.gateConfig.telemetryTimeoutMs : 1200;
+  if (tel.lastTelMs == 0) return false;
+  if (motor->hoverTelemetryTimedOut(nowMs, timeoutMs)) return false;
+  if (tel.fault != 0) return false;
+  // During active homing we expect non-zero RPM, so do not reject by rpm value here.
+  return true;
+}
+
+static void restoreNormalMotionProfile() {
+  if (!motor || !homingProfileApplied) return;
+  motor->setMotionProfile(normalMotionProfile);
+  homingProfileApplied = false;
+}
+
+static void setHomingSoftLimitsOverride(bool enabled) {
+  if (enabled) {
+    if (!homingSoftLimitsOverridden) {
+      homingSoftLimitsPrev = config.gateConfig.softLimitsEnabled;
+      config.gateConfig.softLimitsEnabled = false;
+      homingSoftLimitsOverridden = true;
+      Serial.printf("[HOMING] soft-limits override ON (prev=%d)\n", homingSoftLimitsPrev ? 1 : 0);
+    }
+  } else {
+    if (homingSoftLimitsOverridden) {
+      config.gateConfig.softLimitsEnabled = homingSoftLimitsPrev;
+      homingSoftLimitsOverridden = false;
+      Serial.printf("[HOMING] soft-limits override OFF (restored=%d)\n", config.gateConfig.softLimitsEnabled ? 1 : 0);
+    }
+  }
+}
+
+static void applySlowHomingProfile() {
+  if (!motor || homingProfileApplied) return;
+  normalMotionProfile = config.motionProfile();
+  MotionAdvancedConfig p = normalMotionProfile;
+  // Empirically, 20% was too weak after reboot on some setups (no real movement).
+  // Use 30% as startup homing profile baseline.
+  p.maxSpeedOpen = max(4, (normalMotionProfile.maxSpeedOpen * 30) / 100);
+  p.maxSpeedClose = max(4, (normalMotionProfile.maxSpeedClose * 30) / 100);
+  p.minSpeed = max(2, (normalMotionProfile.minSpeed * 30) / 100);
+  if (p.minSpeed > p.maxSpeedClose - 1) p.minSpeed = max(1, p.maxSpeedClose - 1);
+  if (p.minSpeed > p.maxSpeedOpen - 1) p.minSpeed = max(1, p.maxSpeedOpen - 1);
+  motor->setMotionProfile(p);
+  homingForceCmd = max(70, p.maxSpeedClose);
+  Serial.printf("[HOMING] slow profile applied open=%d close=%d min=%d forceCmd=%d (orig open=%d close=%d min=%d)\n",
+                p.maxSpeedOpen, p.maxSpeedClose, p.minSpeed, homingForceCmd,
+                normalMotionProfile.maxSpeedOpen, normalMotionProfile.maxSpeedClose, normalMotionProfile.minSpeed);
+  homingProfileApplied = true;
+}
+
+static void applyStartupLimitReference() {
+  if (startupLimitRefDone || !gate || !startupHomingEnabled) return;
+  bool openActive = inputManager.limitOpenActive(config);
+  bool closeActive = inputManager.limitCloseActive(config);
+  if (closeActive && !openActive) {
+    gate->onLimitClose();
+    positionTracker.requestResyncClose();
+    setStartupSafetyState(true, false, "close_limit_reference");
+    setHomingResult("skip", "close_limit_active");
+    Serial.println("[HOMING] startup reference from CLOSE limit (position certain)");
+    homingChecked = true;
+    startupLimitRefDone = true;
+  } else if (openActive && !closeActive) {
+    // OPEN switch alone does not grant safety-ready state.
+    // Safer policy: still require CLOSE homing before normal readiness.
+    setStartupSafetyState(false, false, "open_limit_requires_close_homing");
+    setHomingResult("pending", "open_limit_requires_close_homing");
+    Serial.println("[HOMING] OPEN active at boot -> require CLOSE homing before readiness");
+    startupLimitRefDone = true;
+  } else if (openActive && closeActive) {
+    gate->setError(GATE_ERR_LIMITS_INVALID, GATE_STOP_ERROR);
+    setStartupSafetyState(false, true, "both_limits_active");
+    setHomingResult("blocked", "both_limits_active");
+    Serial.println("[HOMING] blocked: both limits active -> ERROR");
+    homingChecked = true;
+    startupLimitRefDone = true;
+  } else {
+    // Both limits inactive at restart -> unknown position.
+    // Use temporary 100 mm helper distance until CLOSE reference is found.
+    startupUiUnknownPos10 = true;
+    Serial.printf("[HOMING_TMP_POS] set mode=temp_100mm reason=limits_inactive_unknown_position mm=%ld\n",
+                  (long)lroundf(kStartupTempDistanceMeters * 1000.0f));
+    setStartupSafetyState(false, false, "limits_inactive_unknown_position");
+    setHomingResult("pending", "limits_inactive_unknown_position");
+    startupLimitRefDone = true;
+  }
+}
+
+static void runStartupHoming(uint32_t nowMs) {
+  static const uint32_t kHomingReadyStableMs = 1200;
+  static const uint32_t kHomingTimeoutMs = 45000;
+  static const uint32_t kHomingTelFailDebounceMs = 1500;
+  static uint32_t lastDiagMs = 0;
+  static uint32_t homingTelBadSinceMs = 0;
+
+  if (!startupHomingEnabled || !gate || calibration.isRunning()) return;
+  if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 500) {
+    logStartupHomingDiag("loop", nowMs, "tick");
+    lastDiagMs = nowMs;
+  }
+  applyStartupLimitReference();
+
+  if (startupSafetyLocked) return;
+  if (startupPositionCertain) {
+    homingChecked = true;
+    return;
+  }
+
+  if (homingChecked && !homingActive) return;
+
+  const bool openActive = inputManager.limitOpenActive(config);
+  const bool closeActive = inputManager.limitCloseActive(config);
+  const bool obstacle = config.sensorsConfig.photocell.enabled && inputManager.obstacleActive();
+  const bool criticalError = gate->getErrorCode() != GATE_ERR_NONE || gate->getState() == GATE_ERROR;
+  const bool telHealthyForStart = hoverTelemetryHealthyForStartup(nowMs);
+  const bool telHealthyForHoming = hoverTelemetryHealthyForHomingMotion(nowMs);
+
+  if (!homingActive) {
+    homingTelBadSinceMs = 0;
+    if (closeActive) {
+      gate->onLimitClose();
+      positionTracker.requestResyncClose();
+      setStartupSafetyState(true, false, "close_limit_reference");
+      homingChecked = true;
+      setHomingResult("skip", "close_limit_active");
+      Serial.println("[HOMING] close limit active -> reference set, no movement");
+      return;
+    }
+    if (obstacle) {
+      setStartupSafetyState(false, false, "obstacle_active");
+      setHomingResult("blocked", "obstacle_active");
+      return;
+    }
+    if (criticalError) {
+      const GateErrorCode ec = gate->getErrorCode();
+      const bool retryableCommErr = (ec == GATE_ERR_HOVER_TEL_TIMEOUT || ec == GATE_ERR_HOVER_OFFLINE);
+      setStartupSafetyState(false, retryableCommErr ? false : true, retryableCommErr ? "wait_comm_recovery" : "critical_error");
+      homingChecked = retryableCommErr ? false : true;
+      setHomingResult(retryableCommErr ? "pending" : "blocked", retryableCommErr ? "wait_comm_recovery" : "critical_error");
+      return;
+    }
+    if (!telHealthyForStart) {
+      const uint32_t kStartupTelGraceMs = 5000;
+      if ((nowMs - startupBootMs) < kStartupTelGraceMs) {
+        setHomingResult("pending", "wait_telemetry_startup");
+        homingReadySinceMs = 0;
+        return;
+      }
+      const HoverTelemetry& tel = motor->hoverTelemetry();
+      if (tel.fault != 0) {
+        gate->setError(GATE_ERR_HOVER_FAULT, GATE_STOP_HOVER_FAULT);
+        setStartupSafetyState(false, true, "startup_tel_fault");
+        setHomingResult("error", "startup_tel_fault");
+        Serial.printf("[HOMING] startup blocked: telemetry fault=%d -> ERROR\n", tel.fault);
+      } else {
+        // Telemetry may appear late after reboot / flash / hoverboard re-arm.
+        // Do not permanently lock startup homing here; keep waiting and retry.
+        setStartupSafetyState(false, false, "startup_tel_missing_retry");
+        setHomingResult("pending", "startup_tel_missing_retry");
+        homingChecked = false;
+        if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 1000) {
+          Serial.println("[HOMING] startup telemetry missing -> keep waiting/retrying");
+          lastDiagMs = nowMs;
+        }
+        homingReadySinceMs = 0;
+        return;
+      }
+      homingChecked = true;
+      homingReadySinceMs = 0;
+      return;
+    }
+    if (homingReadySinceMs == 0) homingReadySinceMs = nowMs;
+    if (nowMs - homingReadySinceMs < kHomingReadyStableMs) return;
+
+    applySlowHomingProfile();
+    setHomingSoftLimitsOverride(true);
+    bool started = false;
+    if (motor) {
+      motor->setDirection(false);
+      if (motor->isHoverUart()) {
+        motor->hoverArm();
+        motor->setHoverTargetSpeed((int16_t)(-homingForceCmd));
+        started = true;
+        Serial.printf("[HOMING] force start CLOSE via hover speed=%d\n", -homingForceCmd);
+      } else {
+        int duty = -max(40, homingForceCmd);
+        motor->setDuty(duty);
+        started = true;
+        Serial.printf("[HOMING] force start CLOSE via PWM duty=%d\n", duty);
+      }
+    }
+    if (!started) {
+      setHomingSoftLimitsOverride(false);
+      restoreNormalMotionProfile();
+      homingChecked = true;
+      setStartupSafetyState(false, true, "start_failed");
+      setHomingResult("blocked", "start_failed");
+      Serial.println("[HOMING] start failed (no motor path)");
+      return;
+    }
+    homingActive = true;
+    homingStartMs = nowMs;
+    moveStartPosition = gate->getControlPosition();
+    setStartupSafetyState(false, false, "homing_running");
+    setHomingResult("running", "search_close_limit");
+    Serial.println("[HOMING] start -> CLOSE at slow profile");
+    return;
+  }
+
+  // Active homing supervision.
+  if (motor) {
+    motor->setDirection(false);
+    if (motor->isHoverUart()) {
+      motor->hoverArm();
+      motor->setHoverTargetSpeed((int16_t)(-homingForceCmd));
+    } else {
+      motor->setDuty(-max(40, homingForceCmd));
+    }
+  }
+  if (closeActive) {
+    gate->onLimitClose();
+    positionTracker.requestResyncClose();
+    if (motor) {
+      if (motor->isHoverUart()) motor->setHoverTargetSpeed(0);
+      motor->stopHard();
+    }
+    homingActive = false;
+    homingChecked = true;
+    setHomingSoftLimitsOverride(false);
+    restoreNormalMotionProfile();
+    setStartupSafetyState(true, false, "close_limit_found");
+    setHomingResult("success", "close_limit_found");
+    Serial.println("[HOMING] success (close limit)");
+    return;
+  }
+
+  if (obstacle) {
+    gate->stop(GATE_STOP_OBSTACLE);
+    gate->setError(GATE_ERR_OBSTACLE, GATE_STOP_OBSTACLE);
+    homingActive = false;
+    homingChecked = true;
+    setHomingSoftLimitsOverride(false);
+    restoreNormalMotionProfile();
+    setStartupSafetyState(false, true, "obstacle_during_homing");
+    setHomingResult("abort", "obstacle");
+    Serial.println("[HOMING] abort: obstacle");
+    return;
+  }
+
+  if (!telHealthyForHoming) {
+    if (homingTelBadSinceMs == 0) homingTelBadSinceMs = nowMs;
+    if (nowMs - homingTelBadSinceMs < kHomingTelFailDebounceMs) {
+      return;
+    }
+    gate->stop(GATE_STOP_TELEMETRY_TIMEOUT);
+    gate->setError(GATE_ERR_HOVER_TEL_TIMEOUT, GATE_STOP_TELEMETRY_TIMEOUT);
+    homingActive = false;
+    homingChecked = false;
+    setHomingSoftLimitsOverride(false);
+    restoreNormalMotionProfile();
+    setStartupSafetyState(false, false, "telemetry_lost_or_fault");
+    setHomingResult("abort", "telemetry_lost_or_fault");
+    Serial.println("[HOMING] abort: telemetry lost/fault -> retry pending");
+    return;
+  }
+  homingTelBadSinceMs = 0;
+
+  if (gate->getErrorCode() != GATE_ERR_NONE || gate->getState() == GATE_ERROR) {
+    homingActive = false;
+    homingChecked = true;
+    setHomingSoftLimitsOverride(false);
+    restoreNormalMotionProfile();
+    setStartupSafetyState(false, true, "gate_error_during_homing");
+    setHomingResult("abort", "gate_error");
+    Serial.println("[HOMING] abort: gate error");
+    return;
+  }
+
+  float maxDistance = gate->getMaxDistance();
+  if (maxDistance <= 0.0f) maxDistance = 4.0f;
+  const float traveled = fabsf(gate->getControlPosition() - moveStartPosition);
+  const float maxAllowedTravel = maxDistance * 1.25f;
+  if (traveled > maxAllowedTravel) {
+    gate->stop(GATE_STOP_ERROR);
+    gate->setError(GATE_ERR_TIMEOUT, GATE_STOP_ERROR);
+    homingActive = false;
+    homingChecked = true;
+    setHomingSoftLimitsOverride(false);
+    restoreNormalMotionProfile();
+    setStartupSafetyState(false, true, "distance_limit");
+    setHomingResult("abort", "distance_limit");
+    Serial.printf("[HOMING] abort: distance limit traveled=%.2fm limit=%.2fm\n", traveled, maxAllowedTravel);
+    return;
+  }
+
+  if (nowMs - homingStartMs > kHomingTimeoutMs) {
+    gate->stop(GATE_STOP_ERROR);
+    gate->setError(GATE_ERR_TIMEOUT, GATE_STOP_ERROR);
+    homingActive = false;
+    homingChecked = true;
+    setHomingSoftLimitsOverride(false);
+    restoreNormalMotionProfile();
+    setStartupSafetyState(false, true, "timeout");
+    setHomingResult("abort", "timeout");
+    Serial.println("[HOMING] abort: timeout");
+    return;
+  }
+}
+
+const char* resetReasonToString(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_UNKNOWN: return "unknown";
+    case ESP_RST_POWERON: return "poweron";
+    case ESP_RST_EXT: return "ext";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "int_wdt";
+    case ESP_RST_TASK_WDT: return "task_wdt";
+    case ESP_RST_WDT: return "other_wdt";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "sdio";
+    default: return "invalid";
+  }
+}
+
+void syncLegacyPositionState() {
+  positionMeters = positionTracker.positionMeters();
+  positionMetersRaw = positionTracker.positionMetersRaw();
+  maxDistanceMeters = positionTracker.maxDistanceMeters();
+  positionPercent = positionTracker.positionPercent();
+  hallPps = positionTracker.hallPps();
+}
+
+void pushEvent(const char* level, const char* code, const char* message) {
+  EventEntry& e = events[eventHead];
+  e.ts = millis();
+  strncpy(e.level, level, sizeof(e.level) - 1);
+  e.level[sizeof(e.level) - 1] = '\0';
+  strncpy(e.code, code ? code : "", sizeof(e.code) - 1);
+  e.code[sizeof(e.code) - 1] = '\0';
+  e.level[sizeof(e.level) - 1] = '\0';
+  strncpy(e.message, message, sizeof(e.message) - 1);
+  e.message[sizeof(e.message) - 1] = '\0';
+  eventHead = (eventHead + 1) % kMaxEvents;
+  if (eventCount < kMaxEvents) eventCount++;
+  if (eventQueue) {
+    EventEntry out = e;
+    if (xQueueSend(eventQueue, &out, 0) != pdTRUE) {
+      static uint32_t lastOverflowLogMs = 0;
+      uint32_t now = millis();
+      if (lastOverflowLogMs == 0 || now - lastOverflowLogMs > 2000) {
+        Serial.println("[EVENT] queue overflow, dropping event");
+        lastOverflowLogMs = now;
+      }
+    }
+  }
+}
+
+void pushEvent(const char* level, const char* message) {
+  pushEvent(level, "", message);
+}
+
+void pushEventf(const char* level, const char* fmt, unsigned long value) {
+  char buf[64];
+  snprintf(buf, sizeof(buf), fmt, value);
+  pushEvent(level, buf);
+}
+
+void drainEventQueue() {
+  if (!eventQueue) return;
+  EventEntry e;
+  while (xQueueReceive(eventQueue, &e, 0) == pdTRUE) {
+    webserver.broadcastEvent(e.level, e.message);
+    mqttPublishEvent(e.level, e.message);
+  }
+}
+
+bool isOtaActive() {
+  return otaActive;
+}
+
+void mqttPublishEvent(const char* level, const char* message) {
+  const char* topic = mqtt.topicEvents();
+  if (!mqtt.connected() || !topic || topic[0] == '\0') return;
+  StaticJsonDocument<192> doc;
+  doc["level"] = level;
+  doc["message"] = message;
+  doc["ts"] = millis();
+  char payload[192];
+  serializeJson(doc, payload, sizeof(payload));
+  mqtt.publish(topic, payload, config.mqttConfig.retain);
+}
+
+void mqttPublishStatus() {
+  const char* topic = mqtt.topicState();
+  if (!mqtt.connected() || !topic || topic[0] == '\0') return;
+  StaticJsonDocument<256> doc;
+  doc["state"] = gate ? gate->getStateString() : "unknown";
+  doc["moving"] = gate ? gate->isMoving() : false;
+  doc["uptimeMs"] = millis();
+  doc["wifiRssi"] = WiFiManager.isConnected() ? WiFi.RSSI() : 0;
+  char payload[256];
+  serializeJson(doc, payload, sizeof(payload));
+  mqtt.publish(topic, payload, config.mqttConfig.retain);
+}
+
+void mqttPublishLedState() {
+  const char* topic = mqtt.topicLedState();
+  if (!mqtt.connected() || !topic || topic[0] == '\0') return;
+  StaticJsonDocument<256> doc;
+  JsonObject root = doc.to<JsonObject>();
+  led.fillStatus(root);
+  root["ts"] = millis();
+  char payload[256];
+  serializeJson(doc, payload, sizeof(payload));
+  mqtt.publish(topic, payload, config.mqttConfig.retain);
+}
+
+void mqttPublishTelemetry() {
+  const char* topic = mqtt.topicTelemetry();
+  if (!mqtt.connected() || !topic || topic[0] == '\0') return;
+  StaticJsonDocument<768> doc;
+  JsonObject gateObj = doc.createNestedObject("gate");
+  if (gate) {
+    const GateStatus& st = gate->getStatus();
+    gateObj["state"] = gate->getStateString();
+    gateObj["moving"] = gate->isMoving();
+    gateObj["position"] = st.position;
+    gateObj["positionPercent"] = st.positionPercent;
+    gateObj["targetPosition"] = st.targetPosition;
+    gateObj["maxDistance"] = st.maxDistance;
+    gateObj["errorCode"] = static_cast<int>(st.error);
+    gateObj["stopReason"] = static_cast<int>(st.lastStopReason);
+  } else {
+    gateObj["state"] = "unknown";
+    gateObj["moving"] = false;
+    gateObj["position"] = positionMeters;
+    gateObj["positionPercent"] = positionPercent;
+    gateObj["targetPosition"] = 0.0f;
+    gateObj["maxDistance"] = maxDistanceMeters;
+    gateObj["errorCode"] = 0;
+  }
+
+  JsonObject hbObj = doc.createNestedObject("hb");
+  if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
+    hbObj["enabled"] = true;
+    const HoverTelemetry& tel = motor->hoverTelemetry();
+    hbObj["dir"] = tel.dir;
+    hbObj["rpm"] = tel.rpm;
+    // Normalized distance in mm (0..max). This matches the gate position and doesn't go negative.
+    hbObj["dist_mm"] = (long)lroundf(positionMetersRaw * 1000.0f);
+    // Keep raw telemetry for debugging.
+    hbObj["dist_mm_raw"] = tel.distMm;
+    hbObj["batValid"] = tel.batValid;
+    hbObj["rawBat"] = tel.rawBat;
+    hbObj["batScale"] = tel.batScale;
+    if (tel.batValid) hbObj["batV"] = tel.batV;
+    else hbObj["batV"] = nullptr;
+    // expose raw centi-volts if available
+    hbObj["bat_cV"] = tel.bat_cV;
+    // current in A (float) if available, else -1
+    if (tel.iA_x100 >= 0) hbObj["iA"] = ((float)tel.iA_x100) / 100.0f;
+    else hbObj["iA"] = -1.0f;
+    hbObj["armed"] = tel.armed;
+    hbObj["fault"] = tel.fault;
+    hbObj["armed"] = tel.armed;
+    hbObj["cmdAgeMs"] = tel.cmdAgeMs;
+    hbObj["lastTelMs"] = tel.lastTelMs;
+    hbObj["telAgeMs"] = (tel.lastTelMs == 0) ? -1 : (long)(millis() - tel.lastTelMs);
+  } else {
+    hbObj["enabled"] = false;
+    hbObj["dir"] = 0;
+    hbObj["rpm"] = 0;
+    hbObj["dist_mm"] = 0;
+    hbObj["batValid"] = false;
+    hbObj["rawBat"] = -1;
+    hbObj["batScale"] = 0;
+    hbObj["batV"] = nullptr;
+    hbObj["bat_cV"] = -1;
+    hbObj["iA"] = -1.0f;
+    hbObj["armed"] = false;
+    hbObj["fault"] = 0;
+    hbObj["armed"] = false;
+    hbObj["cmdAgeMs"] = -1;
+    hbObj["lastTelMs"] = 0;
+    hbObj["telAgeMs"] = -1;
+  }
+
+  doc["ts"] = millis();
+  char payload[512];
+  serializeJson(doc, payload, sizeof(payload));
+  mqtt.publish(topic, payload, config.mqttConfig.retain);
+}
+
+void mqttPublishPosition() {
+  const char* topic = mqtt.topicPosition();
+  if (!mqtt.connected() || !topic || topic[0] == '\0') return;
+  char payload[32];
+  snprintf(payload, sizeof(payload), "%.3f", positionMeters);
+  mqtt.publish(topic, payload, config.mqttConfig.retain);
+}
+
+void logSummary1Hz() {
+  static unsigned long lastLogMs = 0;
+  unsigned long now = millis();
+  if (now - lastLogMs < 1000) return;
+  lastLogMs = now;
+  const WebRuntimeStats ws = webserver.runtimeStats();
+  const bool wifiConnected = WiFiManager.isConnected();
+  Serial.printf("[SYS] up=%lums heap=%u minHeap=%u maxAlloc=%u wifi=%d mode=%s ip=%s ws=%u statusReq=%lu liteReq=%lu statusErr=%lu statusLastUs=%lu statusMaxUs=%lu\n",
+                now,
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMinFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap(),
+                wifiConnected ? 1 : 0,
+                WiFiManager.getModeCString(),
+                wifiConnected ? WiFi.localIP().toString().c_str() : "",
+                (unsigned)ws.wsClients,
+                (unsigned long)ws.statusReqCount,
+                (unsigned long)ws.statusLiteReqCount,
+                (unsigned long)ws.statusErrors,
+                (unsigned long)ws.lastStatusDurationUs,
+                (unsigned long)ws.maxStatusDurationUs);
+  if (gate) {
+    Serial.printf("[GATE] state=%s pos=%.3fm target=%.3fm max=%.3fm stopReason=%s err=%d\n",
+                  gate->getStateString(),
+                  gate->getPosition(),
+                  gate->getTargetPosition(),
+                  gate->getMaxDistance(),
+                  gate->getStopReasonString(gate->getLastStopReason()),
+                  (int)gate->getErrorCode());
+  }
+  if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
+    const HoverTelemetry& tel = motor->hoverTelemetry();
+    long telAge = (tel.lastTelMs == 0 || now < tel.lastTelMs) ? -1 : (long)(now - tel.lastTelMs);
+    Serial.printf("[HB] telAge=%ld cmdAge=%d rpm=%d dist=%ldmm iA=%.2f fault=%d armed=%d rx=%lu tel=%lu bad=%lu\n",
+                  telAge,
+                  tel.cmdAgeMs,
+                  tel.rpm,
+                  tel.distMm,
+                  tel.iA_x100 >= 0 ? ((float)tel.iA_x100) / 100.0f : -1.0f,
+                  tel.fault,
+                  tel.armed ? 1 : 0,
+                  (unsigned long)motor->hoverRxLines(),
+                  (unsigned long)motor->hoverRxTelLines(),
+                  (unsigned long)motor->hoverRxBadLines());
+  }
+}
+
+void mqttPublishMotionState() {
+  const char* topic = mqtt.topicMotionState();
+  if (!mqtt.connected() || !topic || topic[0] == '\0') return;
+  StaticJsonDocument<256> doc;
+  JsonObject gateObj = doc.createNestedObject("gate");
+  if (gate) {
+    const GateStatus& st = gate->getStatus();
+    gateObj["state"] = gate->getStateString();
+    gateObj["moving"] = gate->isMoving();
+    gateObj["position"] = st.position;
+    gateObj["positionPercent"] = st.positionPercent;
+    gateObj["targetPosition"] = st.targetPosition;
+    gateObj["maxDistance"] = st.maxDistance;
+    gateObj["lastDirection"] = gate->getLastDirection();
+    gateObj["errorCode"] = static_cast<int>(st.error);
+  } else {
+    gateObj["state"] = "unknown";
+    gateObj["moving"] = false;
+  }
+  doc["ts"] = millis();
+  char payload[256];
+  serializeJson(doc, payload, sizeof(payload));
+  mqtt.publish(topic, payload, config.mqttConfig.retain);
+}
+
+void mqttPublishMotionPosition() {
+  const char* topic = mqtt.topicMotionPosition();
+  if (!mqtt.connected() || !topic || topic[0] == '\0') return;
+  StaticJsonDocument<128> doc;
+  long mm = (long)(positionMeters * 1000.0f);
+  doc["mm"] = mm;
+  doc["percent"] = positionPercent;
+  doc["state"] = gate ? gate->getStateString() : "unknown";
+  doc["ts"] = millis();
+  char payload[128];
+  serializeJson(doc, payload, sizeof(payload));
+  mqtt.publish(topic, payload, config.mqttConfig.retain);
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  if (!topic || length == 0) return;
+  const char* cmdTopic = mqtt.topicCommand();
+  const char* ledTopic = mqtt.topicLedCmd();
+  const char* gateCmdTopic = mqtt.topicGateCmd();
+  const char* setMaxTopic = mqtt.topicGateSetMax();
+  const char* calTopic = mqtt.topicGateCalibrate();
+  bool isCmd = cmdTopic && cmdTopic[0] != '\0' && strcmp(topic, cmdTopic) == 0;
+  bool isLed = ledTopic && ledTopic[0] != '\0' && strcmp(topic, ledTopic) == 0;
+  bool isGateCmd = gateCmdTopic && gateCmdTopic[0] != '\0' && strcmp(topic, gateCmdTopic) == 0;
+  bool isSetMax = setMaxTopic && setMaxTopic[0] != '\0' && strcmp(topic, setMaxTopic) == 0;
+  bool isCalibrate = calTopic && calTopic[0] != '\0' && strcmp(topic, calTopic) == 0;
+  if (!isCmd && !isLed && !isGateCmd && !isSetMax && !isCalibrate) return;
+
+  char buf[128];
+  unsigned int n = length > sizeof(buf) - 1 ? sizeof(buf) - 1 : length;
+  memcpy(buf, payload, n);
+  buf[n] = '\0';
+
+  if (isLed) {
+    handleLedCmd(buf);
+    return;
+  }
+
+  if (isSetMax) {
+    float value = 0.0f;
+    bool ok = false;
+    if (buf[0] == '{') {
+      StaticJsonDocument<128> doc;
+      if (deserializeJson(doc, buf) == DeserializationError::Ok) {
+        if (doc.containsKey("maxDistance")) {
+          value = doc["maxDistance"].as<float>();
+          ok = true;
+        } else if (doc.containsKey("value")) {
+          value = doc["value"].as<float>();
+          ok = true;
+        }
+      }
+    } else {
+      value = (float)atof(buf);
+      ok = value > 0.0f;
+    }
+    if (ok) {
+      if (applyMaxDistance(value, true)) {
+        mqttPublishTelemetry();
+        mqttPublishPosition();
+      } else {
+        pushEvent("warn", "mqtt set_max_distance failed");
+      }
+    } else {
+      pushEvent("warn", "mqtt set_max_distance invalid");
+    }
+    return;
+  }
+
+  if (isCalibrate) {
+    const char* mode = nullptr;
+    if (buf[0] == '{') {
+      StaticJsonDocument<128> doc;
+      if (deserializeJson(doc, buf) == DeserializationError::Ok) {
+        mode = doc["set"] | "";
+      }
+    } else {
+      mode = buf;
+    }
+    if (mode && mode[0] != '\0') {
+      if (handleGateCalibrate(mode)) {
+        mqttPublishTelemetry();
+        mqttPublishPosition();
+      } else {
+        pushEvent("warn", "mqtt calibrate failed");
+      }
+    }
+    return;
+  }
+
+  if (buf[0] == '{') {
+    StaticJsonDocument<128> doc;
+    if (deserializeJson(doc, buf) == DeserializationError::Ok) {
+      const char* action = doc["action"] | "";
+      if (action[0] != '\0') handleControlCmd(action);
+    }
+    return;
+  }
+  if (isCmd || isGateCmd) {
+    handleControlCmd(buf);
+  }
+}
+
+bool applyMaxDistance(float value, bool persist) {
+  bool ok = positionTracker.applyMaxDistance(value, persist);
+  syncLegacyPositionState();
+  return ok;
+}
+
+bool handleGateCalibrate(const char* mode) {
+  bool ok = positionTracker.calibrateToMode(mode, calibration.isRunning());
+  syncLegacyPositionState();
+  return ok;
+}
+
+void maybePersistPosition(uint32_t nowMs) {
+  positionTracker.maybePersistPosition(nowMs);
+  syncLegacyPositionState();
+}
+
+void setupInputs() {
+  inputManager.begin(config);
+}
+
+void handleInputs() {
+  if (!gate) return;
+
+  InputEvents ev = inputManager.poll(config, millis());
+  const bool photocellEnabled = config.sensorsConfig.photocell.enabled;
+
+  if (ev.stopPressed) {
+    gate->onStopInput();
+    pushEvent("warn", "stop input");
+  }
+
+  if (ev.obstacleChanged) {
+    if (photocellEnabled) {
+      GateCommandResponse r = gate->onObstacle(ev.obstacleActive);
+      if (ev.obstacleActive) {
+        if (r.result == GATE_CMD_OK && r.applied) {
+          if (r.cmd == GATE_CMD_OPEN) pushEvent("warn", "obstacle -> open");
+          else if (r.cmd == GATE_CMD_CLOSE) pushEvent("warn", "obstacle -> close");
+          else if (r.cmd == GATE_CMD_STOP) pushEvent("warn", "obstacle -> stop");
+          else pushEvent("warn", "obstacle");
+        } else if (r.result == GATE_CMD_BLOCKED) {
+          pushEvent("warn", "obstacle action blocked");
+          led.setOverride("command_rejected", 600);
+        }
+      }
+    }
+  }
+
+  if (ev.limitsInvalid) {
+    if (ev.limitsInvalidEdge && gate->getErrorCode() != GATE_ERR_LIMITS_INVALID) {
+      Serial.printf("[INPUT] limits_invalid open=%d close=%d\n",
+                    inputManager.limitOpenActive(config) ? 1 : 0,
+                    inputManager.limitCloseActive(config) ? 1 : 0);
+      pushEvent("error", "limits_invalid (both active)");
+    }
+    gate->onLimitsInvalid();
+  }
+
+  if (ev.limitOpenRising) {
+    led.setOverride("limit_open_hit", 380);
+    gate->onLimitOpen();
+    positionTracker.requestResyncOpen();
+    pushEvent("info", "limit open");
+  }
+
+  if (ev.limitCloseRising) {
+    led.setOverride("limit_close_hit", 380);
+    gate->onLimitClose();
+    positionTracker.requestResyncClose();
+    pushEvent("info", "limit close");
+  }
+
+  if (ev.buttonPressed) {
+    GateCommandResponse r = gate->handleCommand("toggle");
+    if (r.result == GATE_CMD_OK) {
+      pushEvent("info", r.applied ? "button toggle" : "button toggle (no-op)");
+    } else if (r.result == GATE_CMD_BLOCKED) {
+      pushEvent("warn", "button toggle blocked");
+      led.setOverride("command_rejected", 600);
+    }
+  }
+}
+
+void IRAM_ATTR hallIsr() {
+  // Hall ISR moved to PositionTracker in Phase 1.
+}
+
+void updateHallAttachment() {
+  positionTracker.updateHallAttachment(calibration.isRunning());
+}
+
+void updatePositionPercent() {
+  if (gate && startupUiUnknownPos10 && !startupPositionCertain) {
+    float maxD = gate->getMaxDistance();
+    if (maxD <= 0.0f) maxD = config.gateConfig.maxDistance > 0.0f ? config.gateConfig.maxDistance : config.gateConfig.totalDistance;
+    if (maxD <= 0.0f) maxD = 3.0f;
+    float synthetic = kStartupTempDistanceMeters;
+    if (maxD > 0.0f && synthetic > maxD) synthetic = maxD;
+    gate->setPosition(synthetic, maxD);
+    gate->setControlPosition(synthetic);
+    positionMeters = synthetic;
+    positionMetersRaw = synthetic;
+    maxDistanceMeters = maxD;
+    positionPercent = (maxD > 0.0f)
+      ? (int)((synthetic * 100.0f) / maxD + 0.5f)
+      : -1;
+    const uint32_t nowMs = millis();
+    if (startupSyntheticUiLogMs == 0 || (nowMs - startupSyntheticUiLogMs) > 1500) {
+      startupSyntheticUiLogMs = nowMs;
+      Serial.printf("[HOMING_TMP_POS] apply mode=temp_100mm pos=%.3fm posRaw=%.3fm pct=%d active=%d certain=%d\n",
+                    positionMeters,
+                    positionMetersRaw,
+                    positionPercent,
+                    homingActive ? 1 : 0,
+                    startupPositionCertain ? 1 : 0);
+    }
+    return;
+  }
+  positionTracker.updatePosition(calibration.isRunning());
+  syncLegacyPositionState();
+  return;
+  if (!gate) return;
+
+  bool resyncClose = resyncAtCloseLimit;
+  bool resyncOpen = resyncAtOpenLimit;
+  resyncAtCloseLimit = false;
+  resyncAtOpenLimit = false;
+
+  auto syncConfigPosition = []() {
+    config.gateConfig.position = positionMeters;
+    config.gateConfig.maxDistance = maxDistanceMeters;
+    config.gateConfig.totalDistance = maxDistanceMeters;
+  };
+
+  float maxDistance = config.gateConfig.maxDistance > 0.0f ?
+    config.gateConfig.maxDistance : config.gateConfig.totalDistance;
+  if (maxDistance < 0.0f) maxDistance = 0.0f;
+  maxDistanceMeters = maxDistance;
+
+  if (positionMeters < 0.0f) positionMeters = 0.0f;
+  if (maxDistanceMeters > 0.0f && positionMeters > maxDistanceMeters) {
+    positionMeters = maxDistanceMeters;
+  }
+  positionMetersRaw = positionMeters;
+
+  float pulsesPerMeter = 0.0f;
+  long totalCounts = 0;
+  if (config.sensorsConfig.hall.enabled &&
+      config.sensorsConfig.hall.pin >= 0 &&
+      maxDistanceMeters > 0.0f &&
+      config.gateConfig.wheelCircumference > 0.0f &&
+      config.gateConfig.pulsesPerRevolution > 0) {
+    pulsesPerMeter = (float)config.gateConfig.pulsesPerRevolution / config.gateConfig.wheelCircumference;
+    totalCounts = (long)(maxDistanceMeters * pulsesPerMeter);
+  }
+
+  // One-shot hard resync when a limit edge is detected (handled via GateController).
+  if (resyncClose) {
+    positionMeters = 0.0f;
+    positionMetersRaw = 0.0f;
+    if (totalCounts > 0) hallPosition = 0;
+  }
+  if (resyncOpen) {
+    positionMeters = maxDistanceMeters;
+    positionMetersRaw = maxDistanceMeters;
+    if (totalCounts > 0) hallPosition = totalCounts;
+  }
+
+  if (calibration.isRunning()) {
+    syncConfigPosition();
+    positionMetersRaw = positionMeters;
+    gate->setPosition(positionMeters, maxDistanceMeters);
+    gate->setControlPosition(positionMetersRaw);
+    return;
+  }
+
+  const bool preferHover = (config.gateConfig.positionSource == "hoverboard_tel");
+  const bool hallAvailable = (hallAttached && totalCounts > 0 && pulsesPerMeter > 0.0f);
+  const bool hoverAvailable = (motor && motor->isHoverUart() && motor->hoverEnabled());
+
+  if (!preferHover && hallAvailable) {
+    long current = readHallCountAtomic();
+    long delta = current - hallCountLast;
+    hallCountLast = current;
+    if (gate->isMoving() && delta != 0) {
+      int dir = gate->getLastDirection() >= 0 ? 1 : -1;
+      hallPosition += delta * dir;
+      if (hallPosition < 0) hallPosition = 0;
+      if (hallPosition > totalCounts) hallPosition = totalCounts;
+      positionMeters = (float)hallPosition / pulsesPerMeter;
+    }
+    positionMetersRaw = positionMeters;
+    positionPercent = (maxDistanceMeters > 0.0f) ?
+      (int)((positionMeters * 100.0f) / maxDistanceMeters + 0.5f) : -1;
+    syncConfigPosition();
+    gate->setPosition(positionMeters, maxDistanceMeters);
+    gate->setControlPosition(positionMetersRaw);
+    return;
+  }
+
+  if (preferHover && hoverAvailable) {
+    const HoverTelemetry& tel = motor->hoverTelemetry();
+    const uint32_t now = millis();
+
+    // Basic telemetry watchdog
+    uint32_t telTimeoutMs = config.gateConfig.telemetryTimeoutMs > 0 ? config.gateConfig.telemetryTimeoutMs : 1000;
+    if (tel.lastTelMs != 0 && !motor->hoverTelemetryTimedOut(now, telTimeoutMs)) {
+        // Raw distance from hover telemetry
+        const float pos_raw = (float)tel.distMm / 1000.0f;
+        float pos_raw_adj = pos_raw;
+        if (!hoverOffsetValid && config.gateConfig.hbOriginDistMm != 0) {
+          hoverOffsetMeters = -((float)config.gateConfig.hbOriginDistMm) / 1000.0f;
+          hoverOffsetValid = true;
+        }
+        if (hoverOffsetValid) {
+          pos_raw_adj += hoverOffsetMeters;
+        }
+
+        // --- Filtering & sanity check (prevents jumps / frame glitches) ---
+        static bool posFilterInit = false;
+        static float pos_f = 0.0f;
+        static uint32_t lastTelMs = 0;
+
+      float dt = 0.0f;
+      if (lastTelMs != 0 && tel.lastTelMs >= (long)lastTelMs) {
+        dt = (float)(tel.lastTelMs - (long)lastTelMs) / 1000.0f;
+      }
+      // Conservative max speed used for sanity (m/s). Tune if you want.
+        const float vMax_m_s = 1.5f;
+        const float maxJump = (dt > 0.0f) ? (vMax_m_s * dt * 1.5f) : 0.20f; // 20 cm fallback
+
+        if (!posFilterInit) {
+          pos_f = pos_raw_adj;
+          posFilterInit = true;
+        } else {
+          const float diff = fabsf(pos_raw_adj - pos_f);
+          if (diff <= maxJump) {
+            const float alpha = 0.25f; // EMA coefficient (0..1), bigger = more responsive
+            pos_f = pos_f + alpha * (pos_raw_adj - pos_f);
+          } else {
+            // Drop outlier sample (do not update pos_f)
+          }
+        }
+
+        if (resyncClose || resyncOpen) {
+        if (resyncClose) {
+          hoverOffsetMeters = -pos_raw;
+          hoverOffsetValid = true;
+          config.gateConfig.hbOriginDistMm = (int32_t)lroundf(pos_raw * 1000.0f);
+        } else if (resyncOpen && maxDistanceMeters > 0.0f) {
+          hoverOffsetMeters = maxDistanceMeters - pos_raw;
+          hoverOffsetValid = true;
+          config.gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters) * 1000.0f);
+        }
+          if (hoverOffsetValid) {
+            pos_raw_adj = pos_raw + hoverOffsetMeters;
+            pos_f = pos_raw_adj;
+            posFilterInit = true;
+          }
+        }
+
+        lastTelMs = (uint32_t)tel.lastTelMs;
+
+        positionMeters = pos_f;
+        positionMetersRaw = pos_raw_adj;
+
+        // Clamp BOTH filtered and raw positions to [0..max].
+        // The raw telemetry distance can briefly go slightly negative or exceed max due to overshoot
+        // and integration drift. For UI/logic we want a stable 0..max that decreases to 0 on close
+        // and stays at 0 when fully closed.
+        if (positionMeters < 0.0f) positionMeters = 0.0f;
+        if (maxDistanceMeters > 0.0f && positionMeters > maxDistanceMeters) {
+          positionMeters = maxDistanceMeters;
+        }
+        if (positionMetersRaw < 0.0f) positionMetersRaw = 0.0f;
+        if (maxDistanceMeters > 0.0f && positionMetersRaw > maxDistanceMeters) {
+          positionMetersRaw = maxDistanceMeters;
+        }
+
+        // Auto-resync offset when stopped near the ends to prevent the raw value from drifting
+        // below 0 or above max after the gate finishes moving.
+        if (gate && !gate->isMoving() && maxDistanceMeters > 0.0f) {
+          const float endEps = 0.02f;      // 2 cm
+          const float snapWindow = 0.35f;  // 35 cm window for safe snap
+          if (positionMeters <= endEps && fabsf(pos_raw_adj) <= snapWindow) {
+            hoverOffsetMeters = -pos_raw;
+            hoverOffsetValid = true;
+            config.gateConfig.hbOriginDistMm = (int32_t)lroundf(pos_raw * 1000.0f);
+            pos_f = 0.0f;
+            positionMeters = 0.0f;
+            positionMetersRaw = 0.0f;
+            posFilterInit = true;
+          } else if (positionMeters >= (maxDistanceMeters - endEps) &&
+                     fabsf(maxDistanceMeters - pos_raw_adj) <= snapWindow) {
+            hoverOffsetMeters = maxDistanceMeters - pos_raw;
+            hoverOffsetValid = true;
+            config.gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters) * 1000.0f);
+            pos_f = maxDistanceMeters;
+            positionMeters = maxDistanceMeters;
+            positionMetersRaw = maxDistanceMeters;
+            posFilterInit = true;
+          }
+        }
+        positionPercent = (maxDistanceMeters > 0.0f) ?
+          (int)((positionMeters * 100.0f) / maxDistanceMeters + 0.5f) : -1;
+        syncConfigPosition();
+        gate->setPosition(positionMeters, maxDistanceMeters);
+        gate->setControlPosition(positionMetersRaw);
+        return;
+      }
+    }
+
+    // No sensor/telemetry available: do NOT simulate movement. Keep last known position.
+    syncConfigPosition();
+    positionMetersRaw = positionMeters;
+    gate->setPosition(positionMeters, maxDistanceMeters);
+    gate->setControlPosition(positionMetersRaw);
+  }
+
+void updateHallStats(uint32_t nowMs) {
+  positionTracker.updateHallStats(nowMs);
+  hallPps = positionTracker.hallPps();
+}
+
+static int ld2410GateFromCm(int distanceCm) {
+  if (distanceCm <= 0) return 0;
+  int gate = (distanceCm + 74) / 75 - 1;
+  if (gate < 0) gate = 0;
+  if (gate > 8) gate = 8;
+  return gate;
+}
+
+static bool applyLd2410Config(const Ld2410Config& cfg) {
+  bool enabled = cfg.enabled && cfg.rxPin >= 0 && cfg.txPin >= 0;
+  if (!enabled) {
+    if (ld2410Active) {
+      ld2410.end();
+      ld2410Active = false;
+      Serial.println("[LD2410] disabled");
+    }
+    ld2410RxPin = -1;
+    ld2410TxPin = -1;
+    ld2410Baud = -1;
+    ld2410MovingGate = -1;
+    ld2410StationaryGate = -1;
+    ld2410Mode = "";
+    return false;
+  }
+
+  int movingCm = cfg.movingThresholdCm > 0 ? cfg.movingThresholdCm : cfg.thresholdCm;
+  int stationaryCm = cfg.stationaryThresholdCm > 0 ? cfg.stationaryThresholdCm : cfg.thresholdCm;
+  int movingGate = cfg.maxMovingGate >= 0 ? cfg.maxMovingGate : ld2410GateFromCm(movingCm);
+  int stationaryGate = cfg.maxStationaryGate >= 0 ? cfg.maxStationaryGate : ld2410GateFromCm(stationaryCm);
+  int baud = cfg.baudrate > 0 ? cfg.baudrate : 256000;
+  int noOneWindow = cfg.noOneWindow;
+  String mode = cfg.mode;
+  mode.toLowerCase();
+
+  bool thresholdsChanged = false;
+  for (int i = 0; i < 9; ++i) {
+    if (cfg.moveThresholds[i] != ld2410MoveThresholds[i] ||
+        cfg.stillThresholds[i] != ld2410StillThresholds[i]) {
+      thresholdsChanged = true;
+      break;
+    }
+  }
+
+  bool changed = (cfg.rxPin != ld2410RxPin ||
+                  cfg.txPin != ld2410TxPin ||
+                  baud != ld2410Baud ||
+                  movingGate != ld2410MovingGate ||
+                  stationaryGate != ld2410StationaryGate ||
+                  noOneWindow != ld2410NoOneWindow ||
+                  mode != ld2410Mode ||
+                  thresholdsChanged);
+  if (!changed && ld2410Active) return true;
+
+  ld2410RxPin = cfg.rxPin;
+  ld2410TxPin = cfg.txPin;
+  ld2410Baud = baud;
+  ld2410MovingGate = movingGate;
+  ld2410StationaryGate = stationaryGate;
+  ld2410NoOneWindow = noOneWindow;
+  ld2410Mode = mode;
+  for (int i = 0; i < 9; ++i) {
+    ld2410MoveThresholds[i] = cfg.moveThresholds[i];
+    ld2410StillThresholds[i] = cfg.stillThresholds[i];
+  }
+
+  ld2410Serial.begin(baud, SERIAL_8N1, cfg.rxPin, cfg.txPin);
+  delay(50);
+  if (!ld2410.begin()) {
+    ld2410Active = false;
+    Serial.printf("[LD2410] begin failed rx=%d tx=%d baud=%d\n", cfg.rxPin, cfg.txPin, baud);
+    return false;
+  }
+  ld2410Active = true;
+  ld2410.enhancedMode(true);
+  ld2410.configMode(true);
+  ld2410.setMaxGate((byte)movingGate, (byte)stationaryGate, (byte)noOneWindow);
+  for (int i = 0; i < 9; ++i) {
+    int mv = cfg.moveThresholds[i];
+    int st = cfg.stillThresholds[i];
+    if (mv >= 0 && mv <= 100) {
+      ld2410.setMovingThreshold((byte)i, (byte)mv);
+    }
+    if (st >= 0 && st <= 100) {
+      ld2410.setStationaryThreshold((byte)i, (byte)st);
+    }
+  }
+  ld2410.configMode(false);
+
+  Serial.printf("[LD2410] active rx=%d tx=%d baud=%d moveGate=%d stillGate=%d mode=%s\n",
+                cfg.rxPin,
+                cfg.txPin,
+                baud,
+                movingGate,
+                stationaryGate,
+                ld2410Mode.c_str());
+  return true;
+}
+
+void updateLd2410Status(uint32_t nowMs) {
+  const auto& cfg = config.sensorsConfig.ld2410;
+  const uint32_t rev = config.getRevision();
+  bool needApply = (rev != ld2410CfgRevision);
+  if (!ld2410Active && (nowMs - ld2410LastRetryMs > 2000)) {
+    needApply = true;
+  }
+  if (needApply) {
+    applyLd2410Config(cfg);
+    ld2410CfgRevision = rev;
+    ld2410LastRetryMs = nowMs;
+  }
+  bool enabled = cfg.enabled && cfg.rxPin >= 0 && cfg.txPin >= 0;
+  if (!enabled) {
+    ld2410Status.available = false;
+    ld2410Status.present = false;
+    ld2410Status.moving = false;
+    ld2410Status.stationary = false;
+    ld2410Status.distanceCm = -1;
+    ld2410Status.movingDistanceCm = -1;
+    ld2410Status.stationaryDistanceCm = -1;
+    ld2410Status.movingSignal = -1;
+    ld2410Status.stationarySignal = -1;
+    ld2410Status.lastUpdateMs = 0;
+    return;
+  }
+  if (ld2410Status.lastUpdateMs == 0 || nowMs - ld2410Status.lastUpdateMs > 2000) {
+    ld2410Status.available = false;
+    ld2410Status.present = false;
+    ld2410Status.moving = false;
+    ld2410Status.stationary = false;
+    ld2410Status.distanceCm = -1;
+    ld2410Status.movingDistanceCm = -1;
+    ld2410Status.stationaryDistanceCm = -1;
+    ld2410Status.movingSignal = -1;
+    ld2410Status.stationarySignal = -1;
+  }
+
+  if (!ld2410Active) return;
+  const uint32_t kLd2410PollIntervalMs = 50;
+  if (ld2410LastPollMs != 0 && nowMs - ld2410LastPollMs < kLd2410PollIntervalMs) return;
+  ld2410LastPollMs = nowMs;
+  MyLD2410::Response resp = ld2410.check();
+  if (resp == MyLD2410::Response::DATA) {
+    bool present = ld2410.presenceDetected();
+    bool moving = ld2410.movingTargetDetected();
+    bool stationary = ld2410.stationaryTargetDetected();
+    int distanceCm = present ? (int)ld2410.detectedDistance() : -1;
+    int movingDistance = moving ? (int)ld2410.movingTargetDistance() : -1;
+    int stationaryDistance = stationary ? (int)ld2410.stationaryTargetDistance() : -1;
+    int movingSignal = moving ? (int)ld2410.movingTargetSignal() : -1;
+    int stationarySignal = stationary ? (int)ld2410.stationaryTargetSignal() : -1;
+
+    ld2410Status.available = true;
+    ld2410Status.present = present;
+    ld2410Status.moving = moving;
+    ld2410Status.stationary = stationary;
+    ld2410Status.distanceCm = distanceCm;
+    ld2410Status.movingDistanceCm = movingDistance;
+    ld2410Status.stationaryDistanceCm = stationaryDistance;
+    ld2410Status.movingSignal = movingSignal;
+    ld2410Status.stationarySignal = stationarySignal;
+    ld2410Status.lastUpdateMs = nowMs;
+  }
+}
+
+void handleLd2410Trigger(uint32_t nowMs) {
+  const auto& cfg = config.sensorsConfig.ld2410;
+  if (!cfg.enabled || !cfg.triggerEnabled) {
+    ld2410TriggerArmed = true;
+    ld2410ReversePending = false;
+    return;
+  }
+  String mode = cfg.mode;
+  mode.toLowerCase();
+  bool detected = ld2410Status.available &&
+                  ((mode == "moving") ? ld2410Status.moving :
+                   (mode == "stationary") ? ld2410Status.stationary :
+                   ld2410Status.present);
+  if (detected && ld2410TriggerArmed && gate && gate->isMoving() && nowMs >= ld2410TriggerCooldownUntilMs) {
+    gate->stop(GATE_STOP_OBSTACLE);
+    pushEvent("warn", "ld2410 obstacle");
+    if (cfg.triggerAction == "open") {
+      uint32_t delayMs = cfg.triggerReverseDelayMs > 0 ? (uint32_t)cfg.triggerReverseDelayMs : 0;
+      ld2410ReversePending = true;
+      ld2410ReverseAtMs = nowMs + delayMs;
+    }
+    uint32_t cooldownMs = cfg.triggerCooldownMs > 0 ? (uint32_t)cfg.triggerCooldownMs : 0;
+    ld2410TriggerCooldownUntilMs = nowMs + cooldownMs;
+    ld2410TriggerArmed = false;
+  }
+
+  if (ld2410ReversePending && (int32_t)(nowMs - ld2410ReverseAtMs) >= 0) {
+    if (gate && !gate->isMoving()) {
+      if (gate->open()) {
+        pushEvent("warn", "ld2410 -> open");
+      }
+      ld2410ReversePending = false;
+    }
+  }
+}
+
+void onGateStatusChanged(const GateStatus& status, void* ctx) {
+  (void)ctx;
+  led.setState(status.state,
+               status.error,
+               status.lastStopReason,
+               status.obstacle,
+               status.wifiConnected,
+               status.mqttConnected,
+               status.positionPercent,
+               status.apMode,
+               status.otaInProgress);
+}
+
+void fillDiagnostics(JsonObject& out) {
+  const WebRuntimeStats ws = webserver.runtimeStats();
+  JsonObject runtimeObj = out.createNestedObject("runtime");
+  runtimeObj["uptimeMs"] = millis();
+  runtimeObj["freeHeap"] = ESP.getFreeHeap();
+  runtimeObj["minFreeHeap"] = ESP.getMinFreeHeap();
+  runtimeObj["maxAllocHeap"] = ESP.getMaxAllocHeap();
+  runtimeObj["resetReason"] = resetReasonToString(esp_reset_reason());
+  runtimeObj["statusReqCount"] = ws.statusReqCount;
+  runtimeObj["statusLiteReqCount"] = ws.statusLiteReqCount;
+  runtimeObj["statusErrors"] = ws.statusErrors;
+  runtimeObj["lastStatusReqMs"] = ws.lastStatusReqMs;
+  runtimeObj["lastStatusDurationUs"] = ws.lastStatusDurationUs;
+  runtimeObj["maxStatusDurationUs"] = ws.maxStatusDurationUs;
+  runtimeObj["wsClients"] = ws.wsClients;
+
+  JsonObject hoverObj = out.createNestedObject("hoverUart");
+  if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
+    const HoverTelemetry& tel = motor->hoverTelemetry();
+    uint32_t now = millis();
+    hoverObj["enabled"] = true;
+    hoverObj["lastTelMs"] = tel.lastTelMs;
+    hoverObj["telAgeMs"] = (tel.lastTelMs == 0 || now < tel.lastTelMs) ? -1 : (long)(now - tel.lastTelMs);
+    hoverObj["rpm"] = tel.rpm;
+    // Normalized distance in mm (0..max). This is what the UI should treat as "przejechana odlegĹ‚oĹ›Ä‡".
+    hoverObj["dist_mm"] = (long)lroundf(positionMetersRaw * 1000.0f);
+    hoverObj["dist_mm_raw"] = tel.distMm;
+    hoverObj["batValid"] = tel.batValid;
+    hoverObj["rawBat"] = tel.rawBat;
+    hoverObj["batScale"] = tel.batScale;
+    if (tel.batValid) hoverObj["batV"] = tel.batV;
+    else hoverObj["batV"] = nullptr;
+    if (tel.iA_x100 >= 0) hoverObj["iA"] = ((float)tel.iA_x100) / 100.0f;
+    else hoverObj["iA"] = -1.0f;
+    hoverObj["fault"] = tel.fault;
+    hoverObj["armed"] = tel.armed;
+    hoverObj["lastCmdSpeed"] = motor->hoverLastCmdSpeed();
+    hoverObj["cmdAgeMs"] = tel.cmdAgeMs;
+    hoverObj["rxLines"] = motor->hoverRxLines();
+    hoverObj["rxTelLines"] = motor->hoverRxTelLines();
+    hoverObj["rxBadLines"] = motor->hoverRxBadLines();
+  } else {
+    hoverObj["enabled"] = false;
+    hoverObj["iA"] = -1.0f;
+  }
+
+  JsonObject positionObj = out.createNestedObject("position");
+  positionObj["positionMetersRaw"] = positionMetersRaw;
+  positionObj["positionMetersFiltered"] = positionMeters;
+  positionObj["hbOriginDistMm"] = config.gateConfig.hbOriginDistMm;
+  positionObj["maxDistanceMeters"] = maxDistanceMeters;
+  JsonObject gateDiag = out.createNestedObject("gate");
+  if (gate) {
+    gateDiag["stopReason"] = static_cast<int>(gate->getLastStopReason());
+    gateDiag["stopReasonLabel"] = gate->getStopReasonString(gate->getLastStopReason());
+    gateDiag["lastOverCurrentA"] = gate->getLastOverCurrentA();
+    gateDiag["lastOverCurrentMs"] = gate->getLastOverCurrentMs();
+    gateDiag["overCurrentCooldownUntilMs"] = gate->getOverCurrentCooldownUntilMs();
+    gateDiag["overCurrentAutoRearmCount"] = gate->getOverCurrentAutoRearmCount();
+    gateDiag["hoverRecoveryActive"] = gate->isHoverRecoveryActive();
+    gateDiag["lastHoverRestoreMs"] = gate->getLastHoverRestoreMs();
+    gateDiag["lastHoverLossMs"] = gate->getLastHoverLossMs();
+  } else {
+    gateDiag["stopReason"] = 0;
+    gateDiag["stopReasonLabel"] = "none";
+  }
+  gateDiag["softLimitsEnabled"] = config.gateConfig.softLimitsEnabled;
+  gateDiag["telemetryTimeoutMs"] = config.gateConfig.telemetryTimeoutMs;
+  gateDiag["telemetryGraceMs"] = config.gateConfig.telemetryGraceMs;
+  gateDiag["stallTimeoutMs"] = config.gateConfig.stallTimeoutMs;
+  gateDiag["overCurrentTripMs"] = config.gateConfig.overCurrentTripMs;
+  gateDiag["overCurrentCooldownMs"] = config.gateConfig.overCurrentCooldownMs;
+  gateDiag["overCurrentMaxAutoRearm"] = config.gateConfig.overCurrentMaxAutoRearm;
+  gateDiag["overCurrentAutoRearm"] = config.gateConfig.overCurrentAutoRearm;
+  if (gate) {
+    positionObj["positionMmCtrl"] = (long)lroundf(gate->getControlPosition() * 1000.0f);
+    positionObj["finalErrorMm"] = gate->getLastFinalErrorMm();
+    positionObj["stopConfirmCount"] = gate->getStopConfirmCount();
+  } else {
+    positionObj["positionMmCtrl"] = (long)lroundf(positionMeters * 1000.0f);
+    positionObj["finalErrorMm"] = 0;
+    positionObj["stopConfirmCount"] = 0;
+  }
+
+  JsonObject remotesObj = out.createNestedObject("remotes");
+  remotesObj["lastSaveOk"] = config.getLastRemotesSaveOk();
+  remotesObj["lastSaveMs"] = config.getLastRemotesSaveMs();
+  remotesObj["lastSaveError"] = config.getLastRemotesSaveError();
+
+  JsonObject otaObj = out.createNestedObject("ota");
+  otaObj["enabled"] = config.otaConfig.enabled;
+  otaObj["ready"] = otaReady;
+  otaObj["active"] = otaActive;
+  otaObj["progress"] = otaProgress;
+  otaObj["error"] = otaError;
+  otaObj["port"] = config.otaConfig.port;
+  otaObj["hostname"] = config.deviceConfig.hostname;
+  otaObj["passwordSet"] = config.otaConfig.password.length() > 0;
+  otaObj["wifiConnected"] = WiFiManager.isConnected();
+  otaObj["ip"] = WiFiManager.isConnected() ? WiFi.localIP().toString() : "";
+  otaObj["freeSketchSpace"] = ESP.getFreeSketchSpace();
+
+  JsonObject homingObj = out.createNestedObject("homing");
+  homingObj["active"] = homingActive;
+  homingObj["reason"] = homingReason;
+  homingObj["result"] = homingResult;
+  homingObj["lastChangeMs"] = homingLastChangeMs;
+  homingObj["enabled"] = startupHomingEnabled;
+  homingObj["positionCertain"] = startupPositionCertain;
+  homingObj["safetyLocked"] = startupSafetyLocked;
+  homingObj["safetyReason"] = startupSafetyReason;
+}
+
+void fillStatus(JsonObject& out) {
+  syncLegacyPositionState();
+  out["uptimeMs"] = millis();
+
+  JsonObject gateObj = out.createNestedObject("gate");
+  if (gate) {
+    const GateStatus& st = gate->getStatus();
+    gateObj["state"] = gate->getStateString();
+    gateObj["moving"] = gate->isMoving();
+    gateObj["position"] = st.position;
+    gateObj["positionPercent"] = st.positionPercent;
+    gateObj["targetPosition"] = st.targetPosition;
+    gateObj["maxDistance"] = st.maxDistance;
+    gateObj["lastDirection"] = gate->getLastDirection();
+    gateObj["errorCode"] = static_cast<int>(st.error);
+    gateObj["stopReason"] = static_cast<int>(st.lastStopReason);
+    gateObj["obstacle"] = st.obstacle;
+    gateObj["lastMoveMs"] = st.lastMoveMs;
+    gateObj["lastStateChangeMs"] = st.lastStateChangeMs;
+    gateObj["hoverRecoveryActive"] = gate->isHoverRecoveryActive();
+    gateObj["lastHoverRestoreMs"] = gate->getLastHoverRestoreMs();
+    gateObj["lastHoverLossMs"] = gate->getLastHoverLossMs();
+    if (startupUiUnknownPos10 && !startupPositionCertain) {
+      const float maxD = st.maxDistance > 0.0f ? st.maxDistance : maxDistanceMeters;
+      float synthetic = kStartupTempDistanceMeters;
+      if (maxD > 0.0f && synthetic > maxD) synthetic = maxD;
+      gateObj["position"] = synthetic;
+      gateObj["positionPercent"] = (maxD > 0.0f) ? (int)((synthetic * 100.0f) / maxD + 0.5f) : -1;
+      gateObj["targetPosition"] = synthetic;
+    }
+  } else {
+    gateObj["state"] = "unknown";
+    gateObj["moving"] = false;
+    gateObj["position"] = positionMeters;
+    gateObj["positionPercent"] = positionPercent;
+    gateObj["targetPosition"] = 0.0f;
+    gateObj["maxDistance"] = maxDistanceMeters;
+    gateObj["lastDirection"] = 0;
+    gateObj["errorCode"] = 0;
+    gateObj["stopReason"] = 0;
+    gateObj["obstacle"] = false;
+    gateObj["lastMoveMs"] = 0;
+    gateObj["lastStateChangeMs"] = 0;
+    gateObj["hoverRecoveryActive"] = false;
+    gateObj["lastHoverRestoreMs"] = 0;
+    gateObj["lastHoverLossMs"] = 0;
+  }
+
+  JsonObject wifiObj = out.createNestedObject("wifi");
+  bool wifiConnected = WiFiManager.isConnected();
+  wifiObj["connected"] = wifiConnected;
+  const char* wifiMode = WiFiManager.getModeCString();
+  wifiObj["mode"] = wifiMode;
+  wifiObj["ssid"] = wifiConnected ? WiFi.SSID() : "";
+  wifiObj["ip"] = wifiConnected ? WiFi.localIP().toString() : "";
+  wifiObj["rssi"] = wifiConnected ? WiFi.RSSI() : 0;
+  wifiObj["apMode"] = strcmp(wifiMode, "AP") == 0;
+
+  JsonObject mqttObj = out.createNestedObject("mqtt");
+  mqttObj["connected"] = mqtt.connected();
+
+  JsonObject otaObj = out.createNestedObject("ota");
+  otaObj["enabled"] = config.otaConfig.enabled;
+  otaObj["ready"] = otaReady;
+  otaObj["active"] = otaActive;
+  otaObj["progress"] = otaProgress;
+  otaObj["error"] = otaError;
+  otaObj["port"] = config.otaConfig.port;
+  otaObj["hostname"] = config.deviceConfig.hostname;
+  otaObj["passwordSet"] = config.otaConfig.password.length() > 0;
+  otaObj["localOnly"] = true;
+
+  JsonObject hbObj = out.createNestedObject("hb");
+  if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
+    const HoverTelemetry& tel = motor->hoverTelemetry();
+    hbObj["enabled"] = true;
+    hbObj["dir"] = tel.dir;
+    hbObj["rpm"] = tel.rpm;
+    // Normalized distance in mm (0..max). This matches the gate position and doesn't go negative.
+    hbObj["dist_mm"] = (long)lroundf(positionMetersRaw * 1000.0f);
+    hbObj["dist_mm_raw"] = tel.distMm;
+    hbObj["batValid"] = tel.batValid;
+    hbObj["rawBat"] = tel.rawBat;
+    hbObj["batScale"] = tel.batScale;
+    if (tel.batValid) hbObj["batV"] = tel.batV;
+    else hbObj["batV"] = nullptr;
+    if (tel.iA_x100 >= 0) hbObj["iA"] = ((float)tel.iA_x100) / 100.0f;
+    else hbObj["iA"] = -1.0f;
+    hbObj["fault"] = tel.fault;
+    hbObj["lastTelMs"] = tel.lastTelMs;
+    hbObj["cmdAgeMs"] = tel.cmdAgeMs;
+    hbObj["telAgeMs"] = (tel.lastTelMs == 0) ? -1 : (long)(millis() - tel.lastTelMs);
+  } else {
+    hbObj["enabled"] = false;
+    hbObj["dir"] = 0;
+    hbObj["rpm"] = 0;
+    hbObj["dist_mm"] = 0;
+    hbObj["batValid"] = false;
+    hbObj["rawBat"] = -1;
+    hbObj["batScale"] = 0;
+    hbObj["batV"] = nullptr;
+    hbObj["iA"] = -1.0f;
+    hbObj["fault"] = 0;
+    hbObj["lastTelMs"] = 0;
+    hbObj["cmdAgeMs"] = -1;
+    hbObj["telAgeMs"] = -1;
+  }
+
+  JsonObject ledObj = out.createNestedObject("led");
+  led.fillStatus(ledObj);
+
+  JsonObject limitsObj = out.createNestedObject("limits");
+  limitsObj["enabled"] = config.limitsConfig.enabled;
+  limitsObj["openEnabled"] = config.limitsConfig.open.enabled;
+  limitsObj["closeEnabled"] = config.limitsConfig.close.enabled;
+
+  JsonObject ioObj = out.createNestedObject("io");
+  bool limitOpenActive = inputManager.limitOpenActive(config);
+  bool limitCloseActive = inputManager.limitCloseActive(config);
+  ioObj["limitOpenRaw"] = inputManager.limitOpenRaw();
+  ioObj["limitCloseRaw"] = inputManager.limitCloseRaw();
+  ioObj["limitOpen"] = limitOpenActive;
+  ioObj["limitClose"] = limitCloseActive;
+  ioObj["stop"] = inputManager.stopActive();
+  ioObj["obstacle"] = inputManager.obstacleActive();
+  ioObj["button"] = inputManager.buttonActive();
+
+  JsonObject inputsObj = out.createNestedObject("inputs");
+  inputsObj["limitOpen"] = limitOpenActive;
+  inputsObj["limitClose"] = limitCloseActive;
+  inputsObj["limitOpenRaw"] = inputManager.limitOpenRaw();
+  inputsObj["limitCloseRaw"] = inputManager.limitCloseRaw();
+  inputsObj["photocellBlocked"] = config.sensorsConfig.photocell.enabled && inputManager.obstacleActive();
+  inputsObj["photocellRaw"] = inputManager.obstacleActive();
+  inputsObj["photocellEnabled"] = config.sensorsConfig.photocell.enabled;
+  inputsObj["limitsEnabled"] = config.limitsConfig.enabled;
+  inputsObj["limitOpenEnabled"] = config.limitsConfig.open.enabled;
+  inputsObj["limitCloseEnabled"] = config.limitsConfig.close.enabled;
+
+  JsonObject ldObj = out.createNestedObject("ld2410");
+  ldObj["available"] = ld2410Status.available;
+  ldObj["present"] = ld2410Status.present;
+  ldObj["moving"] = ld2410Status.moving;
+  ldObj["stationary"] = ld2410Status.stationary;
+  ldObj["distanceCm"] = ld2410Status.available ? ld2410Status.distanceCm : -1;
+  ldObj["movingDistanceCm"] = ld2410Status.available ? ld2410Status.movingDistanceCm : -1;
+  ldObj["stationaryDistanceCm"] = ld2410Status.available ? ld2410Status.stationaryDistanceCm : -1;
+  ldObj["movingSignal"] = ld2410Status.available ? ld2410Status.movingSignal : -1;
+  ldObj["stationarySignal"] = ld2410Status.available ? ld2410Status.stationarySignal : -1;
+
+  JsonObject fsObj = out.createNestedObject("fs");
+  fsObj["totalBytes"] = fsTotalBytesCached;
+  fsObj["usedBytes"] = fsUsedBytesCached;
+
+  JsonObject homingObj = out.createNestedObject("homing");
+  homingObj["active"] = homingActive;
+  homingObj["reason"] = homingReason;
+  homingObj["result"] = homingResult;
+  homingObj["lastChangeMs"] = homingLastChangeMs;
+  homingObj["enabled"] = startupHomingEnabled;
+  homingObj["positionCertain"] = startupPositionCertain;
+  homingObj["safetyLocked"] = startupSafetyLocked;
+  homingObj["safetyReason"] = startupSafetyReason;
+
+  JsonObject remObj = out.createNestedObject("remotes");
+  remObj["learnMode"] = learnMode;
+  remObj["lastSaveOk"] = config.getLastRemotesSaveOk();
+  remObj["lastSaveMs"] = config.getLastRemotesSaveMs();
+  remObj["lastSaveError"] = config.getLastRemotesSaveError();
+  JsonObject lastObj = remObj.createNestedObject("last");
+  lastObj["serial"] = lastRemote.serial;
+  lastObj["encript"] = lastRemote.encript;
+  lastObj["btnToggle"] = lastRemote.btnToggle;
+  lastObj["btnGreen"] = lastRemote.btnGreen;
+  lastObj["batteryLow"] = lastRemote.batteryLow;
+  lastObj["ts"] = lastRemote.ts;
+  lastObj["known"] = lastRemote.known;
+  lastObj["authorized"] = lastRemote.authorized;
+  RemoteEntry r;
+  if (lastRemote.serial != 0 && config.getRemote(lastRemote.serial, r)) {
+    lastObj["name"] = r.name;
+    lastObj["enabled"] = r.enabled;
+  }
+
+  JsonArray evArr = out.createNestedArray("events");
+  int start = eventHead - eventCount;
+  if (start < 0) start += kMaxEvents;
+  for (int i = 0; i < eventCount; ++i) {
+    int idx = (start + i) % kMaxEvents;
+    JsonObject ev = evArr.createNestedObject();
+    ev["ts"] = events[idx].ts;
+    ev["level"] = events[idx].level;
+    ev["message"] = events[idx].message;
+  }
+}
+
+void fillStatusLite(JsonObject& out) {
+  syncLegacyPositionState();
+  if (gate) {
+    const GateStatus& st = gate->getStatus();
+    out["state"] = gate->getStateString();
+    out["moving"] = gate->isMoving();
+    if (startupUiUnknownPos10 && !startupPositionCertain) {
+      const float maxD = st.maxDistance > 0.0f ? st.maxDistance : maxDistanceMeters;
+      float synthetic = kStartupTempDistanceMeters;
+      if (maxD > 0.0f && synthetic > maxD) synthetic = maxD;
+      out["positionMm"] = (long)lroundf(synthetic * 1000.0f);
+      out["positionPercent"] = (maxD > 0.0f) ? (int)((synthetic * 100.0f) / maxD + 0.5f) : -1;
+    } else {
+      out["positionMm"] = (long)lroundf(st.position * 1000.0f);
+      out["positionPercent"] = st.positionPercent;
+    }
+    out["errorCode"] = static_cast<int>(st.error);
+    out["limitOpen"] = inputManager.limitOpenActive(config);
+    out["limitClose"] = inputManager.limitCloseActive(config);
+  } else {
+    out["state"] = "unknown";
+    out["moving"] = false;
+    out["positionMm"] = (long)lroundf(positionMeters * 1000.0f);
+    out["positionPercent"] = positionPercent;
+    out["errorCode"] = 0;
+    out["limitOpen"] = false;
+    out["limitClose"] = false;
+  }
+
+  if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
+    const HoverTelemetry& tel = motor->hoverTelemetry();
+    out["rpm"] = tel.rpm;
+    out["iA"] = tel.iA_x100 >= 0 ? ((float)tel.iA_x100) / 100.0f : -1.0f;
+  } else {
+    out["rpm"] = 0;
+    out["iA"] = -1.0f;
+  }
+}
+
+void fillRemoteState(JsonObject& out) {
+  out["serial"] = lastRemote.serial;
+  out["encript"] = lastRemote.encript;
+  out["btnToggle"] = lastRemote.btnToggle;
+  out["btnGreen"] = lastRemote.btnGreen;
+  out["batteryLow"] = lastRemote.batteryLow;
+  out["ts"] = lastRemote.ts;
+  out["known"] = lastRemote.known;
+  out["authorized"] = lastRemote.authorized;
+  RemoteEntry r;
+  if (lastRemote.serial != 0 && config.getRemote(lastRemote.serial, r)) {
+    out["name"] = r.name;
+    out["enabled"] = r.enabled;
+  }
+}
+
+void handleControlCmd(const char* action) {
+  if (!gate || !action) return;
+  if (startupHomingEnabled && !startupPositionCertain) {
+    pushEvent("warn", "control blocked: position not referenced");
+    Serial.printf("[UI] control blocked: startup safety (reason=%s)\n", startupSafetyReason);
+    return;
+  }
+  if (startupSafetyLocked) {
+    pushEvent("warn", "control blocked: startup safety lock");
+    Serial.printf("[UI] control blocked: startup safety lock (reason=%s)\n", startupSafetyReason);
+    return;
+  }
+  if (homingActive) {
+    pushEvent("warn", "control blocked by homing");
+    Serial.println("[UI] control blocked: homing active");
+    return;
+  }
+  if (otaActive) {
+    pushEvent("warn", "control blocked by ota");
+    Serial.println("[UI] control blocked: OTA active");
+    return;
+  }
+  Serial.printf("[UI] control action=%s\n", action);
+  if (calibration.isRunning()) {
+    pushEvent("warn", "control blocked by calibration");
+    return;
+  }
+  if (strcmp(action, "zero") == 0) {
+    if (handleGateCalibrate("zero")) {
+      pushEvent("info", "command zero");
+    } else {
+      pushEvent("warn", "command zero failed");
+    }
+    return;
+  }
+  GateCommandResponse r = gate->handleCommand(action);
+  if (r.result == GATE_CMD_UNKNOWN) {
+    pushEvent("warn", "command unknown");
+    Serial.printf("[UI] control result=unknown\n");
+    return;
+  }
+
+  if (r.result == GATE_CMD_BLOCKED) {
+    if (r.cmd == GATE_CMD_OPEN) pushEvent("warn", "command open blocked");
+    else if (r.cmd == GATE_CMD_CLOSE) pushEvent("warn", "command close blocked");
+    else if (r.cmd == GATE_CMD_TOGGLE) pushEvent("warn", "command toggle blocked");
+    else pushEvent("warn", "command blocked");
+    led.setOverride("command_rejected", 600);
+    Serial.printf("[UI] control result=blocked cmd=%d\n", (int)r.cmd);
+    return;
+  }
+
+  // OK
+  if (r.cmd == GATE_CMD_OPEN) {
+    pushEvent("info", "command open");
+    Serial.printf("[UI] control result=open applied=%d\n", r.applied ? 1 : 0);
+  } else if (r.cmd == GATE_CMD_CLOSE) {
+    pushEvent("info", "command close");
+    Serial.printf("[UI] control result=close applied=%d\n", r.applied ? 1 : 0);
+  } else if (r.cmd == GATE_CMD_STOP) {
+    pushEvent("info", "command stop");
+    Serial.printf("[UI] control result=stop applied=%d\n", r.applied ? 1 : 0);
+  } else if (r.cmd == GATE_CMD_TOGGLE) {
+    pushEvent("info", r.applied ? "command toggle" : "command toggle (no-op)");
+    Serial.printf("[UI] control result=toggle applied=%d\n", r.applied ? 1 : 0);
+  } else {
+    pushEvent("info", "command ok");
+    Serial.printf("[UI] control result=ok cmd=%d applied=%d\n", (int)r.cmd, r.applied ? 1 : 0);
+  }
+}
+
+void handleControlWrapper(const String& action) {
+  handleControlCmd(action.c_str());
+}
+
+void handleLedCmd(const char* payload) {
+  if (!payload) return;
+  if (payload[0] == '{') {
+    StaticJsonDocument<256> doc;
+    if (deserializeJson(doc, payload) != DeserializationError::Ok) return;
+    if (doc.containsKey("enabled")) {
+      led.setEnabled(doc["enabled"] | false);
+    }
+    if (doc.containsKey("brightness")) {
+      int value = doc["brightness"] | led.getBrightness();
+      if (value < 0) value = 0;
+      if (value > 100) value = 100;
+      led.setBrightness(value);
+    }
+    if (doc.containsKey("ringStartIndex") || doc.containsKey("ringReverse")) {
+      int startIndex = doc["ringStartIndex"] | led.getRingStartIndex();
+      bool reverse = doc["ringReverse"] | led.getRingReverse();
+      if (startIndex < -4096) startIndex = -4096;
+      if (startIndex > 4096) startIndex = 4096;
+      led.setRingOrientation(startIndex, reverse);
+    }
+    if (doc.containsKey("mode")) {
+      const char* mode = doc["mode"] | "";
+      led.setMode(mode);
+    }
+    if (doc.containsKey("pattern")) {
+      const char* pattern = doc["pattern"] | "flash";
+      unsigned long duration = doc["overrideMs"] | doc["duration"] | 800;
+      led.setOverride(pattern, duration);
+    }
+    if (doc["test"] | false) {
+      led.startTest();
+    }
+    mqttPublishLedState();
+    return;
+  }
+
+  String cmd(payload);
+  cmd.toLowerCase();
+  if (cmd == "test") {
+    led.startTest();
+  } else if (cmd == "stealth") {
+    led.setMode("stealth");
+  } else if (cmd == "off") {
+    led.setMode("off");
+  } else if (cmd == "status") {
+    led.setMode("status");
+  } else if (cmd == "flash") {
+    led.setOverride("flash", 600);
+  } else if (cmd == "idle") {
+    led.setMode("idle");
+  } else if (cmd == "stopped") {
+    led.setMode("stopped");
+  }
+  mqttPublishLedState();
+}
+
+void onHcsReceived(unsigned long serial, unsigned long encript, bool btnToggle, bool btnGreen, bool batt) {
+  unsigned long now = millis();
+  RemoteEntry entry;
+  bool known = config.getRemote(serial, entry);
+  bool authorized = known && entry.enabled;
+
+  lastRemote.serial = serial;
+  lastRemote.encript = encript;
+  lastRemote.btnToggle = btnToggle;
+  lastRemote.btnGreen = btnGreen;
+  lastRemote.batteryLow = batt;
+  lastRemote.ts = now;
+  lastRemote.known = known;
+  lastRemote.authorized = authorized;
+
+  RemoteSeen& seen = lastRemoteMap[serial];
+  unsigned long debounceMs = (unsigned long)config.remoteConfig.antiRepeatMs;
+  if (debounceMs < 50) debounceMs = 50;
+  if (debounceMs > 2000) debounceMs = 2000;
+
+  // Auto-learn only in explicit learn mode window.
+    if (!known) {
+      if (!learnMode || (learnModeUntilMs != 0 && (int32_t)(now - learnModeUntilMs) > 0)) {
+        pushEventf("warn", "unknown remote rejected %lu", serial);
+        led.setOverride("remote_reject", 700);
+        return;
+      }
+      String name = String("Remote ") + String(serial);
+      if (config.addRemote(serial, name)) {
+        pushEventf("info", "learned remote %lu", serial);
+        led.setOverride("remote_ok", 700);
+        config.getRemote(serial, entry);
+        known = true;
+        authorized = entry.enabled;
+      } else {
+        pushEvent("warn", "remote auto-learn failed");
+        led.setOverride("remote_reject", 700);
+        return;
+      }
+    }
+
+    if (!authorized) {
+      pushEvent("warn", "remote not authorized");
+      led.setOverride("remote_reject", 700);
+      return;
+    }
+
+  // Debounce: accept toggle or green (fallback) to avoid "dead" buttons.
+  bool actionToggle = btnToggle || btnGreen;
+  if (!actionToggle) return;
+  if (now - seen.lastActionMs < debounceMs) return;
+  if (seen.encript == encript) return;
+  seen.lastActionMs = now;
+  seen.encript = encript;
+
+  handleControlCmd("toggle");
+  pushEvent("info", "remote: toggle");
+}
+
+void learnCallback(bool enable) {
+  learnMode = enable;
+  learnModeUntilMs = enable ? (millis() + kLearnModeWindowMs) : 0;
+  if (hcs) hcs->setLearnMode(enable);
+  led.setLearnMode(enable);
+  webserver.setLearnState(enable);
+  pushEvent("info", enable ? "learn mode on" : "learn mode off");
+  StaticJsonDocument<128> ev;
+  ev["type"] = "learn_mode";
+  ev["enabled"] = enable;
+  char payload[128];
+  serializeJson(ev, payload, sizeof(payload));
+  webserver.broadcastJson(payload);
+}
+
+void testCallback(unsigned long serial, unsigned long encript, bool btnT, bool btnG, bool batt) {
+  onHcsReceived(serial, encript, btnT, btnG, batt);
+}
+
+void setupOta() {
+  if (!config.otaConfig.enabled || otaReady) return;
+  Serial.printf("[OTA] init enabled=1 host=%s port=%d password=%s\n",
+                config.deviceConfig.hostname.c_str(),
+                config.otaConfig.port,
+                config.otaConfig.password.length() > 0 ? "set" : "empty");
+  ArduinoOTA.setHostname(config.deviceConfig.hostname.c_str());
+  ArduinoOTA.setPort(config.otaConfig.port);
+  if (config.otaConfig.password.length() > 0) {
+    ArduinoOTA.setPassword(config.otaConfig.password.c_str());
+  }
+  ArduinoOTA.onEnd([]() {
+    otaActive = false;
+    otaProgress = 100;
+    otaError[0] = '\0';
+    pushEvent("info", "ota end");
+    led.setOtaActive(false);
+    if (gate) gate->setOtaActive(false);
+    scheduleRestart(1200);
+  });
+  ArduinoOTA.onStart([]() {
+    otaActive = true;
+    otaProgress = 0;
+    otaError[0] = '\0';
+    pushEvent("info", "ota start");
+    if (gate) gate->stop(GATE_STOP_USER);
+    if (motor) {
+      motor->stopHard();
+      if (motor->isHoverUart()) {
+        motor->hoverDisarm();
+      }
+    }
+    led.setOtaActive(true);
+    if (gate) gate->setOtaActive(true);
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    if (total > 0) {
+      int pct = (int)((progress * 100U) / total);
+      otaProgress = pct;
+      led.setOtaProgress(pct);
+    }
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    otaActive = false;
+    otaProgress = -1;
+    snprintf(otaError, sizeof(otaError), "err_%d", (int)error);
+    pushEvent("error", "ota error");
+    led.setOtaActive(false);
+    if (gate) gate->setOtaActive(false);
+  });
+  ArduinoOTA.begin();
+  otaReady = true;
+}
+
+void gateTask(void* pvParameters) {
+  const bool wdtEnabled = config.safetyConfig.watchdogEnabled;
+  if (wdtEnabled) {
+    esp_task_wdt_add(NULL);
+  }
+  while (1) {
+    if (gate) gate->loop();
+    if (wdtEnabled) {
+      esp_task_wdt_reset();
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(10);
+  const esp_reset_reason_t rr = esp_reset_reason();
+  Serial.printf("[BOOT] reset_reason=%s (%d)\n", resetReasonToString(rr), (int)rr);
+  startupBootMs = millis();
+  startupHomingEnabled = true;
+  if (!startupHomingEnabled) {
+    setStartupSafetyState(true, false, "non_cold_boot");
+    setHomingResult("skip", "non_cold_boot");
+    homingChecked = true;
+  } else {
+    setStartupSafetyState(false, false, "cold_boot_pending");
+    setHomingResult("pending", "cold_boot_pending");
+    homingChecked = false;
+  }
+
+  if (!LittleFS.begin()) {
+    Serial.println("LittleFS mount failed - attempting to format...");
+    if (LittleFS.format()) {
+      Serial.println("LittleFS formatted, attempting to mount again...");
+      if (!LittleFS.begin()) {
+        Serial.println("LittleFS mount failed after format");
+      } else {
+        Serial.println("LittleFS mounted OK after format");
+      }
+    } else {
+      Serial.println("LittleFS format failed");
+    }
+  } else {
+    Serial.println("LittleFS mounted OK");
+  }
+
+  if (LittleFS.exists("/index.html")) {
+    Serial.println("index.html found in LittleFS");
+  } else {
+    Serial.println("index.html NOT found in LittleFS - run uploadfs to upload UI files");
+  }
+
+  config.begin();
+  config.load();
+  config.setSaveAllowedCallback(isSafeToSaveConfig);
+  led.init(config.ledConfig);
+  led.setOverride("boot", 1200);
+  led.setMqttEnabled(config.mqttConfig.enabled);
+
+  motor = new MotorController();
+  motor->applyConfig(config.motorConfig, config.gpioConfig, config.hoverUartConfig);
+  // Direction source of truth: motor.invertDir only.
+  // gpio.dirInvert is kept in config for backward compatibility but is not applied to runtime inversion.
+  motor->setInvertDir(config.motorConfig.invertDir);
+  Serial.printf("[DIR] runtime invert source=motor.invertDir motor=%d gpio.dirInvert(legacy_ignored)=%d applied=%d\n",
+                config.motorConfig.invertDir ? 1 : 0,
+                config.gpioConfig.dirInvert ? 1 : 0,
+                config.motorConfig.invertDir ? 1 : 0);
+  motor->setMotionProfile(config.motionProfile());
+  motor->begin();
+
+  gate = new GateController(motor, &config);
+  gate->begin();
+  gate->setStatusCallback(onGateStatusChanged, nullptr);
+  eventQueue = xQueueCreate(64, sizeof(EventEntry));
+  positionTracker.begin(&config, motor, gate);
+  positionTracker.initializeFromConfig();
+  syncLegacyPositionState();
+  xTaskCreatePinnedToCore(gateTask, "GateTask", 6144, NULL, 2, &gateTaskHandle, 0);
+
+  setupInputs();
+  updateHallAttachment();
+  WiFiManager.begin(&config);
+  Serial.printf("[OTA] cfg enabled=%d host=%s port=%d password=%s\n",
+                config.otaConfig.enabled ? 1 : 0,
+                config.deviceConfig.hostname.c_str(),
+                config.otaConfig.port,
+                config.otaConfig.password.length() > 0 ? "set" : "empty");
+
+  hcs = new HCS301Receiver(config.gpioConfig.hcsPin);
+  hcs->begin();
+  hcs->setCallback(onHcsReceived);
+
+  mqtt.setCallback(mqttCallback);
+  mqtt.begin(config.mqttConfig);
+
+  webserver.setStatusCallback(fillStatus);
+  webserver.setStatusLiteCallback(fillStatusLite);
+  webserver.setDiagnosticsCallback(fillDiagnostics);
+  webserver.setRemoteStateCallback(fillRemoteState);
+  webserver.setControlCallback(handleControlWrapper);
+  webserver.setGateCalibrateCallback(handleGateCalibrate);
+  webserver.setLearnCallback(learnCallback);
+  webserver.setTestCallback(testCallback);
+  webserver.setLearnState(learnMode);
+  led.setLearnMode(learnMode);
+  webserver.setMqttManager(&mqtt);
+  webserver.setLedController(&led);
+  webserver.setMotorController(motor);
+  webserver.setOtaActiveCallback(isOtaActive);
+  calibration.begin(&config, motor, gate);
+  webserver.setCalibrationManager(&calibration);
+  webserver.begin();
+
+  pushEvent("info", "setup done");
+}
+
+void loop() {
+  WiFiManager.loop();
+  if (hcs) hcs->loop();
+
+  if (learnMode && learnModeUntilMs != 0 && (int32_t)(millis() - learnModeUntilMs) >= 0) {
+    learnCallback(false);
+  }
+
+  calibration.loop();
+  if (!calibration.isRunning()) {
+    handleInputs();
+  }
+  syncLegacyPositionState();
+  logSummary1Hz();
+  updateHallAttachment();
+  updatePositionPercent();
+  unsigned long now = millis();
+  updateHallStats(now);
+  updateLd2410Status(now);
+  runStartupHoming(now);
+  bool movingNow = gate && gate->isMoving();
+  if (movingNow && !ld2410WasMoving) {
+    ld2410TriggerArmed = true;
+  }
+  if (!movingNow) {
+    ld2410TriggerArmed = false;
+  }
+  ld2410WasMoving = movingNow;
+  handleLd2410Trigger(now);
+  maybePersistPosition(now);
+  updateFsStats(now);
+
+  mqtt.setConnectAllowed(!gate || !gate->isMoving());
+  mqtt.loop();
+  bool nowConnected = mqtt.connected();
+  bool wifiConnected = WiFiManager.isConnected();
+  bool apMode = strcmp(WiFiManager.getModeCString(), "AP") == 0;
+  if (gate) gate->setConnectivity(wifiConnected, nowConnected, apMode);
+  led.setMqttEnabled(mqtt.enabled());
+  led.tick(now);
+  if (nowConnected && !mqttWasConnected) {
+    const char* cmdTopic = mqtt.topicCommand();
+    if (cmdTopic && cmdTopic[0] != '\0') {
+      mqtt.subscribe(cmdTopic);
+    }
+    const char* gateCmdTopic = mqtt.topicGateCmd();
+    if (gateCmdTopic && gateCmdTopic[0] != '\0') {
+      mqtt.subscribe(gateCmdTopic);
+    }
+    const char* setMaxTopic = mqtt.topicGateSetMax();
+    if (setMaxTopic && setMaxTopic[0] != '\0') {
+      mqtt.subscribe(setMaxTopic);
+    }
+    const char* calTopic = mqtt.topicGateCalibrate();
+    if (calTopic && calTopic[0] != '\0') {
+      mqtt.subscribe(calTopic);
+    }
+    const char* ledCmdTopic = mqtt.topicLedCmd();
+    if (ledCmdTopic && ledCmdTopic[0] != '\0') {
+      mqtt.subscribe(ledCmdTopic);
+    }
+    pushEvent("info", "mqtt connected");
+    mqttPublishStatus();
+    mqttPublishLedState();
+    mqttPublishTelemetry();
+    mqttPublishPosition();
+  }
+  mqttWasConnected = nowConnected;
+  if (nowConnected) {
+    if (now - lastMqttPublish > 5000) {
+      lastMqttPublish = now;
+      mqttPublishStatus();
+      mqttPublishLedState();
+    }
+    if (now - lastMqttTelemetryMs > 1000) {
+      lastMqttTelemetryMs = now;
+      mqttPublishTelemetry();
+      mqttPublishPosition();
+      mqttPublishMotionState();
+      mqttPublishMotionPosition();
+    }
+  }
+
+  if (config.otaConfig.enabled && WiFiManager.isConnected()) {
+    if (!otaNetDiagLogged) {
+      Serial.printf("[OTA] net ip=%s host=%s port=%d ready=%d\n",
+                    WiFi.localIP().toString().c_str(),
+                    config.deviceConfig.hostname.c_str(),
+                    config.otaConfig.port,
+                    otaReady ? 1 : 0);
+      otaNetDiagLogged = true;
+    }
+    setupOta();
+    if (otaReady) ArduinoOTA.handle();
+  } else if (!config.otaConfig.enabled) {
+    otaNetDiagLogged = false;
+  }
+
+  if (calibration.isRunning() || calibration.hasError() || calibration.isComplete()) {
+    if (now - lastCalibWsMs > 250) {
+      lastCalibWsMs = now;
+      StaticJsonDocument<768> doc;
+      doc["type"] = "calibration";
+      JsonObject data = doc.createNestedObject("data");
+      calibration.fillStatus(data);
+      char payload[768];
+      serializeJson(doc, payload, sizeof(payload));
+      webserver.broadcastJson(payload);
+    }
+  }
+  // Push status frequently while moving (smooth UI), slower when idle.
+  uint32_t statusIntervalMs = 1000;
+  if (gate && gate->isMoving()) statusIntervalMs = 500;
+  if (now - lastStatusMs > statusIntervalMs) {
+    lastStatusMs = now;
+    webserver.broadcastStatus();
+  }
+  static uint32_t lastWebMaintenanceMs = 0;
+  if (now - lastWebMaintenanceMs >= 250) {
+    lastWebMaintenanceMs = now;
+    webserver.maintenance();
+  }
+  drainEventQueue();
+  static bool saveWasPending = false;
+  bool savePending = config.hasPendingSave();
+  if (savePending && !saveWasPending) {
+    pushEvent("warn", isSafeToSaveConfig() ? "config save deferred" : "config save deferred (moving)");
+  }
+  if (!savePending && saveWasPending) {
+    pushEvent("info", "config save completed");
+  }
+  saveWasPending = savePending;
+  config.processDeferredSave();
+  if (factoryResetPending && (int32_t)(now - factoryResetAtMs) >= 0) {
+    factoryResetPending = false;
+    LittleFS.remove(CONFIG_PATH);
+    config.resetToDefaults();
+    config.save(nullptr);
+  }
+  if (restartPending && (int32_t)(now - restartAtMs) >= 0) {
+    restartPending = false;
+    ESP.restart();
+  }
+  vTaskDelay(pdMS_TO_TICKS(1));
+}
+
+

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GateOS - Dashboard</title>
+  <link rel="stylesheet" href="/styles.css?v=20260102">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" aria-label="GateOS">
+        <div class="logo">G</div>
+        <div>GateOS</div>
+      </div>
+      <nav class="nav" aria-label="Nawigacja">
+        <a class="active" href="/">Dashboard</a>
+        <a href="/settings.html">Ustawienia</a>
+        <a href="/calibration.html">Kalibracja</a>
+        <a href="/remotes.html">Piloty</a>
+        <a href="/settings.html#diagnostyka">Diagnostyka</a>
+        <a href="/settings.html#ota">Aktualizacje</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="grid">
+      <section class="card" style="--delay:0s">
+        <h2>Stan bramy</h2>
+        <div class="status-big" id="gateState">LADOWANIE</div>
+        <div class="progress-track" aria-label="Postep">
+          <div class="progress-bar" id="gateProgress"></div>
+        </div>
+        <div class="progress-label"><span id="gatePercent">--</span>%</div>
+        <div class="chips">
+          <span class="chip" id="wifiChip">WiFi: --</span>
+          <span class="chip" id="mqttChip">MQTT: --</span>
+          <span class="chip" id="limitsChip">Limity: --</span>
+          <span class="chip" id="limitOpenChip">OPEN: --</span>
+          <span class="chip" id="limitCloseChip">CLOSE: --</span>
+          <span class="chip" id="photocellChip">Fotokomorka: --</span>
+          <span class="chip" id="ld2410Chip">LD2410: --</span>
+          <span class="chip" id="hallChip">Hall: --</span>
+          <span class="chip" id="uptimeChip">Uptime: --</span>
+        </div>
+        <div class="metric-list">
+          <div class="metric">
+            <div class="label">IP</div>
+            <div class="value" id="ipValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">RSSI</div>
+            <div class="value" id="rssiValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">Tryb</div>
+            <div class="value" id="wifiModeValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">Ostatni pilot</div>
+            <div class="value" id="lastRemoteValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">Przejechana odleglosc</div>
+            <div class="value" id="hbDistValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">Bateria</div>
+            <div class="value" id="hbBatValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">RPM</div>
+            <div class="value" id="hbRpmValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">Fault</div>
+            <div class="value" id="hbFaultValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">Max dystans</div>
+            <div class="value" id="maxDistanceValue">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">Docelowa pozycja</div>
+            <div class="value" id="targetPositionValue">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" style="--delay:0.05s">
+        <h2>Sterowanie</h2>
+        <div class="controls">
+          <button id="openBtn" class="btn primary" aria-label="Otworz">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M4 20V4h6l6 2v14l-6 2H4Z"/>
+              <path d="M10 12h4"/>
+            </svg>
+            Otworz
+          </button>
+          <button id="stopBtn" class="btn warn" aria-label="Stop">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="2"/>
+            </svg>
+            Stop
+          </button>
+          <button id="closeBtn" class="btn danger" aria-label="Zamknij">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M20 20V4h-6L8 6v12l6 2h6Z"/>
+              <path d="M10 12h4"/>
+            </svg>
+            Zamknij
+          </button>
+          <button id="toggleBtn" class="btn ghost" aria-label="Toggle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M4 12h16"/>
+              <path d="M12 4v16"/>
+            </svg>
+            Toggle
+          </button>
+        </div>
+        <div class="toggle-row" style="margin-top:16px">
+          <div>
+            <strong>Tryb Toggle</strong>
+            <div class="info-row">W trybie toggle aktywny jest tylko przycisk Toggle.</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="toggleMode">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="alert" id="safetyAlert" style="display:none;margin-top:12px">
+          Wykryto blad lub przeszkode. Akcje moga byc zablokowane.
+        </div>
+      </section>
+    </div>
+
+    <section class="card" style="--delay:0.1s;margin-top:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <h2>Ostatnie zdarzenia</h2>
+        <div class="field" style="max-width:180px">
+          <label for="eventFilter">Filtr</label>
+          <select id="eventFilter">
+            <option value="all">Wszystkie</option>
+            <option value="info">Info</option>
+            <option value="warn">Ostrzezenia</option>
+            <option value="error">Bledy</option>
+          </select>
+        </div>
+      </div>
+      <ul class="event-list" id="eventList"></ul>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/script.js?v=20260102"></script>
+</body>
+</html>

@@ -1,0 +1,1132 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GateOS - Ustawienia</title>
+  <link rel="stylesheet" href="/styles.css?v=20260102">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" aria-label="GateOS">
+        <div class="logo">G</div>
+        <div>GateOS</div>
+      </div>
+      <nav class="nav" aria-label="Nawigacja">
+        <a href="/">Dashboard</a>
+        <a class="active" href="/settings.html">Ustawienia</a>
+        <a href="/calibration.html">Kalibracja</a>
+        <a href="/remotes.html">Piloty</a>
+        <a href="#diagnostyka">Diagnostyka</a>
+        <a href="#ota">Aktualizacje</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="card" style="--delay:0s">
+      <h2>Konfiguracja systemu</h2>
+      <div class="info-row">Wszystkie zmiany sa walidowane lokalnie i przez API przed zapisem.</div>
+      <div class="field" style="max-width:320px">
+        <label for="apiToken">Token API (do autoryzacji)</label>
+        <input id="apiToken" type="password" placeholder="np. gateos123" data-path="security.apiToken">
+        <small>Po ustawieniu tokenu musisz go podawac w UI.</small>
+      </div>
+    </section>
+
+    <div class="accordion" style="margin-top:24px">
+      <section class="accordion-item open" id="network">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>Siec i MQTT</h2>
+              <div class="info-row">WiFi, AP fallback, statyczne IP i ustawienia MQTT.</div>
+            </div>
+            <div class="tooltip" data-tip="Polacznie i uslugi">i</div>
+          </div>
+          <div class="accordion-content">
+            <div class="form-grid">
+              <div class="field">
+                <label>WiFi SSID</label>
+                <input type="text" data-path="wifi.ssid" placeholder="Nazwa sieci">
+                <small class="error-msg" data-error-for="wifi.ssid"></small>
+              </div>
+              <div class="field">
+                <label>WiFi haslo</label>
+                <input type="password" data-path="wifi.password" placeholder="Haslo sieci">
+              </div>
+            </div>
+
+            <h3 style="margin-top:16px">AP fallback</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>AP SSID</label>
+                <input type="text" data-path="wifi.apFallback.ssid" placeholder="GateOS-Setup">
+              </div>
+              <div class="field">
+                <label>AP haslo</label>
+                <input type="password" data-path="wifi.apFallback.password" placeholder="minimum 8 znakow">
+              </div>
+              <div class="field">
+                <label>Timeout fallback (ms)</label>
+                <input type="number" data-type="int" data-path="wifi.apFallback.timeoutMs" placeholder="30000">
+              </div>
+            </div>
+
+            <h3 style="margin-top:16px">Statyczne IP</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>Wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="wifi.staticIp.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>IP</label>
+                <input type="text" data-path="wifi.staticIp.ip" placeholder="192.168.1.50">
+              </div>
+              <div class="field">
+                <label>Brama</label>
+                <input type="text" data-path="wifi.staticIp.gateway" placeholder="192.168.1.1">
+              </div>
+              <div class="field">
+                <label>Maska</label>
+                <input type="text" data-path="wifi.staticIp.netmask" placeholder="255.255.255.0">
+              </div>
+              <div class="field">
+                <label>DNS1</label>
+                <input type="text" data-path="wifi.staticIp.dns1" placeholder="1.1.1.1">
+              </div>
+              <div class="field">
+                <label>DNS2</label>
+                <input type="text" data-path="wifi.staticIp.dns2" placeholder="8.8.8.8">
+              </div>
+            </div>
+
+            <h3 style="margin-top:16px">MQTT</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>Wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="mqtt.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Broker</label>
+                <input type="text" data-path="mqtt.server" placeholder="192.168.1.10">
+              </div>
+              <div class="field">
+                <label>Port</label>
+                <input type="number" data-type="int" data-path="mqtt.port" placeholder="1883">
+              </div>
+              <div class="field">
+                <label>User</label>
+                <input type="text" data-path="mqtt.user">
+              </div>
+              <div class="field">
+                <label>Haslo</label>
+                <input type="password" data-path="mqtt.password">
+              </div>
+              <div class="field">
+                <label>Topic base</label>
+                <input type="text" data-path="mqtt.topicBase" placeholder="brama">
+              </div>
+              <div class="field">
+                <label>Retain</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="mqtt.retain">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>QoS</label>
+                <select data-path="mqtt.qos" data-type="int">
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>LWT topic</label>
+                <input type="text" data-path="mqtt.lwtTopic">
+              </div>
+              <div class="field">
+                <label>LWT payload</label>
+                <input type="text" data-path="mqtt.lwtPayload">
+              </div>
+            </div>
+            <div class="section-actions">
+              <button class="btn ghost" id="mqttTestBtn" type="button">Test MQTT</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="accordion-item" id="motor">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>Silnik i rampy</h2>
+              <div class="info-row">Sterownik, PWM, rampy i timeouty ruchu.</div>
+            </div>
+            <div class="tooltip" data-tip="Parametry napedu">i</div>
+          </div>
+          <div class="accordion-content">
+            <div class="form-grid">
+              <div class="field">
+                <label>Typ sterownika</label>
+                <select data-path="motor.driverType">
+                  <option value="hbridge">H-bridge</option>
+                  <option value="pwm_dir">PWM + DIR</option>
+                  <option value="hover_uart">Hover UART</option>
+                  <option value="relay">Przekazniki</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>PWM min</label>
+                <input type="number" data-type="int" data-path="motor.pwmMin">
+              </div>
+              <div class="field">
+                <label>PWM max</label>
+                <input type="number" data-type="int" data-path="motor.pwmMax">
+              </div>
+              <div class="field">
+                <label>Czestotliwosc PWM (Hz)</label>
+                <input type="number" data-type="int" data-path="motor.pwmFreq">
+              </div>
+              <div class="field">
+                <label>Rozdzielczosc PWM (bit)</label>
+                <input type="number" data-type="int" data-path="motor.pwmResolution">
+              </div>
+              <div class="field">
+                <label>Soft start (ms)</label>
+                <input type="number" data-type="int" data-path="motor.softStartMs">
+              </div>
+              <div class="field">
+                <label>Soft stop (ms)</label>
+                <input type="number" data-type="int" data-path="motor.softStopMs">
+              </div>
+              <div class="field">
+                <label>Krzywa rampy</label>
+                <select data-path="motor.rampCurve">
+                  <option value="linear">Linear</option>
+                  <option value="ease">Ease</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Odwroc kierunek</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="motor.invertDir">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <h3 style="margin-top:16px">Hover UART</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>RX</label>
+                <input type="number" data-type="int" data-path="hoverUart.rx">
+              </div>
+              <div class="field">
+                <label>TX</label>
+                <input type="number" data-type="int" data-path="hoverUart.tx">
+              </div>
+              <div class="field">
+                <label>Baud</label>
+                <input type="number" data-type="int" data-path="hoverUart.baud">
+              </div>
+              <div class="field">
+                <label>Max speed</label>
+                <input type="number" data-type="int" data-path="hoverUart.maxSpeed">
+              </div>
+              <div class="field">
+                <label>Ramp step</label>
+                <input type="number" data-type="int" data-path="hoverUart.rampStep">
+              </div>
+            </div>
+
+            <h3 style="margin-top:16px">Parametry bramy</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>Uzywaj krancowek</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="limits.enabled">
+                  <span class="slider"></span>
+                </label>
+                <small>Gdy wylaczone, krancowki sa ignorowane (soft-limity nadal dzialaja).</small>
+              </div>
+              <div class="field">
+                <label>Max dystans otwarcia (m)</label>
+                <input type="number" step="0.01" data-type="float" data-path="gate.maxDistance">
+              </div>
+              <div class="field">
+                <label>Obwod kola (m)</label>
+                <input type="number" step="0.001" data-type="float" data-path="gate.wheelCircumference">
+              </div>
+              <div class="field">
+                <label>Impulsy / obrot</label>
+                <input type="number" data-type="int" data-path="gate.pulsesPerRevolution">
+              </div>
+              <div class="field">
+                <label>Timeout ruchu (ms)</label>
+                <input type="number" data-type="int" data-path="gate.movementTimeout">
+              </div>
+              <div class="field">
+                <label>Auto zamykanie (ms)</label>
+                <input type="number" data-type="int" data-path="gate.autoCloseDelay">
+              </div>
+              <div class="field">
+                <label>Odwracaj kierunek przy toggle</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="gate.toggleDirection">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="section-actions">
+              <button class="btn ghost" id="gateZeroBtn" type="button">Ustaw aktualna pozycje jako 0</button>
+              <button class="btn ghost" id="gateMaxBtn" type="button">Ustaw aktualna pozycje jako MAX</button>
+            </div>
+            <small>Kalibracja zapisuje gate.position w konfiguracji.</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="accordion-item" id="motion-profile">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>Profil ruchu bramy</h2>
+              <div class="info-row">Intuicyjne tryby i opcjonalne ustawienia zaawansowane.</div>
+            </div>
+            <div class="tooltip" data-tip="Motion profile">i</div>
+          </div>
+          <div class="accordion-content">
+            <div class="form-grid">
+              <div class="field">
+                <label>Profil</label>
+                <select data-path="motion.profile">
+                  <option value="user">Użytkownik</option>
+                  <option value="soft">Soft</option>
+                  <option value="dynamic">Dynamic</option>
+                  <option value="industrial">Industrial</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Ekspert (advanced)</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="motion.expert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Prędkość otwierania</label>
+                <select data-path="motion.ui.speedOpen">
+                  <option value="slow">Wolna</option>
+                  <option value="normal">Normalna</option>
+                  <option value="fast">Szybka</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Prędkość zamykania</label>
+                <select data-path="motion.ui.speedClose">
+                  <option value="slow">Wolna</option>
+                  <option value="normal">Normalna</option>
+                  <option value="fast">Szybka</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Łagodność startu</label>
+                <select data-path="motion.ui.accelSmoothness">
+                  <option value="soft">Miękki</option>
+                  <option value="normal">Normalny</option>
+                  <option value="dynamic">Dynamiczny</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Łagodność hamowania</label>
+                <select data-path="motion.ui.decelSmoothness">
+                  <option value="soft">Miękki</option>
+                  <option value="normal">Normalny</option>
+                  <option value="dynamic">Dynamiczny</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Kiedy zwalniać</label>
+                <select data-path="motion.ui.slowdownDistance">
+                  <option value="close">Blisko końca</option>
+                  <option value="normal">Normalnie</option>
+                  <option value="early">Wcześnie</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Siła hamowania</label>
+                <select data-path="motion.ui.brakingFeel">
+                  <option value="soft">Delikatna</option>
+                  <option value="normal">Normalna</option>
+                  <option value="strong">Mocna</option>
+                </select>
+              </div>
+            </div>
+            <div id="motionAdvancedPanel" class="form-grid hidden">
+              <div class="field">
+                <label>Max speed open</label>
+                <input type="number" data-type="int" data-path="motion.advanced.maxSpeedOpen">
+              </div>
+              <div class="field">
+                <label>Max speed close</label>
+                <input type="number" data-type="int" data-path="motion.advanced.maxSpeedClose">
+              </div>
+              <div class="field">
+                <label>Min speed</label>
+                <input type="number" data-type="int" data-path="motion.advanced.minSpeed">
+              </div>
+              <div class="field">
+                <label>Ramp open (value)</label>
+                <input type="number" step="0.1" data-type="float" data-path="motion.advanced.rampOpen.value">
+              </div>
+              <div class="field">
+                <label>Ramp open mode</label>
+                <select data-path="motion.advanced.rampOpen.mode">
+                  <option value="distance">Distance</option>
+                  <option value="time">Time</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Ramp close (value)</label>
+                <input type="number" step="0.1" data-type="float" data-path="motion.advanced.rampClose.value">
+              </div>
+              <div class="field">
+                <label>Ramp close mode</label>
+                <select data-path="motion.advanced.rampClose.mode">
+                  <option value="distance">Distance</option>
+                  <option value="time">Time</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Braking start open (m)</label>
+                <input type="number" step="0.1" data-type="float" data-path="motion.advanced.braking.startDistanceOpen">
+              </div>
+              <div class="field">
+                <label>Braking start close (m)</label>
+                <input type="number" step="0.1" data-type="float" data-path="motion.advanced.braking.startDistanceClose">
+              </div>
+              <div class="field">
+                <label>Braking force</label>
+                <input type="number" data-type="int" data-path="motion.advanced.braking.force">
+              </div>
+              <div class="field">
+                <label>Braking mode</label>
+                <select data-path="motion.advanced.braking.mode">
+                  <option value="coast">Coast</option>
+                  <option value="active">Active</option>
+                  <option value="hold">Hold</option>
+                </select>
+              </div>
+            </div>
+            <div class="section-actions">
+              <button class="btn ghost" id="motionOpenBtn" type="button">Test OPEN</button>
+              <button class="btn ghost" id="motionStopBtn" type="button">Test STOP</button>
+              <button class="btn ghost" id="motionCloseBtn" type="button">Test CLOSE</button>
+            </div>
+            <div class="info-row" id="motionDerived"></div>
+            <small>Tryb wysoki poziom mapuje ustawienia na rampy/hamowanie automatycznie.</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="accordion-item" id="sensors">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>Czujniki i bezpieczenstwo</h2>
+              <div class="info-row">Konfiguracja czujnikow i zachowanie na przeszkode.</div>
+            </div>
+            <div class="tooltip" data-tip="Bezpieczenstwo">i</div>
+          </div>
+          <div class="accordion-content">
+            <h3>Krancowki</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>Limity aktywne</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="limits.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>OPEN wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="limits.open.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>OPEN GPIO</label>
+                <input type="number" data-type="int" data-path="limits.open.pin">
+              </div>
+              <div class="field">
+                <label>OPEN odwroc logike</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="limits.open.invert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>CLOSE wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="limits.close.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>CLOSE GPIO</label>
+                <input type="number" data-type="int" data-path="limits.close.pin">
+              </div>
+              <div class="field">
+                <label>CLOSE odwroc logike</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="limits.close.invert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <details class="advanced">
+              <summary>Zaawansowane: krancowki</summary>
+              <div class="form-grid">
+                <div class="field">
+                  <label>OPEN pull mode</label>
+                  <select data-path="limits.open.pullMode">
+                    <option value="up">Pull-up</option>
+                    <option value="down">Pull-down</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>OPEN debounce (ms)</label>
+                  <input type="number" data-type="int" data-path="limits.open.debounceMs">
+                </div>
+                <div class="field">
+                  <label>CLOSE pull mode</label>
+                  <select data-path="limits.close.pullMode">
+                    <option value="up">Pull-up</option>
+                    <option value="down">Pull-down</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>CLOSE debounce (ms)</label>
+                  <input type="number" data-type="int" data-path="limits.close.debounceMs">
+                </div>
+              </div>
+              <div class="status-grid">
+                <div class="status-line"><span>OPEN</span><span id="limitOpenStatus">-</span></div>
+                <div class="status-line"><span>CLOSE</span><span id="limitCloseStatus">-</span></div>
+              </div>
+            </details>
+
+            <h3 style="margin-top:16px">Fotokomorka</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>Wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="sensors.photocell.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>GPIO</label>
+                <input type="number" data-type="int" data-path="sensors.photocell.pin">
+              </div>
+              <div class="field">
+                <label>Odwroc logike</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="sensors.photocell.invert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <details class="advanced">
+              <summary>Zaawansowane: fotokomorka</summary>
+              <div class="form-grid">
+                <div class="field">
+                  <label>Pull mode</label>
+                  <select data-path="sensors.photocell.pullMode">
+                    <option value="up">Pull-up</option>
+                    <option value="down">Pull-down</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Debounce (ms)</label>
+                  <input type="number" data-type="int" data-path="sensors.photocell.debounceMs">
+                </div>
+              </div>
+              <div class="status-grid">
+                <div class="status-line"><span>Stan</span><span id="photocellStatus">-</span></div>
+              </div>
+            </details>
+
+            <h3 style="margin-top:16px">LD2410</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>Wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="sensors.ld2410.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>RX</label>
+                <input type="number" data-type="int" data-path="sensors.ld2410.rx">
+              </div>
+              <div class="field">
+                <label>TX</label>
+                <input type="number" data-type="int" data-path="sensors.ld2410.tx">
+              </div>
+            </div>
+            <details class="advanced">
+              <summary>Zaawansowane: LD2410</summary>
+              <div class="form-grid">
+                <div class="field">
+                  <label>Baudrate</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.baudrate">
+                </div>
+                <div class="field">
+                  <label>Max gate (moving)</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.maxMovingGate">
+                </div>
+                <div class="field">
+                  <label>Max gate (stationary)</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.maxStationaryGate">
+                </div>
+                <div class="field">
+                  <label>No-one window (s)</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.noOneWindow">
+                </div>
+                <div class="field">
+                  <label>Threshold (cm)</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.thresholdCm">
+                </div>
+                <div class="field">
+                  <label>Moving threshold (cm)</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.movingThresholdCm">
+                </div>
+                <div class="field">
+                  <label>Stationary threshold (cm)</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.stationaryThresholdCm">
+                </div>
+                <div class="field">
+                  <label>Mode</label>
+                  <select data-path="sensors.ld2410.mode">
+                    <option value="presence">Presence</option>
+                    <option value="moving">Moving</option>
+                    <option value="stationary">Stationary</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Akcja przy wykryciu</label>
+                  <label class="switch">
+                    <input type="checkbox" data-path="sensors.ld2410.triggerEnabled">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="field">
+                  <label>LD2410 akcja</label>
+                  <select data-path="sensors.ld2410.triggerAction">
+                    <option value="stop">Stop</option>
+                    <option value="open">Stop + Otwarcie</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Zwoka otwarcia (ms)</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.triggerReverseDelayMs">
+                </div>
+                <div class="field">
+                  <label>Cooldown (ms)</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.triggerCooldownMs">
+                </div>
+              </div>
+              <div class="section-actions">
+                <button class="btn ghost" id="ld2410PresetClose" type="button">Preset: Close</button>
+                <button class="btn ghost" id="ld2410PresetMedium" type="button">Preset: Medium</button>
+                <button class="btn ghost" id="ld2410PresetFar" type="button">Preset: Far</button>
+              </div>
+              <div class="form-grid" style="margin-top:12px">
+                <div class="field">
+                  <label>g0 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g0.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g0 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g0.stillThreshold">
+                </div>
+                <div class="field">
+                  <label>g1 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g1.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g1 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g1.stillThreshold">
+                </div>
+                <div class="field">
+                  <label>g2 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g2.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g2 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g2.stillThreshold">
+                </div>
+                <div class="field">
+                  <label>g3 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g3.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g3 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g3.stillThreshold">
+                </div>
+                <div class="field">
+                  <label>g4 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g4.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g4 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g4.stillThreshold">
+                </div>
+                <div class="field">
+                  <label>g5 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g5.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g5 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g5.stillThreshold">
+                </div>
+                <div class="field">
+                  <label>g6 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g6.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g6 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g6.stillThreshold">
+                </div>
+                <div class="field">
+                  <label>g7 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g7.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g7 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g7.stillThreshold">
+                </div>
+                <div class="field">
+                  <label>g8 move threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g8.moveThreshold">
+                </div>
+                <div class="field">
+                  <label>g8 still threshold</label>
+                  <input type="number" data-type="int" data-path="sensors.ld2410.g8.stillThreshold">
+                </div>
+              </div>
+              <div class="status-grid">
+                <div class="status-line"><span>Available</span><span id="ld2410Available">-</span></div>
+                <div class="status-line"><span>Present</span><span id="ld2410Present">-</span></div>
+                <div class="status-line"><span>Moving</span><span id="ld2410Moving">-</span></div>
+                <div class="status-line"><span>Stationary</span><span id="ld2410Stationary">-</span></div>
+                <div class="status-line"><span>Distance (cm)</span><span id="ld2410Distance">-</span></div>
+              </div>
+              <div class="form-grid" style="margin-top:12px">
+                <div class="field">
+                  <label>Pokaz wiecej</label>
+                  <label class="switch">
+                    <input type="checkbox" id="ld2410ShowExtra">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="status-grid hidden" id="ld2410Extra">
+                <div class="status-line"><span>Move dist (cm)</span><span id="ld2410MoveDistance">-</span></div>
+                <div class="status-line"><span>Still dist (cm)</span><span id="ld2410StillDistance">-</span></div>
+                <div class="status-line"><span>Move signal</span><span id="ld2410MoveSignal">-</span></div>
+                <div class="status-line"><span>Still signal</span><span id="ld2410StillSignal">-</span></div>
+              </div>
+            </details>
+
+            <h3 style="margin-top:16px">Bezpieczenstwo</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>Limit pradu (A)</label>
+                <input type="number" step="0.01" data-type="float" data-path="gate.currentLimitA">
+              </div>
+              <div class="field">
+                <label>Over-current: czas (ms)</label>
+                <input type="number" step="1" data-type="int" data-path="gate.overCurrentTripMs">
+              </div>
+              <div class="field">
+                <label>Over-current: cooldown (ms)</label>
+                <input type="number" step="1" data-type="int" data-path="gate.overCurrentCooldownMs">
+              </div>
+              <div class="field">
+                <label>Over-current: auto-rearm</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="gate.overCurrentAutoRearm">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Over-current: max prob</label>
+                <input type="number" step="1" data-type="int" data-path="gate.overCurrentMaxAutoRearm">
+
+              </div>
+              <div class="field">
+                <label>Akcja przy przekroczeniu pradu</label>
+                <select data-path="gate.overCurrentAction">
+                  <option value="stop">Stop</option>
+                  <option value="reverse">Cofnij</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Akcja na przeszkode</label>
+                <select data-path="safety.obstacleAction">
+                  <option value="stop">Stop</option>
+                  <option value="reverse">Cofnij</option>
+                  <option value="open">Pelne otwarcie</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Cofniecie (cm)</label>
+                <input type="number" data-type="int" data-path="safety.obstacleReverseCm">
+              </div>
+              <div class="field">
+                <label>Watchdog</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="safety.watchdogEnabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="accordion-item" id="gpio">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>GPIO mapa</h2>
+              <div class="info-row">Zaawansowane mapowanie pinow i logika odwrocenia.</div>
+            </div>
+            <div class="tooltip" data-tip="Uwaga na piny flash">i</div>
+          </div>
+          <div class="accordion-content">
+            <div class="form-grid">
+              <div class="field">
+                <label>PWM</label>
+                <input type="number" data-type="int" data-path="gpio.pwm">
+              </div>
+              <div class="field">
+                <label>DIR</label>
+                <input type="number" data-type="int" data-path="gpio.dir">
+              </div>
+              <div class="field">
+                <label>EN</label>
+                <input type="number" data-type="int" data-path="gpio.en">
+              </div>
+              <div class="field">
+                <label>Koncowka OPEN</label>
+                <input type="number" data-type="int" data-path="gpio.limitOpen">
+              </div>
+              <div class="field">
+                <label>Koncowka CLOSE</label>
+                <input type="number" data-type="int" data-path="gpio.limitClose">
+              </div>
+              <div class="field">
+                <label>Przycisk lokalny</label>
+                <input type="number" data-type="int" data-path="gpio.button">
+              </div>
+              <div class="field">
+                <label>STOP</label>
+                <input type="number" data-type="int" data-path="gpio.stop">
+              </div>
+              <div class="field">
+                <label>Przeszkoda</label>
+                <input type="number" data-type="int" data-path="gpio.obstacle">
+              </div>
+              <div class="field">
+                <label>HCS301</label>
+                <input type="number" data-type="int" data-path="gpio.hcs">
+              </div>
+              <div class="field">
+                <label>LED</label>
+                <input type="number" data-type="int" data-path="gpio.led">
+              </div>
+              <div class="field">
+                <label>Invert limit OPEN</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="gpio.limitOpenInvert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Invert limit CLOSE</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="gpio.limitCloseInvert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Invert button</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="gpio.buttonInvert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Invert obstacle</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="gpio.obstacleInvert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Invert DIR</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="gpio.dirInvert">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <small>Walidacja blokuje piny 6-11 (flash).</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="accordion-item" id="remotes">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>Piloty (skrot)</h2>
+              <div class="info-row">Ustawienia anti-repeat i anti-replay.</div>
+            </div>
+            <div class="tooltip" data-tip="Pelna lista na stronie Piloty">i</div>
+          </div>
+          <div class="accordion-content">
+            <div class="form-grid">
+              <div class="field">
+                <label>Anti-repeat (ms)</label>
+                <input type="number" data-type="int" data-path="remotes.antiRepeatMs">
+              </div>
+              <div class="field">
+                <label>Anti-replay</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="remotes.antiReplay">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Replay window</label>
+                <input type="number" data-type="int" data-path="remotes.replayWindow">
+              </div>
+            </div>
+            <div class="section-actions">
+              <a class="btn ghost" href="/remotes.html">Przejdz do pelnej listy</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="accordion-item" id="diagnostyka">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>LED WS2812</h2>
+              <div class="info-row">Sygnalizacja statusu bramy i trybow pracy.</div>
+            </div>
+            <div class="tooltip" data-tip="NeoPixel status">i</div>
+          </div>
+          <div class="accordion-content">
+            <div class="form-grid">
+              <div class="field">
+                <label>Wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="led.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Typ</label>
+                <select data-path="led.type">
+                  <option value="ws2812">WS2812</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>GPIO</label>
+                <input type="number" data-type="int" data-path="led.pin">
+              </div>
+              <div class="field">
+                <label>Liczba diod</label>
+                <input type="number" data-type="int" data-path="led.count">
+              </div>
+              <div class="field">
+                <label>Jasnosc (0-100)</label>
+                <input type="number" data-type="int" data-path="led.brightness">
+              </div>
+              <div class="field">
+                <label>Kolejnosc kolorow</label>
+                <select data-path="led.colorOrder">
+                  <option value="GRB">GRB</option>
+                  <option value="RGB">RGB</option>
+                  <option value="BRG">BRG</option>
+                  <option value="RBG">RBG</option>
+                  <option value="GBR">GBR</option>
+                  <option value="BGR">BGR</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Tryb domyslny</label>
+                <select data-path="led.defaultMode">
+                  <option value="status">Status</option>
+                  <option value="off">Off</option>
+                  <option value="stealth">Stealth</option>
+                  <option value="idle">Idle</option>
+                  <option value="stopped">Stopped</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Szybkosc animacji (1-100)</label>
+                <input type="number" data-type="int" data-path="led.animSpeed">
+              </div>
+              <div class="field">
+                <label>Segmenty (start:len)</label>
+                <input type="text" id="ledSegments" placeholder="0:8,8:8">
+                <div class="info-row">Opcjonalnie, max 8 segmentow.</div>
+              </div>
+            </div>
+            <h3 style="margin-top:16px">Tryb nocny</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>Wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="led.nightMode.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Jasnosc nocna (0-100)</label>
+                <input type="number" data-type="int" data-path="led.nightMode.brightness">
+              </div>
+              <div class="field">
+                <label>Od (HH:MM)</label>
+                <input type="text" data-path="led.nightMode.from" placeholder="22:00">
+              </div>
+              <div class="field">
+                <label>Do (HH:MM)</label>
+                <input type="text" data-path="led.nightMode.to" placeholder="06:00">
+              </div>
+            </div>
+            <div class="section-actions">
+              <button class="btn ghost" id="ledTestBtn" type="button">Test LED</button>
+              <button class="btn ghost" id="ledStealthBtn" type="button">Stealth mode</button>
+            </div>
+            <small>Uwaga: piny strapping 0,2,4,5,12,15 moga powodowac problemy.</small>
+          </div>
+        </div>
+      </section>
+
+      <div class="card" id="otaEnabledBanner" style="display:none; margin-bottom:12px; border:1px solid #ffb300; background:#2a2100;">
+        <div class="info-row" style="color:#ffd36a; font-weight:600;">OTA wlaczone</div>
+      </div>
+
+      <section class="accordion-item" id="ota">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>Aktualizacje (OTA)</h2>
+              <div class="info-row">Ustawienia OTA (wymaga wlaczenia w firmware).</div>
+            </div>
+            <div class="tooltip" data-tip="OTA">i</div>
+          </div>
+          <div class="accordion-content">
+            <div class="form-grid">
+              <div class="field">
+                <label>Wlaczone</label>
+                <label class="switch">
+                  <input type="checkbox" data-path="ota.enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Port OTA</label>
+                <input type="number" data-type="int" data-path="ota.port">
+              </div>
+              <div class="field">
+                <label>Hostname OTA</label>
+                <input type="text" data-path="device.hostname" placeholder="gateos">
+              </div>
+              <div class="field">
+                <label>Haslo OTA</label>
+                <input type="password" data-path="ota.password">
+              </div>
+            </div>
+            <div class="status-grid" style="margin-top:12px">
+              <div class="status-line"><span>Status OTA</span><span id="otaStatus">-</span></div>
+              <div class="status-line"><span>Postep OTA</span><span id="otaProgress">-</span></div>
+              <div class="status-line"><span>Firmware</span><span id="otaFwVersion">-</span></div>
+              <div class="status-line"><span>Uptime</span><span id="otaUptime">-</span></div>
+              <div class="status-line"><span>IP</span><span id="otaIp">-</span></div>
+              <div class="status-line"><span>Free sketch space</span><span id="otaFreeSketch">-</span></div>
+            </div>
+            <div class="info-row" id="otaErrorLine" style="margin-top:8px; color:#ff8a80;"></div>
+            <div class="info-row" style="margin-top:8px;">Dla PlatformIO OTA uzyj env: <code>esp32_ota</code> i ustaw upload_port na IP urzadzenia.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="accordion-item" id="backup">
+        <div class="card">
+          <div class="accordion-header">
+            <div>
+              <h2>Backup / Restore / Reset</h2>
+              <div class="info-row">Eksport/import konfiguracji i reset fabryczny.</div>
+            </div>
+            <div class="tooltip" data-tip="Uwaga: operacje nieodwracalne">i</div>
+          </div>
+          <div class="accordion-content">
+            <div class="section-actions">
+              <button class="btn ghost" id="exportBtn" type="button">Eksport config.json</button>
+              <button class="btn ghost" id="importBtn" type="button">Import config.json</button>
+              <button class="btn warn" id="rebootBtn" type="button">Restart urzadzenia</button>
+              <button class="btn danger" id="factoryBtn" type="button">Factory reset</button>
+              <input type="file" id="importFile" accept="application/json" style="display:none">
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="dirty-bar hidden" id="dirtyBar">
+      <div>Masz niezapisane zmiany</div>
+      <div class="section-actions">
+        <button class="btn primary" id="saveBtn" type="button">Zapisz</button>
+        <button class="btn ghost" id="discardBtn" type="button">Cofnij</button>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="modal" id="confirmModal" aria-hidden="true">
+    <div class="modal-card">
+      <h3>Potwierdzenie</h3>
+      <p id="confirmText">Czy na pewno?</p>
+      <div class="section-actions" style="margin-top:16px">
+        <button class="btn danger" id="confirmYes" type="button">Tak</button>
+        <button class="btn ghost" id="confirmNo" type="button">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/settings.js?v=20260102"></script>
+</body>
+</html>

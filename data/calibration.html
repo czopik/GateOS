@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GateOS - Kalibracja</title>
+  <link rel="stylesheet" href="/styles.css?v=20260102">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" aria-label="GateOS">
+        <div class="logo">G</div>
+        <div>GateOS</div>
+      </div>
+      <nav class="nav" aria-label="Nawigacja">
+        <a href="/">Dashboard</a>
+        <a href="/settings.html">Ustawienia</a>
+        <a class="active" href="/calibration.html">Kalibracja</a>
+        <a href="/remotes.html">Piloty</a>
+        <a href="/settings.html#diagnostyka">Diagnostyka</a>
+        <a href="/settings.html#ota">Aktualizacje</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="card" style="--delay:0s">
+      <h2>Calibration Wizard</h2>
+      <p>Automatyczna kalibracja sprawdza krancowki, kierunek, czujniki i rampy.</p>
+      <div class="calib-actions">
+        <button id="startBtn" class="btn primary">Start kalibracji</button>
+        <button id="stopBtn" class="btn warn">Stop</button>
+        <button id="applyBtn" class="btn success">Zapisz i restart</button>
+      </div>
+      <div class="calib-actions hidden" id="dirConfirm">
+        <button id="dirOkBtn" class="btn primary">Kierunek OK</button>
+        <button id="dirInvertBtn" class="btn danger">Odwrac kierunek</button>
+      </div>
+      <div class="status-msg" id="statusMsg">Status: idle</div>
+      <div class="status-msg error hidden" id="errorMsg"></div>
+    </section>
+
+    <section class="card" style="--delay:0.05s">
+      <h2>Postep</h2>
+      <div class="progress-track" aria-label="Postep">
+        <div class="progress-bar" id="calibProgress"></div>
+      </div>
+      <div class="progress-label"><span id="calibPercent">0</span>%</div>
+      <div class="metric-list" style="margin-top:12px">
+        <div class="metric">
+          <div class="label">Krok</div>
+          <div class="value" id="calibStep">idle</div>
+        </div>
+        <div class="metric">
+          <div class="label">Komunikat</div>
+          <div class="value" id="calibMessage">-</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="--delay:0.1s">
+      <h2>Sygnaly na zywo</h2>
+      <div class="metric-list">
+        <div class="metric">
+          <div class="label">Limit OPEN</div>
+          <div class="value" id="sigLimitOpen">-</div>
+        </div>
+        <div class="metric">
+          <div class="label">Limit CLOSE</div>
+          <div class="value" id="sigLimitClose">-</div>
+        </div>
+        <div class="metric">
+          <div class="label">Obstacle</div>
+          <div class="value" id="sigObstacle">-</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="--delay:0.15s">
+      <h2>Proponowane zmiany</h2>
+      <pre id="deltaBox" class="code-block">{}</pre>
+    </section>
+  </main>
+
+  <script src="/calibration.js?v=20260102"></script>
+</body>
+</html>

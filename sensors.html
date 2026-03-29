@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GateOS - Czujniki info</title>
+  <link rel="stylesheet" href="/styles.css?v=20260102">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" aria-label="GateOS">
+        <div class="logo">G</div>
+        <div>GateOS</div>
+      </div>
+      <nav class="nav" aria-label="Nawigacja">
+        <a href="/">Dashboard</a>
+        <a href="/settings.html">Ustawienia</a>
+        <a class="active" href="/sensors.html">Czujniki info</a>
+        <a href="/calibration.html">Kalibracja</a>
+        <a href="/remotes.html">Piloty</a>
+        <a href="/settings.html#diagnostyka">Diagnostyka</a>
+        <a href="/settings.html#ota">Aktualizacje</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="grid">
+      <section class="card" style="--delay:0s">
+        <h2>LD2410</h2>
+        <div class="status-grid">
+          <div class="status-line"><span>Available</span><span id="ldAvailable">-</span></div>
+          <div class="status-line"><span>Present</span><span id="ldPresent">-</span></div>
+          <div class="status-line"><span>Moving</span><span id="ldMoving">-</span></div>
+          <div class="status-line"><span>Stationary</span><span id="ldStationary">-</span></div>
+          <div class="status-line"><span>Distance (cm)</span><span id="ldDistance">-</span></div>
+          <div class="status-line"><span>Moving dist (cm)</span><span id="ldMovingDistance">-</span></div>
+          <div class="status-line"><span>Stationary dist (cm)</span><span id="ldStationaryDistance">-</span></div>
+          <div class="status-line"><span>Moving signal</span><span id="ldMovingSignal">-</span></div>
+          <div class="status-line"><span>Stationary signal</span><span id="ldStationarySignal">-</span></div>
+        </div>
+      </section>
+
+      <section class="card" style="--delay:0.03s">
+        <h2>Limity / Wejscia</h2>
+        <div class="status-grid">
+          <div class="status-line"><span>Limits enabled</span><span id="limitsEnabled">-</span></div>
+          <div class="status-line"><span>Limit OPEN enabled</span><span id="limitOpenEnabled">-</span></div>
+          <div class="status-line"><span>Limit CLOSE enabled</span><span id="limitCloseEnabled">-</span></div>
+          <div class="status-line"><span>Limit OPEN</span><span id="limitOpen">-</span></div>
+          <div class="status-line"><span>Limit CLOSE</span><span id="limitClose">-</span></div>
+          <div class="status-line"><span>Limit OPEN raw</span><span id="limitOpenRaw">-</span></div>
+          <div class="status-line"><span>Limit CLOSE raw</span><span id="limitCloseRaw">-</span></div>
+          <div class="status-line"><span>STOP input</span><span id="stopInput">-</span></div>
+          <div class="status-line"><span>Obstacle input</span><span id="obstacleInput">-</span></div>
+          <div class="status-line"><span>Button input</span><span id="buttonInput">-</span></div>
+        </div>
+      </section>
+
+      <section class="card" style="--delay:0.06s">
+        <h2>Hall / Fotokomorka</h2>
+        <div class="status-grid">
+          <div class="status-line"><span>Hall enabled</span><span id="hallEnabled">-</span></div>
+          <div class="status-line"><span>Hall pulses/s</span><span id="hallPps">-</span></div>
+          <div class="status-line"><span>Hall count</span><span id="hallCount">-</span></div>
+          <div class="status-line"><span>Photocell enabled</span><span id="photocellEnabled">-</span></div>
+          <div class="status-line"><span>Photocell blocked</span><span id="photocellBlocked">-</span></div>
+          <div class="status-line"><span>Photocell raw</span><span id="photocellRaw">-</span></div>
+        </div>
+      </section>
+
+      <section class="card" style="--delay:0.05s">
+        <h2>LittleFS</h2>
+        <div class="status-grid">
+          <div class="status-line"><span>Total (MB)</span><span id="fsTotal">-</span></div>
+          <div class="status-line"><span>Used (MB)</span><span id="fsUsed">-</span></div>
+          <div class="status-line"><span>Free (MB)</span><span id="fsFree">-</span></div>
+          <div class="status-line"><span>Used (%)</span><span id="fsUsedPct">-</span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/sensors.js?v=20260102"></script>
+</body>
+</html>
