@@ -1,0 +1,71 @@
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1184
+load:0x40078000,len:13232
+load:0x40080400,len:3028
+entry 0x400805e4
+LittleFS mounted OK
+index.html found in LittleFS
+LED warn: pin 2 is strapping
+LED init ok pin=2 count=8
+[HCS] ISR zainicjalizowany na pin 13
+[HCS] Callback ustawiony
+WebServer: LittleFS is mounted
+Web server started
+[LD2410] active rx=33 tx=32 baud=256000 moveGate=3 stillGate=3 mode=moving
+[GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=none err=0
+[HB] telAge=3 cmdAge=8 rpm=0 dist=0mm iA=0.00 fault=0 armed=0 rx=15 tel=15 bad=0
+WiFi connected to ChemiXv3, IP: 192.168.1.12
+MQTT connect 192.168.1.249:1883 user=yes state=-1
+MQTT connected state=0
+MQTT publish fail brama/telemetry state=0
+MQTT publish fail brama/telemetry state=0
+[GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=none err=0
+[HB] telAge=1 cmdAge=95 rpm=0 dist=0mm iA=0.00 fault=0 armed=0 rx=32 tel=32 bad=0
+MQTT publish fail brama/telemetry state=0
+[UI] control action=open
+[UI] control result=open applied=1
+[GATE] state=opening pos=0.001m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=0 cmdAge=24 rpm=10 dist=3mm iA=0.06 fault=0 armed=1 rx=50 tel=50 bad=0
+MQTT publish fail brama/telemetry state=0
+[GATE] state=opening pos=0.033m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=6 cmdAge=17 rpm=16 dist=34mm iA=0.06 fault=0 armed=1 rx=67 tel=67 bad=0
+MQTT publish fail brama/telemetry state=0
+[GATE] state=opening pos=0.071m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=208 cmdAge=17 rpm=20 dist=71mm iA=0.06 fault=0 armed=1 rx=83 tel=83 bad=0
+[UI] control action=stop
+[GATE] STOP reason=user telAgeMs=221 stallAgeMs=383
+[UI] control result=stop applied=1
+[save] bytes=2998 ok
+MQTT publish fail brama/telemetry state=0
+[GATE] state=stopped pos=0.082m target=0.082m max=3.000m stopReason=user err=0
+[HB] telAge=207 cmdAge=168 rpm=20 dist=82mm iA=0.08 fault=0 armed=1 rx=89 tel=87 bad=0
+[UI] control action=close
+[UI] control result=close applied=1
+MQTT publish fail brama/telemetry state=0
+[GATE] state=closing pos=0.088m target=0.000m max=3.000m stopReason=user err=0
+[HB] telAge=196 cmdAge=6 rpm=0 dist=88mm iA=0.04 fault=0 armed=1 rx=102 tel=94 bad=0
+MQTT publish fail brama/telemetry state=0
+[GATE] state=closing pos=0.060m target=0.000m max=3.000m stopReason=user err=0
+[HB] telAge=19 cmdAge=17 rpm=-11 dist=60mm iA=0.06 fault=0 armed=1 rx=122 tel=114 bad=0
+MQTT publish fail brama/telemetry state=0
+[UI] control action=stop
+[GATE] STOP reason=user telAgeMs=36 stallAgeMs=261
+[UI] control result=stop applied=1
+[GATE] state=stopped pos=0.037m target=0.037m max=3.000m stopReason=user err=0
+[HB] telAge=207 cmdAge=17 rpm=0 dist=37mm iA=0.06 fault=0 armed=1 rx=137 tel=129 bad=0
+MQTT publish fail brama/telemetry state=0
+[save] bytes=2999 ok
+[GATE] state=stopped pos=0.036m target=0.036m max=3.000m stopReason=user err=0
+[HB] telAge=40 cmdAge=6 rpm=0 dist=36mm iA=0.06 fault=0 armed=1 rx=161 tel=153 bad=0
+MQTT publish fail brama/telemetry state=0
+[GATE] state=stopped pos=0.036m target=0.036m max=3.000m stopReason=user err=0
+[HB] telAge=541 cmdAge=419 rpm=0 dist=36mm iA=0.02 fault=0 armed=0 rx=169 tel=160 bad=0
+MQTT publish fail brama/telemetry state=0
+[GATE] state=stopped pos=0.036m target=0.036m max=3.000m stopReason=user err=0
+[HB] telAge=24 cmdAge=20 rpm=0 dist=36mm iA=0.04 fault=0 armed=0 rx=190 tel=180 bad=0
+MQTT publish fail brama/telemetry state=0

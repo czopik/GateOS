@@ -1,0 +1,68 @@
+--- Terminal on COM3 | 115200 8-N-1
+--- Available filters and text transformations: colorize, debug, default, direct, hexlify, log2file, nocontrol, printable, send_on_enter, time
+--- More details at https://bit.ly/pio-monitor-filters
+--- Quit: Ctrl+C | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+10:58:41.386 > ets Jul 29 2019 12:21:46
+10:58:41.387 > 
+10:58:41.387 > rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+10:58:41.393 > configsip: 0, SPIWP:0xee
+10:58:41.393 > clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+10:58:41.399 > mode:DIO, clock div:2
+10:58:41.404 > load:0x3fff0030,len:1184
+10:58:41.404 > load:0x40078000,len:13232
+10:58:41.409 > load:0x40080400,len:3028
+10:58:41.409 > entry 0x400805e4
+10:58:41.914 > LittleFS mounted OK
+10:58:41.925 > index.html found in LittleFS
+10:58:42.020 > LED warn: pin 2 is strapping
+10:58:42.022 > LED init ok pin=2 count=8
+10:58:42.148 > [HCS] ISR zainicjalizowany na pin 13
+10:58:42.149 > [HCS] Callback ustawiony
+10:58:42.151 > WebServer: LittleFS is mounted
+10:58:42.156 > Web server started
+10:58:42.863 > [GATE] state=stopped pos=0.000m target=0.000m max=12.000m stopReason=none err=0
+10:58:42.869 > [HB] telAge=61 cmdAge=19 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=13 tel=13 bad=54
+10:58:43.009 > WiFi connected to ChemiXv3, IP: 192.168.1.12
+10:58:43.880 > [GATE] state=stopped pos=0.000m target=0.000m max=12.000m stopReason=none err=0
+10:58:43.886 > [HB] telAge=76 cmdAge=4 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=30 tel=30 bad=54
+10:58:44.099 > [config] motion.advanced.braking.force=80
+10:58:44.421 > [save] bytes=2778 ok
+10:58:44.422 > LED warn: pin 2 is strapping
+10:58:44.422 > LED init ok pin=2 count=8
+10:58:44.878 > [GATE] state=stopped pos=0.000m target=0.000m max=12.000m stopReason=none err=0
+10:58:44.883 > [HB] telAge=23 cmdAge=6 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=46 tel=45 bad=54
+10:58:45.877 > [GATE] state=stopped pos=0.000m target=0.000m max=12.000m stopReason=none err=0
+10:58:45.883 > [HB] telAge=22 cmdAge=11 rpm=0 dist=0mm iA=0.00 fault=0 armed=0 rx=63 tel=62 bad=54
+10:58:46.877 > [GATE] state=opening pos=0.000m target=12.000m max=12.000m stopReason=none err=0
+10:58:46.884 > [HB] telAge=26 cmdAge=12 rpm=0 dist=0mm iA=0.08 fault=0 armed=1 rx=80 tel=79 bad=54
+10:58:47.878 > [GATE] state=error pos=0.000m target=0.000m max=12.000m stopReason=over_current err=7
+10:58:47.883 > [HB] telAge=32 cmdAge=3 rpm=0 dist=0mm iA=0.06 fault=0 armed=1 rx=97 tel=96 bad=54
+10:58:48.879 > [GATE] state=error pos=0.000m target=0.000m max=12.000m stopReason=over_current err=7
+10:58:48.885 > [HB] telAge=42 cmdAge=8 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=114 tel=113 bad=54
+10:58:49.879 > [GATE] state=error pos=0.000m target=0.000m max=12.000m stopReason=over_current err=7
+10:58:49.884 > [HB] telAge=39 cmdAge=1 rpm=0 dist=0mm iA=0.00 fault=0 armed=0 rx=131 tel=130 bad=54
+10:58:50.879 > [GATE] state=error pos=0.000m target=0.000m max=12.000m stopReason=over_current err=7
+10:58:50.885 > [HB] telAge=47 cmdAge=15 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=148 tel=147 bad=54
+10:58:51.125 > [config] motion.advanced.braking.force=80
+10:58:51.337 > [save] bytes=2785 ok
+10:58:51.339 > LED warn: pin 2 is strapping
+10:58:51.339 > LED init ok pin=2 count=8
+10:58:51.878 > [GATE] state=error pos=0.000m target=0.000m max=12.000m stopReason=over_current err=7
+10:58:51.884 > [HB] telAge=51 cmdAge=25 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=165 tel=164 bad=54
+10:58:52.879 > [GATE] state=error pos=0.000m target=0.000m max=12.000m stopReason=over_current err=7
+10:58:52.884 > [HB] telAge=59 cmdAge=8 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=182 tel=181 bad=54
+10:58:53.880 > [GATE] state=opening pos=0.000m target=12.000m max=12.000m stopReason=over_current err=0
+10:58:53.885 > [HB] telAge=61 cmdAge=17 rpm=0 dist=0mm iA=0.06 fault=0 armed=1 rx=199 tel=198 bad=54
+10:58:54.879 > [GATE] state=opening pos=0.071m target=12.000m max=12.000m stopReason=over_current err=0
+10:58:54.885 > [HB] telAge=3 cmdAge=6 rpm=43 dist=74mm iA=0.00 fault=0 armed=1 rx=217 tel=216 bad=54
+10:58:55.880 > [GATE] state=opening pos=0.177m target=12.000m max=12.000m stopReason=over_current err=0
+10:58:55.885 > [HB] telAge=2 cmdAge=15 rpm=49 dist=182mm iA=0.08 fault=0 armed=1 rx=234 tel=233 bad=54
+10:58:56.881 > [GATE] state=opening pos=0.299m target=12.000m max=12.000m stopReason=over_current err=0
+10:58:56.886 > [HB] telAge=2 cmdAge=15 rpm=55 dist=304mm iA=0.08 fault=0 armed=1 rx=251 tel=250 bad=54
+10:58:57.984 > [GATE] state=opening pos=0.435m target=12.000m max=12.000m stopReason=over_current err=0
+10:58:57.990 > [HB] telAge=117 cmdAge=4 rpm=64 dist=445mm iA=0.08 fault=0 armed=1 rx=268 tel=266 bad=54
+10:58:58.360 > [save] bytes=2795 ok
+10:58:58.976 > [GATE] state=stopped pos=0.491m target=0.491m max=12.000m stopReason=user err=0
+10:58:58.982 > [HB] telAge=37 cmdAge=17 rpm=0 dist=491mm iA=0.06 fault=0 armed=1 rx=286 tel=285 bad=54
+10:58:59.974 > [GATE] state=stopped pos=0.491m target=0.491m max=12.000m stopReason=user err=0
+10:58:59.980 > [HB] telAge=38 cmdAge=17 rpm=0 dist=491mm iA=0.02 fault=0 armed=0 rx=303 tel=302 bad=54

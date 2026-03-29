@@ -1,5 +1,11 @@
 # GateOS — ESP32 + STM32 Gate Controller
 
+## Repository layout
+
+- [`esp32/`](esp32) — high-level GateOS firmware for the ESP32
+- [`stm32/`](stm32) — low-level hoverboard / BLDC motor controller firmware for STM32
+- root docs — architecture, API, tests, homing/recovery, LED logic, known issues
+
 GateOS is a two-part gate automation project built around an [`ESP32`](platformio.ini) supervisory controller and an [`STM32`](Src/main.c) hoverboard motor controller firmware. The system provides web control, distance-based motion, startup homing, telemetry recovery, LED signalling, remotes, diagnostics and test tooling.
 
 ## Project goals
@@ -149,13 +155,7 @@ Current runtime direction architecture:
 - calibration UI performs a real toggle of the current state
 - OPEN / CLOSE remain semantic gate commands, not raw motor-sign commands
 
-## Repository layout
-
-- [`Src/`](Src) — ESP32 application + STM32 controller firmware sources
-- [`data/`](data) — web UI and default sample config
-- [`lib/`](lib) — local libraries, including LD2410 support
-- [`scripts/`](scripts) — diagnostic and regression tools
-- [`platformio.ini`](platformio.ini) — PlatformIO environments for serial and OTA ESP32 builds
+Legacy flat layout has been reorganized into dedicated [`esp32/`](esp32) and [`stm32/`](stm32) directories.
 
 ## Build instructions
 

@@ -1,0 +1,79 @@
+EXTENDED FUNCTIONAL TEST REPORT
+API base: http://192.168.1.43
+Serial: COM3 @ 115200
+
+Commands used:
+POST /api/control {"action":"open"} @ 1774731951488
+POST /api/control {"action":"stop"} @ 1774731956056
+POST /api/control {"action":"close"} @ 1774731958718
+POST /api/control {"action":"stop"} @ 1774731962931
+POST /api/control {"action":"open"} @ 1774731965436
+POST /api/control {"action":"close"} @ 1774731967412
+POST /api/control {"action":"stop"} @ 1774731969447
+POST /api/control {"action":"open"} @ 1774731971422
+POST /api/control {"action":"stop"} @ 1774731972968
+POST /api/control {"action":"close"} @ 1774731974597
+POST /api/control {"action":"stop"} @ 1774731976347
+POST /api/control {"action":"open"} @ 1774731977923
+POST /api/control {"action":"stop"} @ 1774731979425
+POST /api/control {"action":"close"} @ 1774731980995
+POST /api/control {"action":"stop"} @ 1774731982627
+POST /api/control {"action":"open"} @ 1774731984347
+POST /api/control {"action":"stop"} @ 1774731990792
+GET /api/status polled every 400ms during tests
+
+Results:
+TEST1_IDLE: PASS
+TEST2_OPEN_STOP: PASS
+TEST3_CLOSE_STOP: PASS
+TEST4_QUICK_REVERSE: FAIL
+TEST5_MULTI_START_STOP: PASS
+TEST8_LONG_MOTION: PASS
+TEST6_COM3_API_CONSISTENCY: PASS
+TEST7_AFTER_STOP_BEHAVIOR: PASS
+
+Key COM3 log excerpts (LD2410 filtered):
+[1774731949940] [GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=telemetry_timeout err=0
+[1774731949941] [HB] telAge=12 cmdAge=7 rpm=0 dist=-5mm iA=0.02 fault=0 armed=1 rx=286 tel=286 bad=0
+[1774731950034] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=53 telTimeout=0 state=0 moving=0 stopReason=3 target=0.000 ctrl=0.000
+[1774731950536] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=23 telTimeout=0 state=0 moving=0 stopReason=3 target=0.000 ctrl=0.000
+[1774731950962] [GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=telemetry_timeout err=0
+[1774731950967] [HB] telAge=-1 cmdAge=4 rpm=0 dist=-5mm iA=0.04 fault=0 armed=1 rx=303 tel=303 bad=0
+[1774731951059] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=20 telTimeout=0 state=0 moving=0 stopReason=3 target=0.000 ctrl=0.000
+[1774731951524] [UI] control action=open
+[1774731951525] [UI] control result=open applied=1
+[1774731951548] [MOTOR] band=2 rem=3.000m v=0.000m/s dir=open
+[1774731951602] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=22 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.000
+[1774731951939] [GATE] state=opening pos=0.001m target=3.000m max=3.000m stopReason=none err=0
+[1774731951940] [HB] telAge=15 cmdAge=11 rpm=12 dist=-4mm iA=0.04 fault=0 armed=1 rx=320 tel=320 bad=0
+[1774731952103] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=19 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.006
+[1774731952605] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=48 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.034
+[1774731952967] [GATE] state=opening pos=0.069m target=3.000m max=3.000m stopReason=none err=0
+[1774731952996] [HB] telAge=-1 cmdAge=33 rpm=60 dist=74mm iA=0.16 fault=0 armed=1 rx=338 tel=338 bad=0
+[1774731953106] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=13 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.097
+[1774731953608] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=48 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.187
+[1774731953940] [GATE] state=opening pos=0.273m target=3.000m max=3.000m stopReason=none err=0
+[1774731953942] [HB] telAge=19 cmdAge=5 rpm=109 dist=268mm iA=0.20 fault=0 armed=1 rx=354 tel=354 bad=0
+[1774731954110] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=13 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.319
+[1774731954609] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=40 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.441
+[1774731954941] [GATE] state=opening pos=0.531m target=3.000m max=3.000m stopReason=none err=0
+[1774731954943] [HB] telAge=12 cmdAge=13 rpm=109 dist=527mm iA=0.26 fault=0 armed=1 rx=371 tel=371 bad=0
+[1774731955113] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=17 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.578
+[1774731955613] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=42 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.700
+[1774731955944] [GATE] state=opening pos=0.791m target=3.000m max=3.000m stopReason=none err=0
+[1774731955945] [HB] telAge=15 cmdAge=8 rpm=109 dist=786mm iA=0.32 fault=0 armed=1 rx=388 tel=388 bad=0
+[1774731956114] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=14 telTimeout=0 state=1 moving=1 stopReason=0 target=3.000 ctrl=0.837
+[1774731956143] [UI] control action=stop
+[1774731956143] [GATE] STOP reason=user telAgeMs=55 stallAgeMs=44
+[1774731956144] [GATE] STOP mode=hard_immediate reason=user
+[1774731956144] [UI] control result=stop applied=1
+[1774731956615] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=43 telTimeout=0 state=0 moving=0 stopReason=1 target=0.888 ctrl=0.888
+[1774731956971] [GATE] state=stopped pos=0.888m target=0.888m max=3.000m stopReason=user err=0
+[1774731956972] [HB] telAge=35 cmdAge=4 rpm=0 dist=883mm iA=0.06 fault=0 armed=1 rx=405 tel=405 bad=0
+[1774731957116] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=16 telTimeout=0 state=0 moving=0 stopReason=1 target=0.888 ctrl=0.888
+[1774731957617] [HOMING_DIAG] stage=loop note=tick enabled=1 certain=1 lock=0 reason=close_limit_reference active=0 reset=poweron open=0 close=0 obstacle=0 fault=0 armed=1 telEnabled=1 telAge=50 telTimeout=0 state=0 moving=0 stopReason=1 target=0.888 ctrl=0.888
+[1774731957970] [GATE] state=stopped pos=0.888m target=0.888m max=3.000m stopReason=user err=0
+
+API reference (OPEN/CLOSE):
+{"tag": "T2_open", "state_set": ["opening"], "moving_set": [true], "rpm_min": 0, "rpm_max": 111, "fault_set": [0]}
+{"tag": "T3_close", "state_set": ["closing"], "moving_set": [true], "rpm_min": -110, "rpm_max": 0, "fault_set": [0]}

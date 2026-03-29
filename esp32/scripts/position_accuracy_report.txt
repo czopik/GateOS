@@ -1,0 +1,217 @@
+POSITION ACCURACY TEST REPORT
+API=http://192.168.1.43
+COM=COM3
+
+CRITERIA: avg<=10.0mm, max<=20.0mm
+
+TEST_A_REPEAT_P0_P1: PASS
+  summary={"count": 10, "min": 0.0, "max": 0.0, "avg": 0.0}
+TEST_B_FIXED_TARGETS: PASS
+  summary={"count": 15, "min": 6.00000000239298e-05, "max": 1.00016600000008, "avg": 0.6000402000000515}
+TEST_C_BIDIRECTIONAL_TARGET: PASS
+  open_side={"count": 5, "min": 0.00023799999993023846, "max": 2.000213000000084, "avg": 1.2135743999999615}
+  close_side={"count": 5, "min": 0.00023799999993023846, "max": 2.9997829999999226, "avg": 1.7999649999999257}
+
+OVERALL: PASS {"count": 35, "min": 0.0, "max": 2.9997829999999226, "avg": 0.6876657142857203}
+
+KEY COM3 LOGS:
+[1774721593020] [GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=none err=0
+[1774721593021] [HB] telAge=15 cmdAge=14 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=64 tel=64 bad=0
+[1774721593885] [UI] control action=stop
+[1774721593885] [GATE] STOP reason=user telAgeMs=9 stallAgeMs=-1
+[1774721593886] [GATE] STOP mode=hard_immediate reason=user
+[1774721593888] [UI] control result=stop applied=0
+[1774721594019] [GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=user err=0
+[1774721594020] [HB] telAge=15 cmdAge=7 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=81 tel=81 bad=0
+[1774721595018] [GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=user err=0
+[1774721595028] [HB] telAge=29 cmdAge=24 rpm=0 dist=0mm iA=0.04 fault=0 armed=0 rx=98 tel=98 bad=0
+[1774721595108] [UI] control action=goto:0.350
+[1774721595110] [UI] control result=open applied=1
+[1774721595129] [MOTOR] band=1 rem=0.350m v=0.000m/s dir=open
+[1774721596017] [GATE] state=opening pos=0.022m target=3.000m max=3.000m stopReason=none err=0
+[1774721596033] [HB] telAge=24 cmdAge=0 rpm=28 dist=22mm iA=0.08 fault=0 armed=1 rx=115 tel=115 bad=0
+[1774721597022] [GATE] state=opening pos=0.112m target=3.000m max=3.000m stopReason=none err=0
+[1774721597038] [HB] telAge=31 cmdAge=11 rpm=40 dist=112mm iA=0.14 fault=0 armed=1 rx=132 tel=132 bad=0
+[1774721598025] [GATE] state=opening pos=0.207m target=3.000m max=3.000m stopReason=none err=0
+[1774721598027] [HB] telAge=37 cmdAge=18 rpm=41 dist=207mm iA=0.14 fault=0 armed=1 rx=149 tel=149 bad=0
+[1774721598402] [MOTOR] band=0 rem=0.100m v=0.154m/s dir=open
+[1774721598402] [MOTOR] precise rem=0.100m v=0.154m/s desired=33 duty=40
+[1774721598408] [MOTOR] precise rem=0.099m v=0.116m/s desired=35 duty=40
+[1774721598418] [MOTOR] precise rem=0.100m v=0.087m/s desired=36 duty=40
+[1774721598428] [MOTOR] band=1 rem=0.100m v=0.065m/s dir=open
+[1774721598465] [MOTOR] band=0 rem=0.094m v=0.152m/s dir=open
+[1774721598466] [MOTOR] precise rem=0.094m v=0.152m/s desired=33 duty=40
+[1774721598471] [MOTOR] precise rem=0.094m v=0.114m/s desired=35 duty=40
+[1774721598482] [MOTOR] precise rem=0.094m v=0.086m/s desired=36 duty=40
+[1774721598492] [MOTOR] precise rem=0.094m v=0.064m/s desired=37 duty=40
+[1774721598502] [MOTOR] precise rem=0.095m v=0.048m/s desired=38 duty=40
+[1774721598514] [MOTOR] precise rem=0.089m v=0.140m/s desired=33 duty=40
+[1774721598524] [MOTOR] precise rem=0.089m v=0.105m/s desired=35 duty=40
+[1774721598549] [MOTOR] precise rem=0.088m v=0.079m/s desired=36 duty=40
+[1774721598566] [MOTOR] precise rem=0.088m v=0.059m/s desired=37 duty=40
+[1774721598585] [MOTOR] precise rem=0.086m v=0.094m/s desired=36 duty=40
+[1774721598598] [MOTOR] precise rem=0.086m v=0.071m/s desired=37 duty=40
+[1774721598608] [MOTOR] precise rem=0.086m v=0.053m/s desired=38 duty=40
+[1774721598618] [MOTOR] precise rem=0.086m v=0.040m/s desired=38 duty=40
+[1774721598628] [MOTOR] precise rem=0.087m v=0.030m/s desired=39 duty=40
+[1774721598643] [MOTOR] precise rem=0.084m v=0.072m/s desired=37 duty=40
+[1774721598655] [MOTOR] precise rem=0.084m v=0.054m/s desired=38 duty=40
+[1774721598665] [MOTOR] precise rem=0.084m v=0.041m/s desired=38 duty=40
+[1774721598675] [MOTOR] precise rem=0.084m v=0.031m/s desired=39 duty=40
+[1774721598685] [MOTOR] precise rem=0.084m v=0.023m/s desired=39 duty=40
+[1774721598698] [MOTOR] precise rem=0.081m v=0.075m/s desired=37 duty=40
+[1774721598708] [MOTOR] precise rem=0.081m v=0.056m/s desired=38 duty=40
+[1774721598717] [MOTOR] precise rem=0.081m v=0.042m/s desired=38 duty=40
+[1774721598728] [MOTOR] precise rem=0.081m v=0.032m/s desired=39 duty=40
+[1774721598739] [MOTOR] precise rem=0.081m v=0.024m/s desired=39 duty=40
+[1774721598764] [MOTOR] precise rem=0.082m v=0.018m/s desired=40 duty=40
+[1774721598779] [MOTOR] precise rem=0.079m v=0.049m/s desired=38 duty=40
+[1774721598790] [MOTOR] precise rem=0.079m v=0.037m/s desired=39 duty=40
+[1774721598802] [MOTOR] precise rem=0.079m v=0.028m/s desired=39 duty=40
+[1774721598815] [MOTOR] precise rem=0.077m v=0.056m/s desired=38 duty=40
+[1774721598825] [MOTOR] precise rem=0.077m v=0.042m/s desired=38 duty=40
+[1774721598838] [MOTOR] precise rem=0.077m v=0.032m/s desired=39 duty=40
+[1774721598848] [MOTOR] precise rem=0.078m v=0.024m/s desired=39 duty=40
+[1774721598858] [MOTOR] precise rem=0.078m v=0.018m/s desired=40 duty=40
+[1774721598873] [MOTOR] precise rem=0.074m v=0.067m/s desired=37 duty=40
+[1774721598881] [MOTOR] precise rem=0.074m v=0.050m/s desired=38 duty=40
+[1774721598891] [MOTOR] precise rem=0.074m v=0.038m/s desired=39 duty=40
+[1774721598902] [MOTOR] precise rem=0.074m v=0.028m/s desired=39 duty=40
+[1774721598912] [MOTOR] precise rem=0.075m v=0.021m/s desired=39 duty=40
+[1774721598922] [MOTOR] precise rem=0.075m v=0.016m/s desired=40 duty=40
+[1774721598934] [MOTOR] precise rem=0.072m v=0.054m/s desired=38 duty=40
+[1774721598947] [MOTOR] precise rem=0.072m v=0.040m/s desired=38 duty=40
+[1774721598960] [MOTOR] precise rem=0.072m v=0.030m/s desired=39 duty=40
+[1774721598973] [MOTOR] precise rem=0.072m v=0.023m/s desired=39 duty=40
+[1774721598992] [MOTOR] precise rem=0.071m v=0.043m/s desired=38 duty=40
+[1774721599039] [MOTOR] precise rem=0.070m v=0.032m/s desired=39 duty=40
+[1774721599041] [GATE] state=opening pos=0.278m target=3.000m max=3.000m stopReason=none err=0
+[1774721599043] [MOTOR] precise rem=0.070m v=0.024m/s desired=39 duty=40
+[1774721599046] [HB] telAge=36 cmdAge=15 rpm=18 dist=278mm iA=0.08 fault=0 armed=1 rx=166 tel=166 bad=0
+[1774721599048] [MOTOR] precise rem=0.071m v=0.018m/s desired=40 duty=40
+[1774721599049] [MOTOR] precise rem=0.068m v=0.052m/s desired=38 duty=40
+[1774721599060] [MOTOR] precise rem=0.068m v=0.039m/s desired=39 duty=40
+[1774721599071] [MOTOR] precise rem=0.069m v=0.029m/s desired=39 duty=40
+[1774721599082] [MOTOR] precise rem=0.069m v=0.022m/s desired=39 duty=40
+[1774721599092] [MOTOR] precise rem=0.069m v=0.017m/s desired=40 duty=40
+[1774721599105] [MOTOR] precise rem=0.065m v=0.070m/s desired=37 duty=40
+[1774721599115] [MOTOR] precise rem=0.065m v=0.053m/s desired=38 duty=40
+[1774721599125] [MOTOR] precise rem=0.065m v=0.039m/s desired=38 duty=40
+[1774721599137] [MOTOR] precise rem=0.065m v=0.030m/s desired=39 duty=40
+[1774721599148] [MOTOR] precise rem=0.065m v=0.022m/s desired=39 duty=40
+[1774721599172] [MOTOR] precise rem=0.067m v=0.017m/s desired=40 duty=40
+[1774721599198] [MOTOR] precise rem=0.063m v=0.032m/s desired=39 duty=40
+[1774721599209] [MOTOR] precise rem=0.063m v=0.024m/s desired=39 duty=40
+[1774721599229] [MOTOR] precise rem=0.061m v=0.045m/s desired=38 duty=40
+[1774721599240] [MOTOR] precise rem=0.061m v=0.033m/s desired=39 duty=40
+[1774721599251] [MOTOR] precise rem=0.062m v=0.025m/s desired=39 duty=40
+[1774721599261] [MOTOR] precise rem=0.062m v=0.019m/s desired=40 duty=40
+[1774721599271] [MOTOR] precise rem=0.062m v=0.014m/s desired=40 duty=40
+[1774721599284] [MOTOR] precise rem=0.060m v=0.049m/s desired=38 duty=40
+[1774721599299] [MOTOR] precise rem=0.059m v=0.037m/s desired=39 duty=40
+[1774721599310] [MOTOR] precise rem=0.059m v=0.028m/s desired=39 duty=40
+[1774721599330] [MOTOR] precise rem=0.060m v=0.021m/s desired=39 duty=40
+[1774721599352] [MOTOR] precise rem=0.057m v=0.046m/s desired=38 duty=40
+[1774721599362] [MOTOR] precise rem=0.057m v=0.034m/s desired=39 duty=40
+[1774721599372] [MOTOR] precise rem=0.057m v=0.026m/s desired=39 duty=40
+[1774721599382] [MOTOR] precise rem=0.057m v=0.019m/s desired=40 duty=40
+[1774721599392] [MOTOR] precise rem=0.057m v=0.014m/s desired=40 duty=40
+[1774721599406] [MOTOR] precise rem=0.055m v=0.047m/s desired=38 duty=40
+[1774721599416] [MOTOR] precise rem=0.055m v=0.035m/s desired=39 duty=40
+[1774721599429] [MOTOR] precise rem=0.055m v=0.026m/s desired=39 duty=40
+[1774721599440] [MOTOR] precise rem=0.055m v=0.020m/s desired=39 duty=40
+[1774721599516] [MOTOR] precise rem=0.054m v=0.015m/s desired=40 duty=40
+[1774721599532] [MOTOR] precise rem=0.056m v=0.011m/s desired=40 duty=40
+[1774721599634] [MOTOR] precise rem=0.055m v=0.008m/s desired=40 duty=40
+[1774721599658] [MOTOR] precise rem=0.046m v=0.034m/s desired=39 duty=40
+[1774721599668] [MOTOR] precise rem=0.046m v=0.025m/s desired=39 duty=40
+[1774721599678] [MOTOR] precise rem=0.046m v=0.019m/s desired=40 duty=40
+[1774721599703] [MOTOR] precise rem=0.047m v=0.014m/s desired=40 duty=40
+[1774721599719] [MOTOR] precise rem=0.043m v=0.042m/s desired=38 duty=40
+[1774721599738] [MOTOR] precise rem=0.043m v=0.032m/s desired=39 duty=40
+[1774721599750] [MOTOR] precise rem=0.041m v=0.059m/s desired=37 duty=40
+[1774721599760] [MOTOR] precise rem=0.041m v=0.045m/s desired=38 duty=40
+[1774721599771] [MOTOR] precise rem=0.041m v=0.033m/s desired=39 duty=40
+[1774721599783] [MOTOR] precise rem=0.041m v=0.025m/s desired=39 duty=40
+[1774721599793] [MOTOR] precise rem=0.042m v=0.019m/s desired=40 duty=40
+[1774721599803] [MOTOR] precise rem=0.042m v=0.014m/s desired=40 duty=40
+[1774721599816] [MOTOR] precise rem=0.038m v=0.068m/s desired=37 duty=40
+[1774721599826] [MOTOR] precise rem=0.038m v=0.051m/s desired=38 duty=40
+[1774721599836] [MOTOR] precise rem=0.038m v=0.038m/s desired=39 duty=40
+[1774721599846] [MOTOR] precise rem=0.038m v=0.029m/s desired=39 duty=40
+[1774721599859] [MOTOR] precise rem=0.038m v=0.022m/s desired=39 duty=40
+[1774721599883] [MOTOR] precise rem=0.037m v=0.035m/s desired=39 duty=40
+[1774721599905] [MOTOR] precise rem=0.037m v=0.027m/s desired=39 duty=40
+[1774721599917] [MOTOR] precise rem=0.037m v=0.020m/s desired=39 duty=40
+[1774721599930] [MOTOR] precise rem=0.035m v=0.051m/s desired=38 duty=40
+[1774721599946] [MOTOR] precise rem=0.034m v=0.038m/s desired=39 duty=40
+[1774721599958] [MOTOR] precise rem=0.034m v=0.028m/s desired=39 duty=40
+[1774721599971] [MOTOR] precise rem=0.035m v=0.021m/s desired=39 duty=40
+[1774721599985] [MOTOR] precise rem=0.035m v=0.016m/s desired=40 duty=40
+[1774721600009] [MOTOR] precise rem=0.033m v=0.034m/s desired=39 duty=40
+[1774721600020] [MOTOR] precise rem=0.033m v=0.025m/s desired=39 duty=40
+[1774721600048] [GATE] state=opening pos=0.316m target=3.000m max=3.000m stopReason=none err=0
+[1774721600050] [HB] telAge=38 cmdAge=3 rpm=17 dist=316mm iA=0.08 fault=0 armed=1 rx=183 tel=183 bad=0
+[1774721600052] [MOTOR] precise rem=0.033m v=0.019m/s desired=40 duty=40
+[1774721600064] [MOTOR] precise rem=0.030m v=0.040m/s desired=38 duty=40
+[1774721600075] [MOTOR] precise rem=0.030m v=0.030m/s desired=39 duty=40
+[1774721600085] [MOTOR] precise rem=0.030m v=0.023m/s desired=39 duty=40
+[1774721600096] [MOTOR] precise rem=0.030m v=0.017m/s desired=40 duty=40
+[1774721600109] [MOTOR] precise rem=0.028m v=0.051m/s desired=38 duty=40
+[1774721600120] [MOTOR] precise rem=0.027m v=0.038m/s desired=39 duty=40
+[1774721600130] [MOTOR] precise rem=0.028m v=0.029m/s desired=39 duty=40
+[1774721600140] [MOTOR] precise rem=0.028m v=0.022m/s desired=39 duty=40
+[1774721600150] [MOTOR] precise rem=0.028m v=0.016m/s desired=40 duty=40
+[1774721600164] [MOTOR] precise rem=0.025m v=0.051m/s desired=38 duty=40
+[1774721600178] [MOTOR] precise rem=0.025m v=0.038m/s desired=39 duty=40
+[1774721600188] [MOTOR] precise rem=0.025m v=0.028m/s desired=39 duty=40
+[1774721600199] [MOTOR] precise rem=0.026m v=0.021m/s desired=39 duty=40
+[1774721600210] [MOTOR] precise rem=0.026m v=0.016m/s desired=40 duty=40
+[1774721600226] [MOTOR] precise rem=0.025m v=0.033m/s desired=39 duty=40
+[1774721600238] [MOTOR] precise rem=0.023m v=0.042m/s desired=38 duty=40
+[1774721600248] [MOTOR] precise rem=0.023m v=0.032m/s desired=39 duty=40
+[1774721600258] [MOTOR] precise rem=0.023m v=0.024m/s desired=39 duty=40
+[1774721600269] [MOTOR] precise rem=0.024m v=0.018m/s desired=40 duty=40
+[1774721600282] [MOTOR] precise rem=0.020m v=0.067m/s desired=37 duty=40
+[1774721600293] [MOTOR] precise rem=0.020m v=0.050m/s desired=38 duty=40
+[1774721600303] [MOTOR] precise rem=0.020m v=0.038m/s desired=39 duty=40
+[1774721600313] [MOTOR] precise rem=0.020m v=0.028m/s desired=39 duty=40
+[1774721600323] [MOTOR] precise rem=0.020m v=0.021m/s desired=39 duty=40
+[1774721600333] [MOTOR] precise rem=0.021m v=0.016m/s desired=40 duty=40
+[1774721600346] [MOTOR] precise rem=0.018m v=0.050m/s desired=38 duty=40
+[1774721600356] [MOTOR] precise rem=0.018m v=0.038m/s desired=39 duty=40
+[1774721600366] [MOTOR] precise rem=0.019m v=0.028m/s desired=39 duty=40
+[1774721600378] [MOTOR] precise rem=0.019m v=0.021m/s desired=39 duty=40
+[1774721600396] [MOTOR] precise rem=0.020m v=0.016m/s desired=40 duty=40
+[1774721600417] [MOTOR] precise rem=0.016m v=0.048m/s desired=38 duty=40
+[1774721600429] [MOTOR] precise rem=0.016m v=0.036m/s desired=39 duty=40
+[1774721600454] [MOTOR] precise rem=0.016m v=0.027m/s desired=39 duty=40
+[1774721600467] [MOTOR] precise rem=0.015m v=0.051m/s desired=38 duty=40
+[1774721600479] [MOTOR] precise rem=0.014m v=0.039m/s desired=39 duty=40
+[1774721600489] [MOTOR] precise rem=0.015m v=0.029m/s desired=39 duty=40
+[1774721600499] [MOTOR] precise rem=0.015m v=0.022m/s desired=39 duty=40
+[1774721600510] [MOTOR] precise rem=0.015m v=0.016m/s desired=40 duty=40
+[1774721600523] [MOTOR] precise rem=0.011m v=0.066m/s desired=37 duty=40
+[1774721600533] [MOTOR] precise rem=0.011m v=0.049m/s desired=38 duty=40
+[1774721600543] [MOTOR] precise rem=0.011m v=0.037m/s desired=39 duty=40
+[1774721600553] [MOTOR] precise rem=0.011m v=0.028m/s desired=39 duty=40
+[1774721600563] [MOTOR] precise rem=0.012m v=0.021m/s desired=39 duty=40
+[1774721601423] [UI] control action=goto:0.000
+[1774721601424] [UI] control result=close applied=1
+[1774721601507] [MOTOR] band=1 rem=0.348m v=0.000m/s dir=close
+[1774721601597] [GATE] state=closing pos=0.348m target=0.000m max=3.000m stopReason=none err=0
+[1774721601600] [HB] telAge=23 cmdAge=128 rpm=0 dist=348mm iA=0.04 fault=0 armed=1 rx=210 tel=210 bad=0
+[1774721602613] [GATE] state=closing pos=0.308m target=0.000m max=3.000m stopReason=none err=0
+[1774721602615] [HB] telAge=29 cmdAge=4 rpm=-35 dist=307mm iA=0.20 fault=0 armed=1 rx=227 tel=227 bad=0
+[1774721603615] [GATE] state=closing pos=0.210m target=0.000m max=3.000m stopReason=none err=0
+[1774721603617] [HB] telAge=29 cmdAge=4 rpm=-42 dist=210mm iA=0.18 fault=0 armed=1 rx=244 tel=244 bad=0
+[1774721604613] [GATE] state=closing pos=0.113m target=0.000m max=3.000m stopReason=none err=0
+[1774721604614] [HB] telAge=25 cmdAge=15 rpm=-42 dist=113mm iA=0.10 fault=0 armed=1 rx=261 tel=261 bad=0
+[1774721604711] [MOTOR] band=0 rem=0.096m v=-0.157m/s dir=close
+[1774721604711] [MOTOR] precise rem=0.096m v=-0.157m/s desired=33 duty=40
+[1774721604718] [MOTOR] precise rem=0.096m v=-0.118m/s desired=35 duty=40
+[1774721604729] [MOTOR] precise rem=0.096m v=-0.088m/s desired=36 duty=40
+[1774721604739] [MOTOR] precise rem=0.097m v=-0.066m/s desired=37 duty=40
+[1774721604749] [MOTOR] precise rem=0.097m v=-0.050m/s desired=38 duty=40
+[1774721604764] [MOTOR] precise rem=0.092m v=-0.121m/s desired=34 duty=40
+[1774721604775] [MOTOR] precise rem=0.092m v=-0.090m/s desired=36 duty=40

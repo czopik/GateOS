@@ -1,0 +1,3892 @@
+{
+  "actions": [
+    {
+      "ts": 1774721908313,
+      "action": "open"
+    },
+    {
+      "ts": 1774721911526,
+      "action": "toggle"
+    },
+    {
+      "ts": 1774721911986,
+      "action": "close"
+    },
+    {
+      "ts": 1774721914272,
+      "action": "toggle"
+    },
+    {
+      "ts": 1774721914639,
+      "action": "open"
+    },
+    {
+      "ts": 1774721916689,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721917096,
+      "action": "open"
+    },
+    {
+      "ts": 1774721922418,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721922952,
+      "action": "open"
+    },
+    {
+      "ts": 1774721925241,
+      "action": "toggle"
+    },
+    {
+      "ts": 1774721925707,
+      "action": "open"
+    },
+    {
+      "ts": 1774721927782,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721928357,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721930133,
+      "action": "open"
+    },
+    {
+      "ts": 1774721931955,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721932850,
+      "action": "close"
+    },
+    {
+      "ts": 1774721935524,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721936408,
+      "action": "open"
+    },
+    {
+      "ts": 1774721938216,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721938802,
+      "action": "close"
+    },
+    {
+      "ts": 1774721941057,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721941741,
+      "action": "open"
+    },
+    {
+      "ts": 1774721943618,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721944221,
+      "action": "close"
+    },
+    {
+      "ts": 1774721946526,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721947348,
+      "action": "open"
+    },
+    {
+      "ts": 1774721949139,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721949794,
+      "action": "close"
+    },
+    {
+      "ts": 1774721951924,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721952774,
+      "action": "open"
+    },
+    {
+      "ts": 1774721954805,
+      "action": "stop"
+    },
+    {
+      "ts": 1774721955528,
+      "action": "close"
+    },
+    {
+      "ts": 1774721957900,
+      "action": "stop"
+    }
+  ],
+  "results": [
+    {
+      "test": "TEST_A_REMOTE_STOP_OPEN",
+      "move": "open",
+      "stop": "toggle",
+      "metrics": {
+        "stopped": true,
+        "t_to_stopped_ms": 0,
+        "t_to_rpm0_ms": 344,
+        "max_abs_rpm_after_stop": 107,
+        "final": {
+          "state": "stopped",
+          "moving": false,
+          "rpm": 0,
+          "stopReason": 1,
+          "position": 0.273999929,
+          "dist": 274
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "test": "TEST_B_REMOTE_STOP_CLOSE",
+      "move": "close",
+      "stop": "toggle",
+      "metrics": {
+        "stopped": true,
+        "t_to_stopped_ms": 0,
+        "t_to_rpm0_ms": 266,
+        "max_abs_rpm_after_stop": 41,
+        "final": {
+          "state": "stopped",
+          "moving": false,
+          "rpm": 0,
+          "stopReason": 1,
+          "position": 0.102000035,
+          "dist": 102
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "test": "TEST_C_OBSTACLE_STOP_SIMULATED",
+      "move": "open",
+      "stop": "stop",
+      "metrics": {
+        "stopped": true,
+        "t_to_stopped_ms": 0,
+        "t_to_rpm0_ms": 263,
+        "max_abs_rpm_after_stop": 98,
+        "final": {
+          "state": "stopped",
+          "moving": false,
+          "rpm": 0,
+          "stopReason": 1,
+          "position": 0.336995989,
+          "dist": 337
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "test": "TEST_D_STOP_TYPE_COMPARE",
+      "status": "PASS",
+      "normal_stop": {
+        "stopped": true,
+        "t_to_stopped_ms": 0,
+        "t_to_rpm0_ms": 366,
+        "max_abs_rpm_after_stop": 109,
+        "final": {
+          "state": "stopped",
+          "moving": false,
+          "rpm": 0,
+          "stopReason": 1,
+          "position": 1.427999735,
+          "dist": 1428
+        }
+      },
+      "user_stop": {
+        "stopped": true,
+        "t_to_stopped_ms": 0,
+        "t_to_rpm0_ms": 313,
+        "max_abs_rpm_after_stop": 105,
+        "final": {
+          "state": "stopped",
+          "moving": false,
+          "rpm": 0,
+          "stopReason": 1,
+          "position": 1.725999832,
+          "dist": 1726
+        }
+      },
+      "obstacle_stop_simulated": {
+        "stopped": true,
+        "t_to_stopped_ms": 0,
+        "t_to_rpm0_ms": 391,
+        "max_abs_rpm_after_stop": 105,
+        "final": {
+          "state": "stopped",
+          "moving": false,
+          "rpm": 0,
+          "stopReason": 1,
+          "position": 1.974994659,
+          "dist": 1975
+        }
+      }
+    },
+    {
+      "test": "TEST_E_REPEATABILITY",
+      "status": "FAIL",
+      "summary": {
+        "tolerance_mm": 20.0,
+        "min_error_mm": 90.9167529999999,
+        "max_error_mm": 130.03826099999992,
+        "avg_error_mm": 107.99100399999998,
+        "all_within_tolerance": false
+      },
+      "cycles": [
+        {
+          "cycle": 1,
+          "p0_m": 1.974999905,
+          "p1_m": 2.203999519,
+          "p2_m": 1.884083152,
+          "return_error_mm": 90.9167529999999,
+          "within_tolerance": false,
+          "return_stop_metrics": {
+            "stopped": true,
+            "t_to_stopped_ms": 0,
+            "t_to_rpm0_ms": 447,
+            "max_abs_rpm_after_stop": 97,
+            "final": {
+              "state": "stopped",
+              "moving": false,
+              "rpm": 0,
+              "stopReason": 1,
+              "position": 1.884083152,
+              "dist": 1884
+            }
+          }
+        },
+        {
+          "cycle": 2,
+          "p0_m": 1.83303833,
+          "p1_m": 1.988999844,
+          "p2_m": 1.703000069,
+          "return_error_mm": 130.03826099999992,
+          "within_tolerance": false,
+          "return_stop_metrics": {
+            "stopped": true,
+            "t_to_stopped_ms": 0,
+            "t_to_rpm0_ms": 312,
+            "max_abs_rpm_after_stop": 109,
+            "final": {
+              "state": "stopped",
+              "moving": false,
+              "rpm": 0,
+              "stopReason": 1,
+              "position": 1.703000069,
+              "dist": 1703
+            }
+          }
+        },
+        {
+          "cycle": 3,
+          "p0_m": 1.703000069,
+          "p1_m": 1.884999752,
+          "p2_m": 1.605000257,
+          "return_error_mm": 97.99981200000008,
+          "within_tolerance": false,
+          "return_stop_metrics": {
+            "stopped": true,
+            "t_to_stopped_ms": 0,
+            "t_to_rpm0_ms": 360,
+            "max_abs_rpm_after_stop": 110,
+            "final": {
+              "state": "stopped",
+              "moving": false,
+              "rpm": 0,
+              "stopReason": 1,
+              "position": 1.605000257,
+              "dist": 1605
+            }
+          }
+        },
+        {
+          "cycle": 4,
+          "p0_m": 1.605000257,
+          "p1_m": 1.759999752,
+          "p2_m": 1.497000217,
+          "return_error_mm": 108.00003999999986,
+          "within_tolerance": false,
+          "return_stop_metrics": {
+            "stopped": true,
+            "t_to_stopped_ms": 0,
+            "t_to_rpm0_ms": 308,
+            "max_abs_rpm_after_stop": 107,
+            "final": {
+              "state": "stopped",
+              "moving": false,
+              "rpm": -13,
+              "stopReason": 1,
+              "position": 1.497000575,
+              "dist": 1497
+            }
+          }
+        },
+        {
+          "cycle": 5,
+          "p0_m": 1.497000217,
+          "p1_m": 1.696999788,
+          "p2_m": 1.384000063,
+          "return_error_mm": 113.00015400000008,
+          "within_tolerance": false,
+          "return_stop_metrics": {
+            "stopped": true,
+            "t_to_stopped_ms": 0,
+            "t_to_rpm0_ms": 369,
+            "max_abs_rpm_after_stop": 82,
+            "final": {
+              "state": "stopped",
+              "moving": false,
+              "rpm": 0,
+              "stopReason": 1,
+              "position": 1.384000063,
+              "dist": 1384
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "TEST_C używa symulacji przez /api/control stop; bez fizycznego wejścia obstacle nie przechodzi przez onObstacle()."
+  ],
+  "api_samples": [
+    {
+      "ts": 1774721909403,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0,
+      "positionPercent": 0,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 0,
+      "fault": 0,
+      "telAge": 52
+    },
+    {
+      "ts": 1774721909675,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0,
+      "positionPercent": 0,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 0,
+      "fault": 0,
+      "telAge": 26
+    },
+    {
+      "ts": 1774721909974,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.006969932,
+      "positionPercent": 0,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 16,
+      "dist": 7,
+      "fault": 0,
+      "telAge": 35
+    },
+    {
+      "ts": 1774721910238,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.017999995,
+      "positionPercent": 1,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 25,
+      "dist": 18,
+      "fault": 0,
+      "telAge": 58
+    },
+    {
+      "ts": 1774721910552,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.042624995,
+      "positionPercent": 1,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 43,
+      "dist": 46,
+      "fault": 0,
+      "telAge": 10
+    },
+    {
+      "ts": 1774721910846,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.082786188,
+      "positionPercent": 3,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 63,
+      "dist": 83,
+      "fault": 0,
+      "telAge": 33
+    },
+    {
+      "ts": 1774721911083,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.121853009,
+      "positionPercent": 4,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 78,
+      "dist": 122,
+      "fault": 0,
+      "telAge": 26
+    },
+    {
+      "ts": 1774721911325,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.169976816,
+      "positionPercent": 6,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 93,
+      "dist": 170,
+      "fault": 0,
+      "telAge": 27
+    },
+    {
+      "ts": 1774721911642,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_after_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 0.239999518,
+      "positionPercent": 8,
+      "target": 0.239999518,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 107,
+      "dist": 240,
+      "fault": 0,
+      "telAge": 49
+    },
+    {
+      "ts": 1774721911986,
+      "tag": "TEST_A_REMOTE_STOP_OPEN_after_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 0.273999929,
+      "positionPercent": 9,
+      "target": 0.273999929,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 274,
+      "fault": 0,
+      "telAge": 44
+    },
+    {
+      "ts": 1774721912081,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_move",
+      "state": "closing",
+      "moving": true,
+      "position": 0.273999929,
+      "positionPercent": 9,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 274,
+      "fault": 0,
+      "telAge": 86
+    },
+    {
+      "ts": 1774721912403,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_move",
+      "state": "closing",
+      "moving": true,
+      "position": 0.273999929,
+      "positionPercent": 9,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 274,
+      "fault": 0,
+      "telAge": 49
+    },
+    {
+      "ts": 1774721912690,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_move",
+      "state": "closing",
+      "moving": true,
+      "position": 0.26700002,
+      "positionPercent": 9,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -15,
+      "dist": 267,
+      "fault": 0,
+      "telAge": 50
+    },
+    {
+      "ts": 1774721912997,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_move",
+      "state": "closing",
+      "moving": true,
+      "position": 0.251000047,
+      "positionPercent": 8,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -33,
+      "dist": 251,
+      "fault": 0,
+      "telAge": 61
+    },
+    {
+      "ts": 1774721913386,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_move",
+      "state": "closing",
+      "moving": true,
+      "position": 0.215002835,
+      "positionPercent": 7,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -41,
+      "dist": 215,
+      "fault": 0,
+      "telAge": 32
+    },
+    {
+      "ts": 1774721913713,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_move",
+      "state": "closing",
+      "moving": true,
+      "position": 0.184500009,
+      "positionPercent": 6,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -41,
+      "dist": 180,
+      "fault": 0,
+      "telAge": 6
+    },
+    {
+      "ts": 1774721914071,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_move",
+      "state": "closing",
+      "moving": true,
+      "position": 0.152006686,
+      "positionPercent": 5,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -42,
+      "dist": 152,
+      "fault": 0,
+      "telAge": 67
+    },
+    {
+      "ts": 1774721914373,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_after_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 0.123001076,
+      "positionPercent": 4,
+      "target": 0.123001076,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": -41,
+      "dist": 123,
+      "fault": 0,
+      "telAge": 3
+    },
+    {
+      "ts": 1774721914639,
+      "tag": "TEST_B_REMOTE_STOP_CLOSE_after_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 0.102000035,
+      "positionPercent": 3,
+      "target": 0.102000035,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 102,
+      "fault": 0,
+      "telAge": 45
+    },
+    {
+      "ts": 1774721914719,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.102000013,
+      "positionPercent": 3,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 102,
+      "fault": 0,
+      "telAge": 9
+    },
+    {
+      "ts": 1774721915067,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.102000013,
+      "positionPercent": 3,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 102,
+      "fault": 0,
+      "telAge": 48
+    },
+    {
+      "ts": 1774721915314,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.107311748,
+      "positionPercent": 4,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 18,
+      "dist": 109,
+      "fault": 0,
+      "telAge": 7
+    },
+    {
+      "ts": 1774721915571,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.119928725,
+      "positionPercent": 4,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 26,
+      "dist": 120,
+      "fault": 0,
+      "telAge": 30
+    },
+    {
+      "ts": 1774721915867,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.141949892,
+      "positionPercent": 5,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 38,
+      "dist": 142,
+      "fault": 0,
+      "telAge": 38
+    },
+    {
+      "ts": 1774721916175,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.175999954,
+      "positionPercent": 6,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 58,
+      "dist": 176,
+      "fault": 0,
+      "telAge": 51
+    },
+    {
+      "ts": 1774721916488,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_move",
+      "state": "opening",
+      "moving": true,
+      "position": 0.22299999,
+      "positionPercent": 7,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 77,
+      "dist": 223,
+      "fault": 0,
+      "telAge": 69
+    },
+    {
+      "ts": 1774721916833,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_after_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 0.295698524,
+      "positionPercent": 10,
+      "target": 0.295698524,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 98,
+      "dist": 297,
+      "fault": 0,
+      "telAge": 49
+    },
+    {
+      "ts": 1774721917096,
+      "tag": "TEST_C_OBSTACLE_STOP_SIMULATED_after_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 0.336995989,
+      "positionPercent": 11,
+      "target": 0.336995989,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 337,
+      "fault": 0,
+      "telAge": 31
+    },
+    {
+      "ts": 1774721917178,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.336999953,
+      "positionPercent": 11,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 337,
+      "fault": 0,
+      "telAge": 31
+    },
+    {
+      "ts": 1774721917514,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.336999953,
+      "positionPercent": 11,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 337,
+      "fault": 0,
+      "telAge": 29
+    },
+    {
+      "ts": 1774721917828,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.34799993,
+      "positionPercent": 12,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 17,
+      "dist": 348,
+      "fault": 0,
+      "telAge": 51
+    },
+    {
+      "ts": 1774721918105,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.361831069,
+      "positionPercent": 12,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 26,
+      "dist": 362,
+      "fault": 0,
+      "telAge": 61
+    },
+    {
+      "ts": 1774721918442,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.396046817,
+      "positionPercent": 13,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 48,
+      "dist": 399,
+      "fault": 0,
+      "telAge": 7
+    },
+    {
+      "ts": 1774721918737,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.438786209,
+      "positionPercent": 15,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 66,
+      "dist": 439,
+      "fault": 0,
+      "telAge": 20
+    },
+    {
+      "ts": 1774721919059,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.491998821,
+      "positionPercent": 16,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 86,
+      "dist": 492,
+      "fault": 0,
+      "telAge": 49
+    },
+    {
+      "ts": 1774721919313,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.542992651,
+      "positionPercent": 18,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 100,
+      "dist": 543,
+      "fault": 0,
+      "telAge": 66
+    },
+    {
+      "ts": 1774721919569,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.608999908,
+      "positionPercent": 20,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 109,
+      "dist": 618,
+      "fault": 0,
+      "telAge": 9
+    },
+    {
+      "ts": 1774721919868,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.693932295,
+      "positionPercent": 23,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 109,
+      "dist": 694,
+      "fault": 0,
+      "telAge": 29
+    },
+    {
+      "ts": 1774721920178,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.769997299,
+      "positionPercent": 26,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 109,
+      "dist": 770,
+      "fault": 0,
+      "telAge": 38
+    },
+    {
+      "ts": 1774721920433,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.83967185,
+      "positionPercent": 28,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 109,
+      "dist": 846,
+      "fault": 0,
+      "telAge": 7
+    },
+    {
+      "ts": 1774721920785,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.921999931,
+      "positionPercent": 31,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 109,
+      "dist": 922,
+      "fault": 0,
+      "telAge": 2
+    },
+    {
+      "ts": 1774721921036,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 0.997366488,
+      "positionPercent": 33,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 109,
+      "dist": 998,
+      "fault": 0,
+      "telAge": 16
+    },
+    {
+      "ts": 1774721921335,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 1.067671776,
+      "positionPercent": 36,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 108,
+      "dist": 1074,
+      "fault": 0,
+      "telAge": 25
+    },
+    {
+      "ts": 1774721921581,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 1.134952426,
+      "positionPercent": 38,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 111,
+      "dist": 1135,
+      "fault": 0,
+      "telAge": 29
+    },
+    {
+      "ts": 1774721921911,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 1.210999727,
+      "positionPercent": 40,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 109,
+      "dist": 1211,
+      "fault": 0,
+      "telAge": 1
+    },
+    {
+      "ts": 1774721922217,
+      "tag": "TEST_D_normal_motion",
+      "state": "opening",
+      "moving": true,
+      "position": 1.302524805,
+      "positionPercent": 43,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 111,
+      "dist": 1303,
+      "fault": 0,
+      "telAge": 20
+    },
+    {
+      "ts": 1774721922586,
+      "tag": "TEST_D_normal_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.387671113,
+      "positionPercent": 46,
+      "target": 1.387671113,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 109,
+      "dist": 1394,
+      "fault": 0,
+      "telAge": 21
+    },
+    {
+      "ts": 1774721922952,
+      "tag": "TEST_D_normal_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.427999735,
+      "positionPercent": 48,
+      "target": 1.427999735,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1428,
+      "fault": 0,
+      "telAge": 32
+    },
+    {
+      "ts": 1774721923075,
+      "tag": "TEST_D_user_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.427999735,
+      "positionPercent": 48,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1428,
+      "fault": 0,
+      "telAge": 26
+    },
+    {
+      "ts": 1774721923328,
+      "tag": "TEST_D_user_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.427999735,
+      "positionPercent": 48,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1428,
+      "fault": 0,
+      "telAge": 2
+    },
+    {
+      "ts": 1774721923577,
+      "tag": "TEST_D_user_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.433644056,
+      "positionPercent": 48,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 18,
+      "dist": 1434,
+      "fault": 0,
+      "telAge": 16
+    },
+    {
+      "ts": 1774721923863,
+      "tag": "TEST_D_user_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.446749926,
+      "positionPercent": 48,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 24,
+      "dist": 1449,
+      "fault": 0,
+      "telAge": 3
+    },
+    {
+      "ts": 1774721924166,
+      "tag": "TEST_D_user_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.471910954,
+      "positionPercent": 49,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 39,
+      "dist": 1472,
+      "fault": 0,
+      "telAge": 20
+    },
+    {
+      "ts": 1774721924477,
+      "tag": "TEST_D_user_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.505998373,
+      "positionPercent": 50,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 58,
+      "dist": 1506,
+      "fault": 0,
+      "telAge": 36
+    },
+    {
+      "ts": 1774721924784,
+      "tag": "TEST_D_user_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.552999735,
+      "positionPercent": 52,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 76,
+      "dist": 1553,
+      "fault": 0,
+      "telAge": 47
+    },
+    {
+      "ts": 1774721925041,
+      "tag": "TEST_D_user_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.599999547,
+      "positionPercent": 53,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 93,
+      "dist": 1600,
+      "fault": 0,
+      "telAge": 54
+    },
+    {
+      "ts": 1774721925394,
+      "tag": "TEST_D_user_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.694776773,
+      "positionPercent": 56,
+      "target": 1.694776773,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 105,
+      "dist": 1700,
+      "fault": 0,
+      "telAge": 7
+    },
+    {
+      "ts": 1774721925707,
+      "tag": "TEST_D_user_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.725999832,
+      "positionPercent": 58,
+      "target": 1.725999832,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1726,
+      "fault": 0,
+      "telAge": 26
+    },
+    {
+      "ts": 1774721925792,
+      "tag": "TEST_D_obs_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.725999832,
+      "positionPercent": 58,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1726,
+      "fault": 0,
+      "telAge": 34
+    },
+    {
+      "ts": 1774721926073,
+      "tag": "TEST_D_obs_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.725999832,
+      "positionPercent": 58,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1726,
+      "fault": 0,
+      "telAge": 27
+    },
+    {
+      "ts": 1774721926427,
+      "tag": "TEST_D_obs_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.736994624,
+      "positionPercent": 58,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 22,
+      "dist": 1737,
+      "fault": 0,
+      "telAge": 32
+    },
+    {
+      "ts": 1774721926733,
+      "tag": "TEST_D_obs_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.754999876,
+      "positionPercent": 58,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 36,
+      "dist": 1755,
+      "fault": 0,
+      "telAge": 52
+    },
+    {
+      "ts": 1774721927054,
+      "tag": "TEST_D_obs_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.782999754,
+      "positionPercent": 59,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 53,
+      "dist": 1783,
+      "fault": 0,
+      "telAge": 1
+    },
+    {
+      "ts": 1774721927321,
+      "tag": "TEST_D_obs_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.822990894,
+      "positionPercent": 61,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 67,
+      "dist": 1823,
+      "fault": 0,
+      "telAge": 40
+    },
+    {
+      "ts": 1774721927581,
+      "tag": "TEST_D_obs_move",
+      "state": "opening",
+      "moving": true,
+      "position": 1.867999792,
+      "positionPercent": 62,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 88,
+      "dist": 1877,
+      "fault": 0,
+      "telAge": 6
+    },
+    {
+      "ts": 1774721927908,
+      "tag": "TEST_D_obs_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.928999901,
+      "positionPercent": 64,
+      "target": 1.928999901,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 105,
+      "dist": 1929,
+      "fault": 0,
+      "telAge": 26
+    },
+    {
+      "ts": 1774721928299,
+      "tag": "TEST_D_obs_stop",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974994659,
+      "positionPercent": 66,
+      "target": 1.974994659,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 13
+    },
+    {
+      "ts": 1774721928357,
+      "tag": "E_boot_chk",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 1.974999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 21
+    },
+    {
+      "ts": 1774721928455,
+      "tag": "E_settle",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 1.974999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 45
+    },
+    {
+      "ts": 1774721928782,
+      "tag": "E_settle",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 1.974999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 27
+    },
+    {
+      "ts": 1774721929043,
+      "tag": "E_settle",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 1.974999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 61
+    },
+    {
+      "ts": 1774721929347,
+      "tag": "E_settle",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 1.974999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 1
+    },
+    {
+      "ts": 1774721929701,
+      "tag": "E_settle",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 1.974999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 2
+    },
+    {
+      "ts": 1774721930019,
+      "tag": "E1_pre_chk",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 1.974999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 31
+    },
+    {
+      "ts": 1774721930133,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 1.974999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 23
+    },
+    {
+      "ts": 1774721930225,
+      "tag": "E1_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.974999905,
+      "positionPercent": 66,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 63
+    },
+    {
+      "ts": 1774721930548,
+      "tag": "E1_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.976156235,
+      "positionPercent": 66,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 9,
+      "dist": 1977,
+      "fault": 0,
+      "telAge": 12
+    },
+    {
+      "ts": 1774721930834,
+      "tag": "E1_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.988969803,
+      "positionPercent": 66,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 24,
+      "dist": 1989,
+      "fault": 0,
+      "telAge": 25
+    },
+    {
+      "ts": 1774721931093,
+      "tag": "E1_open",
+      "state": "opening",
+      "moving": true,
+      "position": 2.003999472,
+      "positionPercent": 67,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 30,
+      "dist": 2004,
+      "fault": 0,
+      "telAge": 37
+    },
+    {
+      "ts": 1774721931396,
+      "tag": "E1_open",
+      "state": "opening",
+      "moving": true,
+      "position": 2.03093195,
+      "positionPercent": 68,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 49,
+      "dist": 2032,
+      "fault": 0,
+      "telAge": 56
+    },
+    {
+      "ts": 1774721931755,
+      "tag": "E1_open",
+      "state": "opening",
+      "moving": true,
+      "position": 2.082999706,
+      "positionPercent": 69,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 71,
+      "dist": 2083,
+      "fault": 0,
+      "telAge": 56
+    },
+    {
+      "ts": 1774721932184,
+      "tag": "E1_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 2.170816183,
+      "positionPercent": 72,
+      "target": 2.170816183,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 100,
+      "dist": 2179,
+      "fault": 0,
+      "telAge": 9
+    },
+    {
+      "ts": 1774721932480,
+      "tag": "E1_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 2.203999519,
+      "positionPercent": 73,
+      "target": 2.203999519,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 21,
+      "dist": 2204,
+      "fault": 0,
+      "telAge": 67
+    },
+    {
+      "ts": 1774721932783,
+      "tag": "E1_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 2.203999519,
+      "positionPercent": 73,
+      "target": 2.203999519,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 2204,
+      "fault": 0,
+      "telAge": 25
+    },
+    {
+      "ts": 1774721932850,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 2.203999519,
+      "positionPercent": 73,
+      "target": 2.203999519,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 2204,
+      "fault": 0,
+      "telAge": 22
+    },
+    {
+      "ts": 1774721932947,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 2.203999519,
+      "positionPercent": 73,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 2204,
+      "fault": 0,
+      "telAge": 63
+    },
+    {
+      "ts": 1774721933273,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 2.203999519,
+      "positionPercent": 73,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 2204,
+      "fault": 0,
+      "telAge": 137
+    },
+    {
+      "ts": 1774721933539,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 2.198126793,
+      "positionPercent": 73,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -20,
+      "dist": 2198,
+      "fault": 0,
+      "telAge": 17
+    },
+    {
+      "ts": 1774721933946,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 2.180000305,
+      "positionPercent": 73,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -23,
+      "dist": 2180,
+      "fault": 0,
+      "telAge": 52
+    },
+    {
+      "ts": 1774721934324,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 2.141045332,
+      "positionPercent": 71,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -50,
+      "dist": 2141,
+      "fault": 0,
+      "telAge": 27
+    },
+    {
+      "ts": 1774721934627,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 2.099012136,
+      "positionPercent": 70,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -70,
+      "dist": 2099,
+      "fault": 0,
+      "telAge": 31
+    },
+    {
+      "ts": 1774721934934,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 2.044000149,
+      "positionPercent": 68,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -88,
+      "dist": 2044,
+      "fault": 0,
+      "telAge": 48
+    },
+    {
+      "ts": 1774721935239,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.975000143,
+      "positionPercent": 66,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -107,
+      "dist": 1975,
+      "fault": 0,
+      "telAge": 55
+    },
+    {
+      "ts": 1774721935524,
+      "tag": "E1_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.914000273,
+      "positionPercent": 64,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -112,
+      "dist": 1899,
+      "fault": 0,
+      "telAge": 16
+    },
+    {
+      "ts": 1774721935692,
+      "tag": "E1_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.884083152,
+      "positionPercent": 63,
+      "target": 1.884083152,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": -97,
+      "dist": 1884,
+      "fault": 0,
+      "telAge": 1
+    },
+    {
+      "ts": 1774721936139,
+      "tag": "E1_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.884083152,
+      "positionPercent": 63,
+      "target": 1.884083152,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1884,
+      "fault": 0,
+      "telAge": 96
+    },
+    {
+      "ts": 1774721936267,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.884083152,
+      "positionPercent": 63,
+      "target": 1.884083152,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1884,
+      "fault": 0,
+      "telAge": 19
+    },
+    {
+      "ts": 1774721936336,
+      "tag": "E2_pre_chk",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.842091799,
+      "positionPercent": 61,
+      "target": 1.842091799,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1833,
+      "fault": 0,
+      "telAge": 32
+    },
+    {
+      "ts": 1774721936408,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.83303833,
+      "positionPercent": 61,
+      "target": 1.83303833,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1833,
+      "fault": 0,
+      "telAge": 44
+    },
+    {
+      "ts": 1774721936526,
+      "tag": "E2_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.833000183,
+      "positionPercent": 61,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1833,
+      "fault": 0,
+      "telAge": 31
+    },
+    {
+      "ts": 1774721936799,
+      "tag": "E2_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.833000183,
+      "positionPercent": 61,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1833,
+      "fault": 0,
+      "telAge": 19
+    },
+    {
+      "ts": 1774721937068,
+      "tag": "E2_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.836999893,
+      "positionPercent": 61,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 18,
+      "dist": 1837,
+      "fault": 0,
+      "telAge": 44
+    },
+    {
+      "ts": 1774721937349,
+      "tag": "E2_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.845999718,
+      "positionPercent": 62,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 27,
+      "dist": 1846,
+      "fault": 0,
+      "telAge": 42
+    },
+    {
+      "ts": 1774721937709,
+      "tag": "E2_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.872999907,
+      "positionPercent": 62,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 35,
+      "dist": 1873,
+      "fault": 0,
+      "telAge": 44
+    },
+    {
+      "ts": 1774721938016,
+      "tag": "E2_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.905974746,
+      "positionPercent": 64,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 57,
+      "dist": 1906,
+      "fault": 0,
+      "telAge": 52
+    },
+    {
+      "ts": 1774721938371,
+      "tag": "E2_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.953749776,
+      "positionPercent": 65,
+      "target": 1.953749776,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 76,
+      "dist": 1962,
+      "fault": 0,
+      "telAge": 43
+    },
+    {
+      "ts": 1774721938729,
+      "tag": "E2_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.988999844,
+      "positionPercent": 66,
+      "target": 1.988999844,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1989,
+      "fault": 0,
+      "telAge": 62
+    },
+    {
+      "ts": 1774721938802,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.988999844,
+      "positionPercent": 66,
+      "target": 1.988999844,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1989,
+      "fault": 0,
+      "telAge": 20
+    },
+    {
+      "ts": 1774721938916,
+      "tag": "E2_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.988999844,
+      "positionPercent": 66,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1989,
+      "fault": 0,
+      "telAge": 46
+    },
+    {
+      "ts": 1774721939243,
+      "tag": "E2_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.988999844,
+      "positionPercent": 66,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1989,
+      "fault": 0,
+      "telAge": 39
+    },
+    {
+      "ts": 1774721939565,
+      "tag": "E2_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.981000185,
+      "positionPercent": 66,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -19,
+      "dist": 1981,
+      "fault": 0,
+      "telAge": 70
+    },
+    {
+      "ts": 1774721939857,
+      "tag": "E2_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.963250041,
+      "positionPercent": 65,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -28,
+      "dist": 1961,
+      "fault": 0,
+      "telAge": 6
+    },
+    {
+      "ts": 1774721940128,
+      "tag": "E2_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.938000202,
+      "positionPercent": 65,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -50,
+      "dist": 1938,
+      "fault": 0,
+      "telAge": 41
+    },
+    {
+      "ts": 1774721940432,
+      "tag": "E2_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.901033878,
+      "positionPercent": 63,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -65,
+      "dist": 1901,
+      "fault": 0,
+      "telAge": 47
+    },
+    {
+      "ts": 1774721940781,
+      "tag": "E2_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.836000204,
+      "positionPercent": 61,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -87,
+      "dist": 1836,
+      "fault": 0,
+      "telAge": 49
+    },
+    {
+      "ts": 1774721941057,
+      "tag": "E2_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.769126415,
+      "positionPercent": 59,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -109,
+      "dist": 1768,
+      "fault": 0,
+      "telAge": 17
+    },
+    {
+      "ts": 1774721941187,
+      "tag": "E2_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.75301218,
+      "positionPercent": 58,
+      "target": 1.75301218,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": -109,
+      "dist": 1753,
+      "fault": 0,
+      "telAge": 3
+    },
+    {
+      "ts": 1774721941499,
+      "tag": "E2_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.703000069,
+      "positionPercent": 57,
+      "target": 1.703000069,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1703,
+      "fault": 0,
+      "telAge": 49
+    },
+    {
+      "ts": 1774721941582,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.703000069,
+      "positionPercent": 57,
+      "target": 1.703000069,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1703,
+      "fault": 0,
+      "telAge": 77
+    },
+    {
+      "ts": 1774721941664,
+      "tag": "E3_pre_chk",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.703000069,
+      "positionPercent": 57,
+      "target": 1.703000069,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1703,
+      "fault": 0,
+      "telAge": 27
+    },
+    {
+      "ts": 1774721941741,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.703000069,
+      "positionPercent": 57,
+      "target": 1.703000069,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1703,
+      "fault": 0,
+      "telAge": 55
+    },
+    {
+      "ts": 1774721941852,
+      "tag": "E3_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.703000069,
+      "positionPercent": 57,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1703,
+      "fault": 0,
+      "telAge": 51
+    },
+    {
+      "ts": 1774721942126,
+      "tag": "E3_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.703000069,
+      "positionPercent": 57,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1703,
+      "fault": 0,
+      "telAge": 28
+    },
+    {
+      "ts": 1774721942409,
+      "tag": "E3_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.707849741,
+      "positionPercent": 57,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 17,
+      "dist": 1708,
+      "fault": 0,
+      "telAge": 18
+    },
+    {
+      "ts": 1774721942728,
+      "tag": "E3_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.720999718,
+      "positionPercent": 57,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 21,
+      "dist": 1721,
+      "fault": 0,
+      "telAge": 42
+    },
+    {
+      "ts": 1774721943048,
+      "tag": "E3_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.742999792,
+      "positionPercent": 58,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 41,
+      "dist": 1743,
+      "fault": 0,
+      "telAge": 2
+    },
+    {
+      "ts": 1774721943417,
+      "tag": "E3_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.776999712,
+      "positionPercent": 59,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 62,
+      "dist": 1777,
+      "fault": 0,
+      "telAge": 19
+    },
+    {
+      "ts": 1774721943826,
+      "tag": "E3_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.866781592,
+      "positionPercent": 62,
+      "target": 1.866781592,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 85,
+      "dist": 1867,
+      "fault": 0,
+      "telAge": 17
+    },
+    {
+      "ts": 1774721944142,
+      "tag": "E3_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.884996533,
+      "positionPercent": 63,
+      "target": 1.884996533,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1885,
+      "fault": 0,
+      "telAge": 37
+    },
+    {
+      "ts": 1774721944221,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.884999752,
+      "positionPercent": 63,
+      "target": 1.884999752,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1885,
+      "fault": 0,
+      "telAge": 2
+    },
+    {
+      "ts": 1774721944334,
+      "tag": "E3_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.884999752,
+      "positionPercent": 63,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1885,
+      "fault": 0,
+      "telAge": 40
+    },
+    {
+      "ts": 1774721944683,
+      "tag": "E3_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.884999752,
+      "positionPercent": 63,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1885,
+      "fault": 0,
+      "telAge": 44
+    },
+    {
+      "ts": 1774721944984,
+      "tag": "E3_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.878000259,
+      "positionPercent": 63,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -19,
+      "dist": 1878,
+      "fault": 0,
+      "telAge": 56
+    },
+    {
+      "ts": 1774721945291,
+      "tag": "E3_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.863000154,
+      "positionPercent": 62,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -25,
+      "dist": 1863,
+      "fault": 0,
+      "telAge": 67
+    },
+    {
+      "ts": 1774721945574,
+      "tag": "E3_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.838000298,
+      "positionPercent": 61,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -41,
+      "dist": 1838,
+      "fault": 0,
+      "telAge": 55
+    },
+    {
+      "ts": 1774721945881,
+      "tag": "E3_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.804000616,
+      "positionPercent": 60,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -59,
+      "dist": 1804,
+      "fault": 0,
+      "telAge": 60
+    },
+    {
+      "ts": 1774721946164,
+      "tag": "E3_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.75600028,
+      "positionPercent": 59,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -77,
+      "dist": 1756,
+      "fault": 0,
+      "telAge": 54
+    },
+    {
+      "ts": 1774721946526,
+      "tag": "E3_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.68200016,
+      "positionPercent": 56,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -100,
+      "dist": 1682,
+      "fault": 0,
+      "telAge": 53
+    },
+    {
+      "ts": 1774721946678,
+      "tag": "E3_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.645399451,
+      "positionPercent": 55,
+      "target": 1.645399451,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": -110,
+      "dist": 1638,
+      "fault": 0,
+      "telAge": 25
+    },
+    {
+      "ts": 1774721947038,
+      "tag": "E3_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.605000257,
+      "positionPercent": 54,
+      "target": 1.605000257,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1605,
+      "fault": 0,
+      "telAge": 37
+    },
+    {
+      "ts": 1774721947127,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.605000257,
+      "positionPercent": 54,
+      "target": 1.605000257,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1605,
+      "fault": 0,
+      "telAge": 1
+    },
+    {
+      "ts": 1774721947212,
+      "tag": "E4_pre_chk",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.605000257,
+      "positionPercent": 54,
+      "target": 1.605000257,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1605,
+      "fault": 0,
+      "telAge": 29
+    },
+    {
+      "ts": 1774721947348,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.605000257,
+      "positionPercent": 54,
+      "target": 1.605000257,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1605,
+      "fault": 0,
+      "telAge": 46
+    },
+    {
+      "ts": 1774721947493,
+      "tag": "E4_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.605000257,
+      "positionPercent": 54,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1605,
+      "fault": 0,
+      "telAge": 3
+    },
+    {
+      "ts": 1774721947859,
+      "tag": "E4_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.605000257,
+      "positionPercent": 54,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1605,
+      "fault": 0,
+      "telAge": 26
+    },
+    {
+      "ts": 1774721948281,
+      "tag": "E4_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.617622137,
+      "positionPercent": 54,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 23,
+      "dist": 1619,
+      "fault": 0,
+      "telAge": 8
+    },
+    {
+      "ts": 1774721948612,
+      "tag": "E4_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.636999846,
+      "positionPercent": 55,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 28,
+      "dist": 1637,
+      "fault": 0,
+      "telAge": 67
+    },
+    {
+      "ts": 1774721948939,
+      "tag": "E4_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.671994805,
+      "positionPercent": 56,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 52,
+      "dist": 1672,
+      "fault": 0,
+      "telAge": 52
+    },
+    {
+      "ts": 1774721949400,
+      "tag": "E4_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.724999905,
+      "positionPercent": 57,
+      "target": 1.724999905,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 69,
+      "dist": 1725,
+      "fault": 0,
+      "telAge": 37
+    },
+    {
+      "ts": 1774721949702,
+      "tag": "E4_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.759999752,
+      "positionPercent": 59,
+      "target": 1.759999752,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1760,
+      "fault": 0,
+      "telAge": 47
+    },
+    {
+      "ts": 1774721949794,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.759999752,
+      "positionPercent": 59,
+      "target": 1.759999752,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1760,
+      "fault": 0,
+      "telAge": 9
+    },
+    {
+      "ts": 1774721949925,
+      "tag": "E4_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.759999752,
+      "positionPercent": 59,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1760,
+      "fault": 0,
+      "telAge": 79
+    },
+    {
+      "ts": 1774721950323,
+      "tag": "E4_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.759999752,
+      "positionPercent": 59,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1760,
+      "fault": 0,
+      "telAge": 19
+    },
+    {
+      "ts": 1774721950627,
+      "tag": "E4_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.748011351,
+      "positionPercent": 58,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -33,
+      "dist": 1748,
+      "fault": 0,
+      "telAge": 29
+    },
+    {
+      "ts": 1774721950923,
+      "tag": "E4_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.733000278,
+      "positionPercent": 58,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -37,
+      "dist": 1733,
+      "fault": 0,
+      "telAge": 1
+    },
+    {
+      "ts": 1774721951238,
+      "tag": "E4_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.699000359,
+      "positionPercent": 57,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -46,
+      "dist": 1699,
+      "fault": 0,
+      "telAge": 42
+    },
+    {
+      "ts": 1774721951564,
+      "tag": "E4_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.659000158,
+      "positionPercent": 55,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -67,
+      "dist": 1659,
+      "fault": 0,
+      "telAge": 66
+    },
+    {
+      "ts": 1774721951924,
+      "tag": "E4_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.594000101,
+      "positionPercent": 53,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -89,
+      "dist": 1594,
+      "fault": 0,
+      "telAge": 82
+    },
+    {
+      "ts": 1774721952164,
+      "tag": "E4_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.551831961,
+      "positionPercent": 52,
+      "target": 1.551831961,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": -107,
+      "dist": 1540,
+      "fault": 0,
+      "telAge": 3
+    },
+    {
+      "ts": 1774721952472,
+      "tag": "E4_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.497000575,
+      "positionPercent": 50,
+      "target": 1.497000575,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": -13,
+      "dist": 1497,
+      "fault": 0,
+      "telAge": 37
+    },
+    {
+      "ts": 1774721952573,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.497000217,
+      "positionPercent": 50,
+      "target": 1.497000217,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1497,
+      "fault": 0,
+      "telAge": 14
+    },
+    {
+      "ts": 1774721952677,
+      "tag": "E5_pre_chk",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.497000217,
+      "positionPercent": 50,
+      "target": 1.497000217,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1497,
+      "fault": 0,
+      "telAge": 55
+    },
+    {
+      "ts": 1774721952774,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.497000217,
+      "positionPercent": 50,
+      "target": 1.497000217,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1497,
+      "fault": 0,
+      "telAge": 46
+    },
+    {
+      "ts": 1774721952937,
+      "tag": "E5_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.497000217,
+      "positionPercent": 50,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1497,
+      "fault": 0,
+      "telAge": 87
+    },
+    {
+      "ts": 1774721953318,
+      "tag": "E5_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.497000217,
+      "positionPercent": 50,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1497,
+      "fault": 0,
+      "telAge": 98
+    },
+    {
+      "ts": 1774721953702,
+      "tag": "E5_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.508994579,
+      "positionPercent": 50,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 18,
+      "dist": 1509,
+      "fault": 0,
+      "telAge": 31
+    },
+    {
+      "ts": 1774721954004,
+      "tag": "E5_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.526959896,
+      "positionPercent": 51,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 29,
+      "dist": 1527,
+      "fault": 0,
+      "telAge": 38
+    },
+    {
+      "ts": 1774721954316,
+      "tag": "E5_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.554999828,
+      "positionPercent": 52,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 47,
+      "dist": 1555,
+      "fault": 0,
+      "telAge": 58
+    },
+    {
+      "ts": 1774721954605,
+      "tag": "E5_open",
+      "state": "opening",
+      "moving": true,
+      "position": 1.59499979,
+      "positionPercent": 53,
+      "target": 3,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 66,
+      "dist": 1595,
+      "fault": 0,
+      "telAge": 49
+    },
+    {
+      "ts": 1774721954992,
+      "tag": "E5_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.65983963,
+      "positionPercent": 55,
+      "target": 1.65983963,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 87,
+      "dist": 1660,
+      "fault": 0,
+      "telAge": 74
+    },
+    {
+      "ts": 1774721955421,
+      "tag": "E5_stop1",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.696999788,
+      "positionPercent": 57,
+      "target": 1.696999788,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1697,
+      "fault": 0,
+      "telAge": 38
+    },
+    {
+      "ts": 1774721955528,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.696999788,
+      "positionPercent": 57,
+      "target": 1.696999788,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1697,
+      "fault": 0,
+      "telAge": 80
+    },
+    {
+      "ts": 1774721955664,
+      "tag": "E5_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.696999788,
+      "positionPercent": 57,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1697,
+      "fault": 0,
+      "telAge": 37
+    },
+    {
+      "ts": 1774721956119,
+      "tag": "E5_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.694711924,
+      "positionPercent": 56,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -21,
+      "dist": 1694,
+      "fault": 0,
+      "telAge": 31
+    },
+    {
+      "ts": 1774721956491,
+      "tag": "E5_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.677000284,
+      "positionPercent": 56,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -26,
+      "dist": 1677,
+      "fault": 0,
+      "telAge": 40
+    },
+    {
+      "ts": 1774721956879,
+      "tag": "E5_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.646500111,
+      "positionPercent": 55,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -45,
+      "dist": 1642,
+      "fault": 0,
+      "telAge": 7
+    },
+    {
+      "ts": 1774721957302,
+      "tag": "E5_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.585563183,
+      "positionPercent": 53,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -71,
+      "dist": 1585,
+      "fault": 0,
+      "telAge": 18
+    },
+    {
+      "ts": 1774721957593,
+      "tag": "E5_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.528380156,
+      "positionPercent": 51,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -92,
+      "dist": 1528,
+      "fault": 0,
+      "telAge": 20
+    },
+    {
+      "ts": 1774721957900,
+      "tag": "E5_return",
+      "state": "closing",
+      "moving": true,
+      "position": 1.459002495,
+      "positionPercent": 49,
+      "target": 0,
+      "stopReason": 0,
+      "error": 0,
+      "rpm": -109,
+      "dist": 1459,
+      "fault": 0,
+      "telAge": 37
+    },
+    {
+      "ts": 1774721958160,
+      "tag": "E5_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.444011211,
+      "positionPercent": 48,
+      "target": 1.444011211,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": -82,
+      "dist": 1444,
+      "fault": 0,
+      "telAge": 45
+    },
+    {
+      "ts": 1774721958529,
+      "tag": "E5_stop2",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.384000063,
+      "positionPercent": 46,
+      "target": 1.384000063,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1384,
+      "fault": 0,
+      "telAge": 62
+    },
+    {
+      "ts": 1774721958634,
+      "tag": "POS",
+      "state": "stopped",
+      "moving": false,
+      "position": 1.384000063,
+      "positionPercent": 46,
+      "target": 1.384000063,
+      "stopReason": 1,
+      "error": 0,
+      "rpm": 0,
+      "dist": 1384,
+      "fault": 0,
+      "telAge": 52
+    }
+  ],
+  "serial_gate_hb": [
+    {
+      "ts": 1774721908816,
+      "line": "[GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721908818,
+      "line": "[HB] telAge=1 cmdAge=18 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=15 tel=15 bad=0"
+    },
+    {
+      "ts": 1774721909359,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721909360,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721909817,
+      "line": "[GATE] state=opening pos=0.003m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721909818,
+      "line": "[HB] telAge=7 cmdAge=10 rpm=14 dist=3mm iA=0.08 fault=0 armed=1 rx=32 tel=32 bad=0"
+    },
+    {
+      "ts": 1774721910816,
+      "line": "[GATE] state=opening pos=0.082m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721910818,
+      "line": "[HB] telAge=8 cmdAge=18 rpm=63 dist=83mm iA=0.18 fault=0 armed=1 rx=49 tel=49 bad=0"
+    },
+    {
+      "ts": 1774721911561,
+      "line": "[UI] control action=toggle"
+    },
+    {
+      "ts": 1774721911561,
+      "line": "[GATE] STOP reason=user telAgeMs=49 stallAgeMs=38"
+    },
+    {
+      "ts": 1774721911562,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721911562,
+      "line": "[UI] control result=toggle applied=1"
+    },
+    {
+      "ts": 1774721911817,
+      "line": "[GATE] state=stopped pos=0.271m target=0.271m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721911818,
+      "line": "[HB] telAge=2 cmdAge=4 rpm=17 dist=272mm iA=0.04 fault=0 armed=1 rx=66 tel=66 bad=0"
+    },
+    {
+      "ts": 1774721912029,
+      "line": "[UI] control action=close"
+    },
+    {
+      "ts": 1774721912029,
+      "line": "[UI] control result=close applied=1"
+    },
+    {
+      "ts": 1774721912817,
+      "line": "[GATE] state=closing pos=0.260m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721912818,
+      "line": "[HB] telAge=3 cmdAge=24 rpm=-21 dist=258mm iA=0.14 fault=0 armed=1 rx=83 tel=83 bad=0"
+    },
+    {
+      "ts": 1774721913817,
+      "line": "[GATE] state=closing pos=0.175m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721913818,
+      "line": "[HB] telAge=-1 cmdAge=4 rpm=-41 dist=169mm iA=0.14 fault=0 armed=1 rx=100 tel=100 bad=0"
+    },
+    {
+      "ts": 1774721914321,
+      "line": "[UI] control action=toggle"
+    },
+    {
+      "ts": 1774721914322,
+      "line": "[GATE] STOP reason=user telAgeMs=33 stallAgeMs=23"
+    },
+    {
+      "ts": 1774721914323,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721914324,
+      "line": "[UI] control result=toggle applied=1"
+    },
+    {
+      "ts": 1774721914667,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721914668,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721914819,
+      "line": "[GATE] state=opening pos=0.102m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721914822,
+      "line": "[HB] telAge=58 cmdAge=6 rpm=0 dist=102mm iA=0.04 fault=0 armed=1 rx=116 tel=116 bad=0"
+    },
+    {
+      "ts": 1774721915818,
+      "line": "[GATE] state=opening pos=0.137m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721915819,
+      "line": "[HB] telAge=-1 cmdAge=17 rpm=38 dist=142mm iA=0.10 fault=0 armed=1 rx=134 tel=134 bad=0"
+    },
+    {
+      "ts": 1774721916778,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721916779,
+      "line": "[GATE] STOP reason=user telAgeMs=9 stallAgeMs=68"
+    },
+    {
+      "ts": 1774721916781,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721916782,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721916845,
+      "line": "[GATE] state=stopped pos=0.296m target=0.296m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721916846,
+      "line": "[HB] telAge=20 cmdAge=21 rpm=103 dist=311mm iA=0.16 fault=0 armed=1 rx=151 tel=151 bad=0"
+    },
+    {
+      "ts": 1774721917123,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721917123,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721917844,
+      "line": "[GATE] state=opening pos=0.350m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721917845,
+      "line": "[HB] telAge=26 cmdAge=17 rpm=24 dist=351mm iA=0.08 fault=0 armed=1 rx=168 tel=168 bad=0"
+    },
+    {
+      "ts": 1774721918843,
+      "line": "[GATE] state=opening pos=0.458m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721918845,
+      "line": "[HB] telAge=25 cmdAge=18 rpm=75 dist=458mm iA=0.18 fault=0 armed=1 rx=185 tel=185 bad=0"
+    },
+    {
+      "ts": 1774721919841,
+      "line": "[GATE] state=opening pos=0.694m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721919864,
+      "line": "[HB] telAge=19 cmdAge=13 rpm=109 dist=694mm iA=0.38 fault=0 armed=1 rx=202 tel=202 bad=0"
+    },
+    {
+      "ts": 1774721920844,
+      "line": "[GATE] state=opening pos=0.952m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721920845,
+      "line": "[HB] telAge=19 cmdAge=7 rpm=109 dist=952mm iA=0.26 fault=0 armed=1 rx=219 tel=219 bad=0"
+    },
+    {
+      "ts": 1774721921844,
+      "line": "[GATE] state=opening pos=1.211m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721921845,
+      "line": "[HB] telAge=13 cmdAge=14 rpm=109 dist=1211mm iA=0.38 fault=0 armed=1 rx=236 tel=236 bad=0"
+    },
+    {
+      "ts": 1774721922520,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721922521,
+      "line": "[GATE] STOP reason=user telAgeMs=48 stallAgeMs=38"
+    },
+    {
+      "ts": 1774721922521,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721922522,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721922844,
+      "line": "[GATE] state=stopped pos=1.428m target=1.428m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721922845,
+      "line": "[HB] telAge=10 cmdAge=15 rpm=17 dist=1428mm iA=0.04 fault=0 armed=1 rx=253 tel=253 bad=0"
+    },
+    {
+      "ts": 1774721922985,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721922986,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721923872,
+      "line": "[GATE] state=opening pos=1.447m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721923873,
+      "line": "[HB] telAge=2 cmdAge=12 rpm=24 dist=1449mm iA=0.12 fault=0 armed=1 rx=270 tel=270 bad=0"
+    },
+    {
+      "ts": 1774721924843,
+      "line": "[GATE] state=opening pos=1.574m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721924844,
+      "line": "[HB] telAge=8 cmdAge=7 rpm=83 dist=1576mm iA=0.18 fault=0 armed=1 rx=287 tel=287 bad=0"
+    },
+    {
+      "ts": 1774721925321,
+      "line": "[UI] control action=toggle"
+    },
+    {
+      "ts": 1774721925321,
+      "line": "[GATE] STOP reason=user telAgeMs=17 stallAgeMs=7"
+    },
+    {
+      "ts": 1774721925322,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721925322,
+      "line": "[UI] control result=toggle applied=1"
+    },
+    {
+      "ts": 1774721925734,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721925734,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721925843,
+      "line": "[GATE] state=opening pos=1.726m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721925845,
+      "line": "[HB] telAge=1 cmdAge=2 rpm=0 dist=1726mm iA=0.04 fault=0 armed=1 rx=304 tel=304 bad=0"
+    },
+    {
+      "ts": 1774721926844,
+      "line": "[GATE] state=opening pos=1.765m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721926845,
+      "line": "[HB] telAge=61 cmdAge=4 rpm=37 dist=1765mm iA=0.16 fault=0 armed=1 rx=320 tel=320 bad=0"
+    },
+    {
+      "ts": 1774721927834,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721927835,
+      "line": "[GATE] STOP reason=user telAgeMs=57 stallAgeMs=48"
+    },
+    {
+      "ts": 1774721927835,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721927836,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721927868,
+      "line": "[GATE] state=stopped pos=1.929m target=1.929m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721927909,
+      "line": "[HB] telAge=20 cmdAge=26 rpm=105 dist=1944mm iA=0.38 fault=0 armed=1 rx=338 tel=338 bad=0"
+    },
+    {
+      "ts": 1774721928384,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721928385,
+      "line": "[UI] control result=stop applied=0"
+    },
+    {
+      "ts": 1774721928902,
+      "line": "[GATE] state=stopped pos=1.975m target=1.975m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721928903,
+      "line": "[HB] telAge=60 cmdAge=9 rpm=0 dist=1975mm iA=0.06 fault=0 armed=1 rx=355 tel=355 bad=0"
+    },
+    {
+      "ts": 1774721929900,
+      "line": "[GATE] state=stopped pos=1.975m target=1.975m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721929902,
+      "line": "[HB] telAge=0 cmdAge=17 rpm=0 dist=1975mm iA=0.14 fault=0 armed=1 rx=373 tel=373 bad=0"
+    },
+    {
+      "ts": 1774721930163,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721930163,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721930902,
+      "line": "[GATE] state=opening pos=1.992m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721930904,
+      "line": "[HB] telAge=59 cmdAge=19 rpm=25 dist=1992mm iA=0.10 fault=0 armed=1 rx=389 tel=389 bad=0"
+    },
+    {
+      "ts": 1774721931901,
+      "line": "[GATE] state=opening pos=2.115m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721931904,
+      "line": "[HB] telAge=51 cmdAge=3 rpm=81 dist=2115mm iA=0.34 fault=0 armed=1 rx=406 tel=406 bad=0"
+    },
+    {
+      "ts": 1774721932100,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721932101,
+      "line": "[GATE] STOP reason=user telAgeMs=23 stallAgeMs=14"
+    },
+    {
+      "ts": 1774721932102,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721932104,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721932877,
+      "line": "[UI] control action=close"
+    },
+    {
+      "ts": 1774721932878,
+      "line": "[UI] control result=close applied=1"
+    },
+    {
+      "ts": 1774721932900,
+      "line": "[GATE] state=closing pos=2.204m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721932940,
+      "line": "[HB] telAge=51 cmdAge=14 rpm=0 dist=2204mm iA=0.04 fault=0 armed=1 rx=423 tel=423 bad=0"
+    },
+    {
+      "ts": 1774721934026,
+      "line": "[GATE] state=closing pos=2.179m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721934027,
+      "line": "[HB] telAge=34 cmdAge=29 rpm=-30 dist=2170mm iA=0.22 fault=0 armed=1 rx=442 tel=442 bad=0"
+    },
+    {
+      "ts": 1774721935025,
+      "line": "[GATE] state=closing pos=2.018m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721935026,
+      "line": "[HB] telAge=42 cmdAge=5 rpm=-95 dist=2018mm iA=0.34 fault=0 armed=1 rx=459 tel=459 bad=0"
+    },
+    {
+      "ts": 1774721935560,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721935560,
+      "line": "[GATE] STOP reason=user telAgeMs=56 stallAgeMs=47"
+    },
+    {
+      "ts": 1774721935561,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721935561,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721936277,
+      "line": "[GATE] state=stopped pos=1.884m target=1.884m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721936278,
+      "line": "[HB] telAge=5 cmdAge=18 rpm=0 dist=1833mm iA=0.06 fault=0 armed=1 rx=481 tel=481 bad=0"
+    },
+    {
+      "ts": 1774721936445,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721936446,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721937303,
+      "line": "[GATE] state=opening pos=1.846m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721937345,
+      "line": "[HB] telAge=33 cmdAge=10 rpm=27 dist=1850mm iA=0.08 fault=0 armed=1 rx=498 tel=498 bad=0"
+    },
+    {
+      "ts": 1774721938282,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721938284,
+      "line": "[GATE] STOP reason=user telAgeMs=3 stallAgeMs=115"
+    },
+    {
+      "ts": 1774721938285,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721938288,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721938317,
+      "line": "[GATE] state=stopped pos=1.954m target=1.954m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721938357,
+      "line": "[HB] telAge=35 cmdAge=8 rpm=76 dist=1962mm iA=0.28 fault=0 armed=1 rx=515 tel=515 bad=0"
+    },
+    {
+      "ts": 1774721938829,
+      "line": "[UI] control action=close"
+    },
+    {
+      "ts": 1774721938830,
+      "line": "[UI] control result=close applied=1"
+    },
+    {
+      "ts": 1774721939318,
+      "line": "[GATE] state=closing pos=1.988m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721939321,
+      "line": "[HB] telAge=34 cmdAge=15 rpm=-12 dist=1988mm iA=0.06 fault=0 armed=1 rx=532 tel=532 bad=0"
+    },
+    {
+      "ts": 1774721940318,
+      "line": "[GATE] state=closing pos=1.909m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721940320,
+      "line": "[HB] telAge=33 cmdAge=16 rpm=-60 dist=1909mm iA=0.22 fault=0 armed=1 rx=549 tel=549 bad=0"
+    },
+    {
+      "ts": 1774721941095,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721941096,
+      "line": "[GATE] STOP reason=user telAgeMs=47 stallAgeMs=28"
+    },
+    {
+      "ts": 1774721941096,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721941097,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721941318,
+      "line": "[GATE] state=stopped pos=1.708m target=1.708m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721941320,
+      "line": "[HB] telAge=21 cmdAge=16 rpm=-22 dist=1708mm iA=0.04 fault=0 armed=1 rx=566 tel=566 bad=0"
+    },
+    {
+      "ts": 1774721941771,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721941771,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721942318,
+      "line": "[GATE] state=opening pos=1.706m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721942320,
+      "line": "[HB] telAge=28 cmdAge=8 rpm=17 dist=1706mm iA=0.08 fault=0 armed=1 rx=583 tel=583 bad=0"
+    },
+    {
+      "ts": 1774721943359,
+      "line": "[GATE] state=opening pos=1.777m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721943410,
+      "line": "[HB] telAge=7 cmdAge=4 rpm=62 dist=1793mm iA=0.22 fault=0 armed=1 rx=601 tel=601 bad=0"
+    },
+    {
+      "ts": 1774721943712,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721943712,
+      "line": "[GATE] STOP reason=user telAgeMs=8 stallAgeMs=62"
+    },
+    {
+      "ts": 1774721943713,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721943713,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721944251,
+      "line": "[UI] control action=close"
+    },
+    {
+      "ts": 1774721944252,
+      "line": "[UI] control result=close applied=1"
+    },
+    {
+      "ts": 1774721944362,
+      "line": "[GATE] state=closing pos=1.885m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721944363,
+      "line": "[HB] telAge=61 cmdAge=17 rpm=0 dist=1885mm iA=0.06 fault=0 armed=1 rx=617 tel=617 bad=0"
+    },
+    {
+      "ts": 1774721945388,
+      "line": "[GATE] state=closing pos=1.861m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721945390,
+      "line": "[HB] telAge=32 cmdAge=8 rpm=-31 dist=1849mm iA=0.22 fault=0 armed=1 rx=635 tel=635 bad=0"
+    },
+    {
+      "ts": 1774721946388,
+      "line": "[GATE] state=closing pos=1.696m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721946389,
+      "line": "[HB] telAge=24 cmdAge=16 rpm=-96 dist=1696mm iA=0.26 fault=0 armed=1 rx=652 tel=652 bad=0"
+    },
+    {
+      "ts": 1774721946576,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721946577,
+      "line": "[GATE] STOP reason=user telAgeMs=16 stallAgeMs=2"
+    },
+    {
+      "ts": 1774721946578,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721946578,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721947389,
+      "line": "[GATE] state=stopped pos=1.605m target=1.605m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721947390,
+      "line": "[HB] telAge=82 cmdAge=8 rpm=0 dist=1605mm iA=0.04 fault=0 armed=1 rx=668 tel=668 bad=0"
+    },
+    {
+      "ts": 1774721947401,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721947401,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721948390,
+      "line": "[GATE] state=opening pos=1.628m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721948392,
+      "line": "[HB] telAge=25 cmdAge=19 rpm=26 dist=1628mm iA=0.08 fault=0 armed=1 rx=686 tel=686 bad=0"
+    },
+    {
+      "ts": 1774721949244,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721949245,
+      "line": "[GATE] STOP reason=user telAgeMs=57 stallAgeMs=100"
+    },
+    {
+      "ts": 1774721949245,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721949246,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721949428,
+      "line": "[GATE] state=stopped pos=1.725m target=1.725m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721949430,
+      "line": "[HB] telAge=54 cmdAge=4 rpm=30 dist=1753mm iA=0.08 fault=0 armed=1 rx=703 tel=703 bad=0"
+    },
+    {
+      "ts": 1774721949821,
+      "line": "[UI] control action=close"
+    },
+    {
+      "ts": 1774721949822,
+      "line": "[UI] control result=close applied=1"
+    },
+    {
+      "ts": 1774721950427,
+      "line": "[GATE] state=closing pos=1.755m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721950428,
+      "line": "[HB] telAge=57 cmdAge=36 rpm=-17 dist=1755mm iA=0.06 fault=0 armed=1 rx=720 tel=720 bad=0"
+    },
+    {
+      "ts": 1774721951427,
+      "line": "[GATE] state=closing pos=1.668m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721951428,
+      "line": "[HB] telAge=48 cmdAge=18 rpm=-64 dist=1668mm iA=0.14 fault=0 armed=1 rx=737 tel=737 bad=0"
+    },
+    {
+      "ts": 1774721952049,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721952049,
+      "line": "[GATE] STOP reason=user telAgeMs=25 stallAgeMs=16"
+    },
+    {
+      "ts": 1774721952050,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721952050,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721952483,
+      "line": "[GATE] state=stopped pos=1.497m target=1.497m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721952485,
+      "line": "[HB] telAge=36 cmdAge=14 rpm=0 dist=1497mm iA=0.06 fault=0 armed=1 rx=755 tel=755 bad=0"
+    },
+    {
+      "ts": 1774721952832,
+      "line": "[UI] control action=open"
+    },
+    {
+      "ts": 1774721952833,
+      "line": "[UI] control result=open applied=1"
+    },
+    {
+      "ts": 1774721953483,
+      "line": "[GATE] state=opening pos=1.502m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721953485,
+      "line": "[HB] telAge=38 cmdAge=7 rpm=15 dist=1502mm iA=0.08 fault=0 armed=1 rx=772 tel=772 bad=0"
+    },
+    {
+      "ts": 1774721954482,
+      "line": "[GATE] state=opening pos=1.586m target=3.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721954483,
+      "line": "[HB] telAge=39 cmdAge=20 rpm=62 dist=1586mm iA=0.18 fault=0 armed=1 rx=789 tel=789 bad=0"
+    },
+    {
+      "ts": 1774721954876,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721954876,
+      "line": "[GATE] STOP reason=user telAgeMs=23 stallAgeMs=12"
+    },
+    {
+      "ts": 1774721954877,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721954877,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721955541,
+      "line": "[GATE] state=stopped pos=1.697m target=1.697m max=3.000m stopReason=user err=0"
+    },
+    {
+      "ts": 1774721955542,
+      "line": "[HB] telAge=38 cmdAge=8 rpm=0 dist=1697mm iA=0.06 fault=0 armed=1 rx=807 tel=807 bad=0"
+    },
+    {
+      "ts": 1774721955555,
+      "line": "[UI] control action=close"
+    },
+    {
+      "ts": 1774721955556,
+      "line": "[UI] control result=close applied=1"
+    },
+    {
+      "ts": 1774721956540,
+      "line": "[GATE] state=closing pos=1.670m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721956541,
+      "line": "[HB] telAge=5 cmdAge=0 rpm=-32 dist=1668mm iA=0.12 fault=0 armed=1 rx=824 tel=824 bad=0"
+    },
+    {
+      "ts": 1774721957602,
+      "line": "[GATE] state=closing pos=1.528m target=0.000m max=3.000m stopReason=none err=0"
+    },
+    {
+      "ts": 1774721957603,
+      "line": "[HB] telAge=28 cmdAge=26 rpm=-93 dist=1515mm iA=0.36 fault=0 armed=1 rx=842 tel=842 bad=0"
+    },
+    {
+      "ts": 1774721957948,
+      "line": "[UI] control action=stop"
+    },
+    {
+      "ts": 1774721957949,
+      "line": "[GATE] STOP reason=user telAgeMs=76 stallAgeMs=67"
+    },
+    {
+      "ts": 1774721957950,
+      "line": "[GATE] STOP mode=hard_immediate reason=user"
+    },
+    {
+      "ts": 1774721957951,
+      "line": "[UI] control result=stop applied=1"
+    },
+    {
+      "ts": 1774721958646,
+      "line": "[GATE] state=stopped pos=1.384m target=1.384m max=3.000m stopReason=user err=0"
+    }
+  ]
+}

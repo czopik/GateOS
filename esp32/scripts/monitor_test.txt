@@ -1,0 +1,320 @@
+--- Terminal on COM3 | 115200 8-N-1
+--- Available filters and text transformations: colorize, debug, default, direct, hexlify, log2file, nocontrol, printable, send_on_enter, time
+--- More details at https://bit.ly/pio-monitor-filters
+--- Quit: Ctrl+C | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+10:33:47.669 > ets Jul 29 2019 12:21:46
+10:33:47.670 > 
+10:33:47.670 > rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+10:33:47.676 > configsip: 0, SPIWP:0xee
+10:33:47.676 > clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+10:33:47.681 > mode:DIO, clock div:2
+10:33:47.686 > load:0x3fff0030,len:1184
+10:33:47.686 > load:0x40078000,len:13232
+10:33:47.692 > load:0x40080400,len:3028
+10:33:47.692 > entry 0x400805e4
+10:33:48.198 > LittleFS mounted OK
+10:33:48.223 > index.html found in LittleFS
+10:33:48.295 > LED warn: pin 2 is strapping
+10:33:48.296 > LED init ok pin=2 count=8
+10:33:48.420 > [HCS] ISR zainicjalizowany na pin 13
+10:33:48.422 > [HCS] Callback ustawiony
+10:33:48.424 > WebServer: LittleFS is mounted
+10:33:48.425 > Web server started
+10:33:49.145 > [GATE] state=stopped pos=1.366m target=1.366m max=5.000m stopReason=none err=0
+10:33:49.150 > [HB] telAge=52 cmdAge=9 rpm=0 dist=0mm iA=0.00 fault=0 armed=0 rx=14 tel=14 bad=0
+10:33:49.522 > WiFi connected to ChemiXv3, IP: 192.168.1.12
+10:33:50.144 > [GATE] state=stopped pos=1.366m target=1.366m max=5.000m stopReason=none err=0
+10:33:50.150 > [HB] telAge=49 cmdAge=2 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=31 tel=31 bad=0
+10:33:51.258 > [GATE] state=opening pos=1.366m target=5.000m max=5.000m stopReason=none err=0
+10:33:51.264 > [HB] telAge=46 cmdAge=172 rpm=11 dist=3mm iA=0.08 fault=0 armed=1 rx=50 tel=50 bad=0
+10:33:52.260 > [GATE] state=opening pos=1.473m target=5.000m max=5.000m stopReason=none err=0
+10:33:52.266 > [HB] telAge=49 cmdAge=11 rpm=68 dist=107mm iA=0.10 fault=0 armed=1 rx=67 tel=67 bad=0
+10:33:53.259 > [GATE] state=opening pos=1.688m target=5.000m max=5.000m stopReason=none err=0
+10:33:53.265 > [HB] telAge=53 cmdAge=19 rpm=120 dist=322mm iA=0.00 fault=0 armed=1 rx=84 tel=84 bad=0
+10:33:54.260 > [GATE] state=opening pos=2.051m target=5.000m max=5.000m stopReason=none err=0
+10:33:54.265 > [HB] telAge=46 cmdAge=17 rpm=181 dist=685mm iA=0.18 fault=0 armed=1 rx=101 tel=101 bad=0
+10:33:55.259 > [GATE] state=opening pos=2.538m target=5.000m max=5.000m stopReason=none err=0
+10:33:55.265 > [HB] telAge=34 cmdAge=11 rpm=222 dist=1172mm iA=0.20 fault=0 armed=1 rx=118 tel=118 bad=0
+10:33:56.327 > [GATE] state=opening pos=2.971m target=5.000m max=5.000m stopReason=none err=0
+10:33:56.333 > [HB] telAge=222 cmdAge=8 rpm=225 dist=1637mm iA=0.18 fault=0 armed=1 rx=133 tel=133 bad=0
+10:33:57.327 > [GATE] state=opening pos=3.624m target=5.000m max=5.000m stopReason=none err=0
+10:33:57.333 > [HB] telAge=31 cmdAge=2 rpm=223 dist=2258mm iA=0.22 fault=0 armed=1 rx=152 tel=151 bad=0
+10:33:58.443 > [GATE] state=opening pos=4.145m target=5.000m max=5.000m stopReason=none err=0
+10:33:58.569 > [HB] telAge=68 cmdAge=83 rpm=221 dist=2782mm iA=0.06 fault=0 armed=1 rx=169 tel=168 bad=0
+10:33:59.496 > [GATE] state=opening pos=4.305m target=5.000m max=5.000m stopReason=none err=0
+10:33:59.502 > [HB] telAge=9 cmdAge=16 rpm=163 dist=3385mm iA=0.10 fault=0 armed=1 rx=187 tel=184 bad=0
+10:34:00.495 > [GATE] state=opening pos=4.455m target=5.000m max=5.000m stopReason=none err=0
+10:34:00.501 > [HB] telAge=10 cmdAge=7 rpm=38 dist=3563mm iA=0.06 fault=0 armed=1 rx=204 tel=201 bad=0
+10:34:01.531 > [GATE] state=opening pos=4.455m target=5.000m max=5.000m stopReason=none err=0
+10:34:01.537 > [HB] telAge=1 cmdAge=30 rpm=18 dist=3608mm iA=0.08 fault=0 armed=1 rx=220 tel=217 bad=0
+10:34:02.530 > [GATE] state=opening pos=4.689m target=5.000m max=5.000m stopReason=none err=0
+10:34:02.536 > [HB] telAge=37 cmdAge=16 rpm=8 dist=3650mm iA=0.06 fault=0 armed=1 rx=238 tel=235 bad=0
+10:34:03.121 > [save] bytes=2766 ok
+10:34:03.530 > [GATE] state=stopped pos=5.000m target=5.000m max=5.000m stopReason=none err=0
+10:34:03.536 > [HB] telAge=34 cmdAge=15 rpm=0 dist=3652mm iA=0.06 fault=0 armed=1 rx=255 tel=252 bad=0
+10:34:04.576 > [GATE] state=closing pos=5.000m target=0.000m max=5.000m stopReason=none err=0
+10:34:04.582 > [HB] telAge=16 cmdAge=18 rpm=-7 dist=3651mm iA=0.08 fault=0 armed=1 rx=273 tel=270 bad=0
+10:34:05.886 > [GATE] state=closing pos=4.923m target=0.000m max=5.000m stopReason=none err=0
+10:34:05.892 > [HB] telAge=50 cmdAge=2 rpm=-77 dist=3524mm iA=0.10 fault=0 armed=1 rx=292 tel=289 bad=0
+10:34:07.011 > [GATE] state=closing pos=4.828m target=0.000m max=5.000m stopReason=none err=0
+10:34:07.017 > [HB] telAge=211 cmdAge=470 rpm=-78 dist=3437mm iA=0.10 fault=0 armed=1 rx=298 tel=294 bad=0
+10:34:08.011 > [GATE] state=closing pos=4.600m target=0.000m max=5.000m stopReason=none err=0
+10:34:08.017 > [HB] telAge=156 cmdAge=531 rpm=-79 dist=3252mm iA=0.10 fault=0 armed=1 rx=307 tel=297 bad=0
+10:34:09.012 > [GATE] state=closing pos=4.370m target=0.000m max=5.000m stopReason=none err=0
+10:34:09.018 > [HB] telAge=0 cmdAge=5 rpm=-91 dist=2903mm iA=0.12 fault=0 armed=1 rx=322 tel=304 bad=0
+10:34:10.063 > [GATE] state=closing pos=3.928m target=0.000m max=5.000m stopReason=none err=0
+10:34:10.068 > [HB] telAge=48 cmdAge=15 rpm=-227 dist=2488mm iA=0.02 fault=0 armed=1 rx=337 tel=318 bad=0
+10:34:11.117 > [GATE] state=closing pos=3.521m target=0.000m max=5.000m stopReason=none err=0
+10:34:11.123 > [HB] telAge=390 cmdAge=9 rpm=-226 dist=2110mm iA=0.20 fault=0 armed=1 rx=349 tel=330 bad=0
+10:34:12.117 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:12.123 > [HB] telAge=16 cmdAge=11 rpm=-226 dist=1384mm iA=0.12 fault=0 armed=1 rx=368 tel=347 bad=0
+10:34:13.118 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:13.124 > [HB] telAge=53 cmdAge=176 rpm=-225 dist=1195mm iA=0.20 fault=0 armed=1 rx=374 tel=353 bad=0
+10:34:14.169 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:14.175 > [HB] telAge=50 cmdAge=12 rpm=-225 dist=312mm iA=0.20 fault=0 armed=1 rx=393 tel=365 bad=0
+10:34:15.244 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:15.250 > [HB] telAge=2 cmdAge=14 rpm=-227 dist=-285mm iA=0.20 fault=0 armed=1 rx=412 tel=384 bad=0
+10:34:16.461 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:16.467 > [HB] telAge=32 cmdAge=27 rpm=-223 dist=-914mm iA=0.18 fault=0 armed=1 rx=432 tel=404 bad=0
+10:34:17.587 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:17.593 > [HB] telAge=147 cmdAge=9 rpm=-158 dist=-1341mm iA=0.14 fault=0 armed=1 rx=448 tel=420 bad=0
+10:34:18.535 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:18.540 > [HB] telAge=319 cmdAge=175 rpm=-146 dist=-1426mm iA=0.12 fault=0 armed=1 rx=454 tel=424 bad=0
+10:34:19.579 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:19.585 > [HB] telAge=146 cmdAge=490 rpm=-142 dist=-1854mm iA=0.14 fault=0 armed=1 rx=462 tel=427 bad=0
+10:34:20.671 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:20.677 > [HB] telAge=15 cmdAge=15 rpm=-121 dist=-2417mm iA=0.14 fault=0 armed=1 rx=478 tel=436 bad=0
+10:34:21.670 > [GATE] state=closing pos=3.396m target=0.000m max=5.000m stopReason=none err=0
+10:34:21.676 > [HB] telAge=1 cmdAge=14 rpm=-75 dist=-2651mm iA=0.12 fault=0 armed=1 rx=495 tel=453 bad=0
+10:34:22.981 > [GATE] state=stopped pos=3.396m target=3.396m max=5.000m stopReason=none err=0
+10:34:22.987 > [HB] telAge=5 cmdAge=15 rpm=-12 dist=-2748mm iA=0.04 fault=0 armed=0 rx=517 tel=475 bad=0
+10:34:23.298 > [save] bytes=2766 ok
+10:34:24.144 > [GATE] state=stopped pos=3.396m target=3.396m max=5.000m stopReason=none err=0
+10:34:24.149 > [HB] telAge=111 cmdAge=15 rpm=0 dist=-2751mm iA=0.02 fault=0 armed=1 rx=533 tel=491 bad=0
+10:34:25.028 > [GATE] state=stopped pos=3.396m target=3.396m max=5.000m stopReason=none err=0
+10:34:25.034 > [HB] telAge=49 cmdAge=7 rpm=0 dist=-2753mm iA=0.08 fault=0 armed=1 rx=550 tel=507 bad=0
+10:34:26.211 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:26.217 > [HB] telAge=95 cmdAge=11 rpm=0 dist=-2753mm iA=0.06 fault=0 armed=1 rx=561 tel=518 bad=0
+10:34:27.316 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:27.321 > [HB] telAge=48 cmdAge=118 rpm=9 dist=-2737mm iA=0.08 fault=0 armed=1 rx=571 tel=523 bad=0
+10:34:28.461 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:28.467 > [HB] telAge=245 cmdAge=237 rpm=14 dist=-2704mm iA=0.08 fault=0 armed=1 rx=581 tel=528 bad=0
+10:34:29.462 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:29.467 > [HB] telAge=11 cmdAge=39 rpm=19 dist=-2657mm iA=0.06 fault=0 armed=1 rx=589 tel=532 bad=0
+10:34:30.534 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:30.539 > [HB] telAge=49 cmdAge=9 rpm=53 dist=-2553mm iA=0.02 fault=0 armed=1 rx=607 tel=544 bad=0
+10:34:31.556 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:31.562 > [HB] telAge=13 cmdAge=12 rpm=55 dist=-2415mm iA=0.06 fault=0 armed=1 rx=621 tel=556 bad=0
+10:34:32.670 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:32.676 > [HB] telAge=66 cmdAge=27 rpm=55 dist=-2315mm iA=0.10 fault=0 armed=1 rx=634 tel=569 bad=0
+10:34:33.852 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:33.858 > [HB] telAge=237 cmdAge=2 rpm=55 dist=-2146mm iA=0.08 fault=0 armed=1 rx=648 tel=576 bad=0
+10:34:34.853 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:34.858 > [HB] telAge=48 cmdAge=5 rpm=55 dist=-1992mm iA=0.08 fault=0 armed=1 rx=664 tel=588 bad=0
+10:34:36.109 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:36.115 > [HB] telAge=14 cmdAge=68 rpm=56 dist=-1861mm iA=0.08 fault=0 armed=1 rx=681 tel=605 bad=0
+10:34:37.181 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:37.186 > [HB] telAge=13 cmdAge=14 rpm=55 dist=-1684mm iA=0.10 fault=0 armed=1 rx=695 tel=614 bad=1
+10:34:38.296 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:38.301 > [HB] telAge=-1 cmdAge=6 rpm=56 dist=-1538mm iA=0.08 fault=0 armed=1 rx=713 tel=631 bad=1
+10:34:39.416 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:39.423 > [HB] telAge=79 cmdAge=24 rpm=55 dist=-1438mm iA=0.14 fault=0 armed=1 rx=726 tel=644 bad=1
+10:34:40.597 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:40.603 > [HB] telAge=292 cmdAge=19 rpm=63 dist=-1273mm iA=0.10 fault=0 armed=1 rx=745 tel=661 bad=1
+10:34:41.672 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:41.678 > [HB] telAge=53 cmdAge=14 rpm=27 dist=-1075mm iA=0.14 fault=0 armed=1 rx=758 tel=669 bad=1
+10:34:42.799 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:42.805 > [HB] telAge=6 cmdAge=23 rpm=119 dist=-833mm iA=0.12 fault=0 armed=1 rx=776 tel=686 bad=1
+10:34:43.907 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:43.912 > [HB] telAge=60 cmdAge=235 rpm=144 dist=-684mm iA=0.14 fault=0 armed=1 rx=784 tel=694 bad=1
+10:34:45.043 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:45.049 > [HB] telAge=58 cmdAge=17 rpm=167 dist=-80mm iA=0.18 fault=0 armed=1 rx=806 tel=713 bad=1
+10:34:46.044 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:46.050 > [HB] telAge=57 cmdAge=20 rpm=224 dist=394mm iA=0.18 fault=0 armed=1 rx=823 tel=730 bad=1
+10:34:47.044 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:47.050 > [HB] telAge=16 cmdAge=308 rpm=225 dist=674mm iA=0.18 fault=0 armed=1 rx=833 tel=737 bad=1
+10:34:48.125 > [GATE] state=opening pos=3.396m target=5.000m max=5.000m stopReason=none err=0
+10:34:48.130 > [HB] telAge=9 cmdAge=156 rpm=223 dist=1289mm iA=0.22 fault=0 armed=1 rx=845 tel=749 bad=1
+10:34:49.240 > [GATE] state=opening pos=3.170m target=5.000m max=5.000m stopReason=none err=0
+10:34:49.246 > [HB] telAge=415 cmdAge=146 rpm=223 dist=1570mm iA=0.16 fault=0 armed=1 rx=853 tel=752 bad=1
+10:34:50.417 > [GATE] state=opening pos=3.459m target=5.000m max=5.000m stopReason=none err=0
+10:34:50.424 > [HB] telAge=363 cmdAge=11 rpm=215 dist=2199mm iA=0.18 fault=0 armed=1 rx=863 tel=755 bad=1
+10:34:51.951 > [GATE] state=opening pos=3.892m target=5.000m max=5.000m stopReason=none err=0
+10:34:51.956 > [HB] telAge=62 cmdAge=216 rpm=186 dist=3259mm iA=0.16 fault=0 armed=1 rx=884 tel=768 bad=1
+10:34:52.951 > [GATE] state=opening pos=4.071m target=5.000m max=5.000m stopReason=none err=0
+10:34:52.956 > [HB] telAge=89 cmdAge=182 rpm=173 dist=3534mm iA=0.14 fault=0 armed=1 rx=893 tel=773 bad=1
+10:34:54.017 > [GATE] state=opening pos=4.071m target=5.000m max=5.000m stopReason=none err=0
+10:34:54.022 > [HB] telAge=51 cmdAge=68 rpm=159 dist=1mm iA=0.16 fault=0 armed=1 rx=902 tel=778 bad=1
+10:34:55.019 > [GATE] state=opening pos=4.071m target=5.000m max=5.000m stopReason=none err=0
+10:34:55.024 > [HB] telAge=67 cmdAge=118 rpm=149 dist=4378mm iA=0.14 fault=0 armed=1 rx=913 tel=784 bad=1
+10:34:56.020 > [GATE] state=opening pos=4.071m target=5.000m max=5.000m stopReason=none err=0
+10:34:56.026 > [HB] telAge=11 cmdAge=15 rpm=84 dist=4827mm iA=0.10 fault=0 armed=1 rx=935 tel=804 bad=1
+10:34:57.024 > [GATE] state=opening pos=4.071m target=5.000m max=5.000m stopReason=none err=0
+10:34:57.030 > [HB] telAge=11 cmdAge=1 rpm=14 dist=4940mm iA=0.06 fault=0 armed=1 rx=952 tel=821 bad=1
+10:34:57.865 > [save] bytes=2766 ok
+10:34:58.024 > [GATE] state=stopped pos=4.071m target=4.071m max=5.000m stopReason=none err=0
+10:34:58.030 > [HB] telAge=14 cmdAge=16 rpm=0 dist=4944mm iA=0.06 fault=0 armed=1 rx=969 tel=838 bad=1
+10:34:59.024 > [GATE] state=stopped pos=4.071m target=4.071m max=5.000m stopReason=none err=0
+10:34:59.030 > [HB] telAge=10 cmdAge=13 rpm=0 dist=4944mm iA=0.02 fault=0 armed=0 rx=986 tel=855 bad=1
+10:35:00.024 > [GATE] state=stopped pos=4.071m target=4.071m max=5.000m stopReason=none err=0
+10:35:00.029 > [HB] telAge=8 cmdAge=2 rpm=0 dist=4944mm iA=0.00 fault=0 armed=0 rx=1003 tel=872 bad=1
+10:35:01.025 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:01.031 > [HB] telAge=12 cmdAge=8 rpm=-46 dist=4915mm iA=0.08 fault=0 armed=1 rx=1020 tel=889 bad=1
+10:35:02.025 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:02.031 > [HB] telAge=3 cmdAge=6 rpm=-56 dist=4784mm iA=0.08 fault=0 armed=1 rx=1037 tel=906 bad=1
+10:35:03.025 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:03.031 > [HB] telAge=0 cmdAge=19 rpm=-56 dist=4651mm iA=0.08 fault=0 armed=1 rx=1054 tel=923 bad=1
+10:35:04.025 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:04.030 > [HB] telAge=51 cmdAge=65 rpm=-57 dist=4525mm iA=0.08 fault=0 armed=1 rx=1070 tel=939 bad=1
+10:35:05.080 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:05.085 > [HB] telAge=96 cmdAge=17 rpm=-57 dist=4391mm iA=0.08 fault=0 armed=1 rx=1088 tel=956 bad=1
+10:35:06.078 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:06.083 > [HB] telAge=29 cmdAge=7 rpm=-57 dist=4250mm iA=0.08 fault=0 armed=1 rx=1105 tel=974 bad=1
+10:35:07.078 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:07.084 > [HB] telAge=19 cmdAge=14 rpm=-57 dist=4116mm iA=0.08 fault=0 armed=1 rx=1122 tel=991 bad=1
+10:35:08.079 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:08.085 > [HB] telAge=12 cmdAge=2 rpm=-56 dist=3983mm iA=0.12 fault=0 armed=1 rx=1139 tel=1008 bad=1
+10:35:09.078 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:09.084 > [HB] telAge=8 cmdAge=6 rpm=-56 dist=3849mm iA=0.08 fault=0 armed=1 rx=1156 tel=1025 bad=1
+10:35:10.080 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:10.086 > [HB] telAge=4 cmdAge=8 rpm=-57 dist=3716mm iA=0.04 fault=0 armed=1 rx=1173 tel=1042 bad=1
+10:35:11.080 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:11.085 > [HB] telAge=55 cmdAge=64 rpm=-66 dist=3586mm iA=0.04 fault=0 armed=1 rx=1189 tel=1058 bad=1
+10:35:12.133 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:12.139 > [HB] telAge=-1 cmdAge=3 rpm=-122 dist=3360mm iA=0.12 fault=0 armed=1 rx=1207 tel=1076 bad=1
+10:35:13.133 > [GATE] state=closing pos=4.071m target=0.000m max=5.000m stopReason=none err=0
+10:35:13.139 > [HB] telAge=35 cmdAge=20 rpm=-191 dist=2992mm iA=0.22 fault=0 armed=1 rx=1224 tel=1093 bad=1
+10:35:14.133 > [GATE] state=closing pos=3.823m target=0.000m max=5.000m stopReason=none err=0
+10:35:14.138 > [HB] telAge=25 cmdAge=9 rpm=-226 dist=2475mm iA=0.18 fault=0 armed=1 rx=1241 tel=1110 bad=1
+10:35:15.133 > [GATE] state=closing pos=3.290m target=0.000m max=5.000m stopReason=none err=0
+10:35:15.139 > [HB] telAge=8 cmdAge=12 rpm=-225 dist=1939mm iA=0.20 fault=0 armed=1 rx=1258 tel=1127 bad=1
+10:35:16.133 > [GATE] state=closing pos=2.774m target=0.000m max=5.000m stopReason=none err=0
+10:35:16.139 > [HB] telAge=2 cmdAge=4 rpm=-227 dist=1403mm iA=0.10 fault=0 armed=1 rx=1275 tel=1144 bad=1
+10:35:17.133 > [GATE] state=closing pos=2.246m target=0.000m max=5.000m stopReason=none err=0
+10:35:17.139 > [HB] telAge=55 cmdAge=9 rpm=-223 dist=898mm iA=0.12 fault=0 armed=1 rx=1291 tel=1160 bad=1
+10:35:18.133 > [GATE] state=closing pos=1.711m target=0.000m max=5.000m stopReason=none err=0
+10:35:18.139 > [HB] telAge=49 cmdAge=8 rpm=-227 dist=363mm iA=0.18 fault=0 armed=1 rx=1308 tel=1177 bad=1
+10:35:19.133 > [GATE] state=closing pos=1.177m target=0.000m max=5.000m stopReason=none err=0
+10:35:19.138 > [HB] telAge=39 cmdAge=6 rpm=-225 dist=-171mm iA=0.18 fault=0 armed=1 rx=1325 tel=1194 bad=1
+10:35:20.133 > [GATE] state=closing pos=0.641m target=0.000m max=5.000m stopReason=none err=0
+10:35:20.138 > [HB] telAge=24 cmdAge=1 rpm=-225 dist=-707mm iA=0.20 fault=0 armed=1 rx=1342 tel=1211 bad=1
+10:35:21.133 > [GATE] state=closing pos=0.169m target=0.000m max=5.000m stopReason=none err=0
+10:35:21.138 > [HB] telAge=20 cmdAge=18 rpm=-168 dist=-1179mm iA=0.14 fault=0 armed=1 rx=1359 tel=1228 bad=1
+10:35:22.133 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:22.139 > [HB] telAge=4 cmdAge=1 rpm=-100 dist=-1496mm iA=0.10 fault=0 armed=1 rx=1376 tel=1245 bad=1
+10:35:23.143 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:23.148 > [HB] telAge=7 cmdAge=6 rpm=-29 dist=-1647mm iA=0.08 fault=0 armed=1 rx=1393 tel=1262 bad=1
+10:35:24.143 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:24.149 > [HB] telAge=6 cmdAge=26 rpm=0 dist=-1662mm iA=0.06 fault=0 armed=0 rx=1410 tel=1279 bad=1
+10:35:25.151 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:25.157 > [HB] telAge=11 cmdAge=21 rpm=0 dist=-1662mm iA=0.12 fault=0 armed=0 rx=1427 tel=1296 bad=1
+10:35:26.155 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:26.161 > [HB] telAge=15 cmdAge=1 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1444 tel=1313 bad=1
+10:35:27.161 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:27.168 > [HB] telAge=15 cmdAge=20 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1461 tel=1330 bad=1
+10:35:28.169 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:28.175 > [HB] telAge=21 cmdAge=16 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1478 tel=1347 bad=1
+10:35:29.204 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:29.210 > [HB] telAge=1 cmdAge=17 rpm=0 dist=-1662mm iA=0.02 fault=0 armed=0 rx=1496 tel=1365 bad=1
+10:35:30.208 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:30.214 > [HB] telAge=2 cmdAge=24 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1513 tel=1382 bad=1
+10:35:31.210 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:31.216 > [HB] telAge=2 cmdAge=11 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1530 tel=1399 bad=1
+10:35:32.219 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:32.225 > [HB] telAge=6 cmdAge=14 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1547 tel=1416 bad=1
+10:35:33.224 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:33.229 > [HB] telAge=9 cmdAge=21 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1564 tel=1433 bad=1
+10:35:34.228 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:34.234 > [HB] telAge=6 cmdAge=22 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1581 tel=1450 bad=1
+10:35:35.246 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:35.252 > [HB] telAge=17 cmdAge=7 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1598 tel=1467 bad=1
+10:35:36.249 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:36.255 > [HB] telAge=21 cmdAge=12 rpm=0 dist=-1662mm iA=0.02 fault=0 armed=0 rx=1615 tel=1484 bad=1
+10:35:37.336 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:37.342 > [HB] telAge=3 cmdAge=14 rpm=0 dist=-1662mm iA=0.10 fault=0 armed=0 rx=1633 tel=1502 bad=1
+10:35:37.537 > [save] bytes=2756 ok
+10:35:38.336 > [GATE] state=stopped pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:38.341 > [HB] telAge=48 cmdAge=23 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1650 tel=1519 bad=1
+10:35:39.336 > [GATE] state=stopped pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:35:39.342 > [HB] telAge=44 cmdAge=12 rpm=0 dist=-1662mm iA=0.00 fault=0 armed=0 rx=1667 tel=1536 bad=1
+10:35:40.336 > [GATE] state=opening pos=0.015m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:40.341 > [HB] telAge=38 cmdAge=13 rpm=37 dist=-1647mm iA=0.08 fault=0 armed=1 rx=1684 tel=1553 bad=1
+10:35:41.337 > [GATE] state=opening pos=0.166m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:41.342 > [HB] telAge=32 cmdAge=12 rpm=85 dist=-1496mm iA=0.12 fault=0 armed=1 rx=1701 tel=1570 bad=1
+10:35:42.337 > [GATE] state=opening pos=0.443m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:42.343 > [HB] telAge=30 cmdAge=8 rpm=149 dist=-1219mm iA=0.16 fault=0 armed=1 rx=1718 tel=1587 bad=1
+10:35:43.337 > [GATE] state=opening pos=0.875m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:43.342 > [HB] telAge=25 cmdAge=18 rpm=217 dist=-787mm iA=0.18 fault=0 armed=1 rx=1735 tel=1604 bad=1
+10:35:44.338 > [GATE] state=opening pos=1.402m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:44.343 > [HB] telAge=12 cmdAge=0 rpm=225 dist=-258mm iA=0.00 fault=0 armed=1 rx=1752 tel=1621 bad=1
+10:35:45.337 > [GATE] state=opening pos=1.931m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:45.343 > [HB] telAge=9 cmdAge=2 rpm=224 dist=272mm iA=0.20 fault=0 armed=1 rx=1769 tel=1638 bad=1
+10:35:46.337 > [GATE] state=opening pos=2.461m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:46.343 > [HB] telAge=8 cmdAge=5 rpm=226 dist=803mm iA=0.20 fault=0 armed=1 rx=1786 tel=1655 bad=1
+10:35:47.337 > [GATE] state=opening pos=2.989m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:47.343 > [HB] telAge=6 cmdAge=18 rpm=222 dist=1334mm iA=0.18 fault=0 armed=1 rx=1803 tel=1672 bad=1
+10:35:48.337 > [GATE] state=opening pos=3.494m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:48.343 > [HB] telAge=47 cmdAge=121 rpm=225 dist=1834mm iA=0.20 fault=0 armed=1 rx=1819 tel=1688 bad=1
+10:35:49.403 > [GATE] state=opening pos=4.025m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:49.409 > [HB] telAge=-1 cmdAge=91 rpm=218 dist=2424mm iA=0.18 fault=0 armed=1 rx=1838 tel=1707 bad=1
+10:35:50.402 > [GATE] state=opening pos=4.559m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:50.408 > [HB] telAge=50 cmdAge=6 rpm=187 dist=2897mm iA=0.12 fault=0 armed=1 rx=1854 tel=1723 bad=1
+10:35:51.402 > [GATE] state=opening pos=4.830m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:51.408 > [HB] telAge=50 cmdAge=20 rpm=69 dist=3168mm iA=0.08 fault=0 armed=1 rx=1871 tel=1740 bad=1
+10:35:52.402 > [GATE] state=opening pos=4.926m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:52.408 > [HB] telAge=40 cmdAge=14 rpm=26 dist=3264mm iA=0.06 fault=0 armed=1 rx=1888 tel=1757 bad=1
+10:35:53.403 > [GATE] state=opening pos=4.973m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:53.409 > [HB] telAge=42 cmdAge=8 rpm=18 dist=3311mm iA=0.10 fault=0 armed=1 rx=1905 tel=1774 bad=1
+10:35:54.403 > [GATE] state=opening pos=5.000m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:54.408 > [HB] telAge=36 cmdAge=14 rpm=0 dist=3343mm iA=0.02 fault=0 armed=0 rx=1922 tel=1791 bad=1
+10:35:55.403 > [GATE] state=opening pos=5.000m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:55.409 > [HB] telAge=37 cmdAge=5 rpm=0 dist=3343mm iA=0.00 fault=0 armed=0 rx=1939 tel=1808 bad=1
+10:35:56.403 > [GATE] state=opening pos=5.000m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:56.409 > [HB] telAge=36 cmdAge=5 rpm=0 dist=3343mm iA=0.02 fault=0 armed=0 rx=1956 tel=1825 bad=1
+10:35:57.379 > [save] bytes=2756 ok
+10:35:57.403 > [GATE] state=stopped pos=5.000m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:57.409 > [HB] telAge=37 cmdAge=0 rpm=0 dist=3343mm iA=0.02 fault=0 armed=0 rx=1973 tel=1842 bad=1
+10:35:58.404 > [GATE] state=stopped pos=5.000m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:58.410 > [HB] telAge=18 cmdAge=98 rpm=0 dist=3343mm iA=0.16 fault=0 armed=0 rx=1990 tel=1859 bad=1
+10:35:59.404 > [GATE] state=stopped pos=5.000m target=5.000m max=5.000m stopReason=soft_limit err=0
+10:35:59.410 > [HB] telAge=32 cmdAge=12 rpm=0 dist=3343mm iA=0.02 fault=0 armed=0 rx=2007 tel=1876 bad=1
+10:36:00.418 > [GATE] state=closing pos=4.988m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:00.424 > [HB] telAge=43 cmdAge=1 rpm=-38 dist=3322mm iA=0.08 fault=0 armed=1 rx=2024 tel=1893 bad=1
+10:36:01.426 > [GATE] state=closing pos=4.844m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:01.432 > [HB] telAge=46 cmdAge=6 rpm=-89 dist=3163mm iA=0.12 fault=0 armed=1 rx=2041 tel=1910 bad=1
+10:36:02.443 > [GATE] state=closing pos=4.607m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:02.448 > [HB] telAge=49 cmdAge=1 rpm=-154 dist=2872mm iA=0.14 fault=0 armed=1 rx=2058 tel=1927 bad=1
+10:36:03.445 > [GATE] state=closing pos=4.129m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:03.451 > [HB] telAge=51 cmdAge=9 rpm=-220 dist=2432mm iA=0.18 fault=0 armed=1 rx=2075 tel=1944 bad=1
+10:36:04.454 > [GATE] state=closing pos=3.617m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:04.460 > [HB] telAge=48 cmdAge=21 rpm=-226 dist=1897mm iA=0.08 fault=0 armed=1 rx=2092 tel=1961 bad=1
+10:36:05.459 > [GATE] state=closing pos=3.081m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:05.465 > [HB] telAge=44 cmdAge=18 rpm=-226 dist=1361mm iA=0.12 fault=0 armed=1 rx=2109 tel=1978 bad=1
+10:36:06.578 > [GATE] state=closing pos=2.544m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:06.584 > [HB] telAge=2 cmdAge=94 rpm=-226 dist=761mm iA=0.20 fault=0 armed=1 rx=2128 tel=1997 bad=1
+10:36:07.578 > [GATE] state=closing pos=1.883m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:07.584 > [HB] telAge=31 cmdAge=20 rpm=-226 dist=226mm iA=0.18 fault=0 armed=1 rx=2145 tel=2014 bad=1
+10:36:08.611 > [GATE] state=closing pos=1.411m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:08.617 > [HB] telAge=171 cmdAge=9 rpm=-229 dist=-246mm iA=0.18 fault=0 armed=1 rx=2160 tel=2029 bad=1
+10:36:09.608 > [GATE] state=closing pos=0.812m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:09.614 > [HB] telAge=37 cmdAge=3 rpm=-226 dist=-845mm iA=0.08 fault=0 armed=1 rx=2179 tel=2048 bad=1
+10:36:10.607 > [GATE] state=closing pos=0.300m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:10.614 > [HB] telAge=25 cmdAge=2 rpm=-188 dist=-1357mm iA=0.12 fault=0 armed=1 rx=2196 tel=2065 bad=1
+10:36:11.608 > [GATE] state=closing pos=0.004m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:11.613 > [HB] telAge=194 cmdAge=2 rpm=-137 dist=-1672mm iA=0.00 fault=0 armed=1 rx=2210 tel=2079 bad=1
+10:36:12.608 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:12.613 > [HB] telAge=7 cmdAge=15 rpm=-90 dist=-1996mm iA=0.12 fault=0 armed=1 rx=2228 tel=2096 bad=1
+10:36:13.618 > [GATE] state=closing pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:13.624 > [HB] telAge=6 cmdAge=66 rpm=-19 dist=-2117mm iA=0.06 fault=0 armed=1 rx=2244 tel=2112 bad=1
+10:36:14.921 > [save] bytes=2756 ok
+10:36:14.927 > [GATE] state=stopped pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:14.933 > [HB] telAge=2 cmdAge=170 rpm=0 dist=-2129mm iA=0.00 fault=0 armed=0 rx=2267 tel=2135 bad=1
+10:36:15.927 > [GATE] state=stopped pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:15.933 > [HB] telAge=15 cmdAge=3 rpm=0 dist=-2129mm iA=0.00 fault=0 armed=0 rx=2284 tel=2152 bad=1
+10:36:16.484 > [save] bytes=2756 ok
+10:36:16.928 > [GATE] state=stopped pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:16.934 > [HB] telAge=12 cmdAge=2 rpm=0 dist=-2129mm iA=0.02 fault=0 armed=0 rx=2299 tel=2166 bad=1
+10:36:17.928 > [GATE] state=stopped pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:17.935 > [HB] telAge=12 cmdAge=5 rpm=0 dist=-2129mm iA=0.00 fault=0 armed=0 rx=2316 tel=2183 bad=1
+10:36:18.929 > [GATE] state=stopped pos=0.000m target=0.000m max=5.000m stopReason=soft_limit err=0
+10:36:18.935 > [HB] telAge=13 cmdAge=8 rpm=0 dist=-2129mm iA=0.00 fault=0 armed=0 rx=2333 tel=2200 bad=1

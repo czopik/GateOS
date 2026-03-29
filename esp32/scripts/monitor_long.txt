@@ -1,0 +1,45 @@
+--- forcing DTR inactive
+--- forcing RTS inactive
+--- Terminal on COM3 | 115200 8-N-1
+--- Available filters and text transformations: colorize, debug, default, direct, esp32_exception_decoder, hexlify, log2file, nocontrol, printable, send_on_enter, time
+--- More details at https://bit.ly/pio-monitor-filters
+--- Quit: Ctrl+C | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+[save] bytes=2655 ok
+E (99966) task_wdt: Task watchdog got triggered. The following tasks did not reset the watchdog in time:
+E (99966) task_wdt:  - GateTask (CPU 1)
+E (99966) task_wdt: Tasks currently running:
+E (99966) task_wdt: CPU 0: IDLE0
+E (99966) task_wdt: CPU 1: IDLE1
+E (99966) task_wdt: Aborting.
+
+abort() was called at PC 0x4010c62c on core 0
+
+
+Backtrace: 0x400843ad:0x3ffbed3c |<-CORRUPTED
+
+
+
+
+ELF file SHA256: 25dd03dbba97684e
+
+Rebooting...
+ets Jul 29 2019 12:21:46
+
+rst:0xc (SW_CPU_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1184
+load:0x40078000,len:13232
+load:0x40080400,len:3028
+entry 0x400805e4
+LittleFS mounted OK
+index.html found in LittleFS
+LED warn: pin 2 is strapping
+LED init ok pin=2 count=8
+[HCS] ISR zainicjalizowany na pin 13
+[HCS] Callback ustawiony
+WebServer: LittleFS is mounted
+Web server started
+WiFi connected to ChemiXv3, IP: 192.168.1.12
+[save] bytes=2655 ok

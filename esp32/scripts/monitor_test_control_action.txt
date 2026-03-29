@@ -1,0 +1,37 @@
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1184
+load:0x40078000,len:13232
+load:0x40080400,len:3028
+entry 0x400805e4
+LittleFS mounted OK
+index.html found in LittleFS
+LED warn: pin 2 is strapping
+LED init ok pin=2 count=8
+[HCS] ISR zainicjalizowany na pin 13
+[HCS] Callback ustawiony
+WebServer: LittleFS is mounted
+Web server started
+[GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=none err=0
+[HB] telAge=39 cmdAge=5 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=14 tel=14 bad=1
+WiFi connected to ChemiXv3, IP: 192.168.1.12
+[GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=none err=0
+[HB] telAge=49 cmdAge=0 rpm=0 dist=0mm iA=0.00 fault=0 armed=0 rx=31 tel=31 bad=1
+[UI] control action=open
+[UI] control result=open applied=1
+[GATE] state=opening pos=0.000m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=14 cmdAge=16 rpm=0 dist=0mm iA=0.06 fault=0 armed=1 rx=49 tel=49 bad=1
+[GATE] state=opening pos=0.088m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=16 cmdAge=13 rpm=56 dist=96mm iA=0.14 fault=0 armed=1 rx=66 tel=66 bad=1
+[GATE] state=opening pos=0.254m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=19 cmdAge=0 rpm=91 dist=267mm iA=0.12 fault=0 armed=1 rx=83 tel=83 bad=1
+[GATE] state=opening pos=0.514m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=15 cmdAge=15 rpm=124 dist=550mm iA=0.14 fault=0 armed=1 rx=101 tel=101 bad=1
+[GATE] state=opening pos=0.827m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=12 cmdAge=6 rpm=124 dist=841mm iA=0.12 fault=0 armed=1 rx=118 tel=118 bad=1
+[GATE] state=opening pos=1.115m target=3.000m max=3.000m stopReason=none err=0
+[HB] telAge=4 cmdAge=11 rpm=122 dist=1133mm iA=0.14 fault=0 armed=1 rx=135 tel=135 bad=1

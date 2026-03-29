@@ -1,0 +1,142 @@
+STOP + REPEATABILITY TEST REPORT
+API=http://192.168.1.43
+COM=COM3
+
+NOTES:
+- TEST_C używa symulacji przez /api/control stop; bez fizycznego wejścia obstacle nie przechodzi przez onObstacle().
+
+RESULTS:
+TEST_A_REMOTE_STOP_OPEN: PASS
+  {"stopped": true, "t_to_stopped_ms": 0, "t_to_rpm0_ms": 344, "max_abs_rpm_after_stop": 107, "final": {"state": "stopped", "moving": false, "rpm": 0, "stopReason": 1, "position": 0.273999929, "dist": 274}}
+TEST_B_REMOTE_STOP_CLOSE: PASS
+  {"stopped": true, "t_to_stopped_ms": 0, "t_to_rpm0_ms": 266, "max_abs_rpm_after_stop": 41, "final": {"state": "stopped", "moving": false, "rpm": 0, "stopReason": 1, "position": 0.102000035, "dist": 102}}
+TEST_C_OBSTACLE_STOP_SIMULATED: PASS
+  {"stopped": true, "t_to_stopped_ms": 0, "t_to_rpm0_ms": 263, "max_abs_rpm_after_stop": 98, "final": {"state": "stopped", "moving": false, "rpm": 0, "stopReason": 1, "position": 0.336995989, "dist": 337}}
+TEST_D_STOP_TYPE_COMPARE: PASS
+  normal={"stopped": true, "t_to_stopped_ms": 0, "t_to_rpm0_ms": 366, "max_abs_rpm_after_stop": 109, "final": {"state": "stopped", "moving": false, "rpm": 0, "stopReason": 1, "position": 1.427999735, "dist": 1428}}
+  user={"stopped": true, "t_to_stopped_ms": 0, "t_to_rpm0_ms": 313, "max_abs_rpm_after_stop": 105, "final": {"state": "stopped", "moving": false, "rpm": 0, "stopReason": 1, "position": 1.725999832, "dist": 1726}}
+  obstacle(sim)={"stopped": true, "t_to_stopped_ms": 0, "t_to_rpm0_ms": 391, "max_abs_rpm_after_stop": 105, "final": {"state": "stopped", "moving": false, "rpm": 0, "stopReason": 1, "position": 1.974994659, "dist": 1975}}
+TEST_E_REPEATABILITY: FAIL
+  summary={"tolerance_mm": 20.0, "min_error_mm": 90.9167529999999, "max_error_mm": 130.03826099999992, "avg_error_mm": 107.99100399999998, "all_within_tolerance": false}
+
+KEY COM3 LOGS:
+[1774721908816] [GATE] state=stopped pos=0.000m target=0.000m max=3.000m stopReason=none err=0
+[1774721908818] [HB] telAge=1 cmdAge=18 rpm=0 dist=0mm iA=0.02 fault=0 armed=0 rx=15 tel=15 bad=0
+[1774721909359] [UI] control action=open
+[1774721909360] [UI] control result=open applied=1
+[1774721909817] [GATE] state=opening pos=0.003m target=3.000m max=3.000m stopReason=none err=0
+[1774721909818] [HB] telAge=7 cmdAge=10 rpm=14 dist=3mm iA=0.08 fault=0 armed=1 rx=32 tel=32 bad=0
+[1774721910816] [GATE] state=opening pos=0.082m target=3.000m max=3.000m stopReason=none err=0
+[1774721910818] [HB] telAge=8 cmdAge=18 rpm=63 dist=83mm iA=0.18 fault=0 armed=1 rx=49 tel=49 bad=0
+[1774721911561] [UI] control action=toggle
+[1774721911561] [GATE] STOP reason=user telAgeMs=49 stallAgeMs=38
+[1774721911562] [GATE] STOP mode=hard_immediate reason=user
+[1774721911562] [UI] control result=toggle applied=1
+[1774721911817] [GATE] state=stopped pos=0.271m target=0.271m max=3.000m stopReason=user err=0
+[1774721911818] [HB] telAge=2 cmdAge=4 rpm=17 dist=272mm iA=0.04 fault=0 armed=1 rx=66 tel=66 bad=0
+[1774721912029] [UI] control action=close
+[1774721912029] [UI] control result=close applied=1
+[1774721912817] [GATE] state=closing pos=0.260m target=0.000m max=3.000m stopReason=none err=0
+[1774721912818] [HB] telAge=3 cmdAge=24 rpm=-21 dist=258mm iA=0.14 fault=0 armed=1 rx=83 tel=83 bad=0
+[1774721913817] [GATE] state=closing pos=0.175m target=0.000m max=3.000m stopReason=none err=0
+[1774721913818] [HB] telAge=-1 cmdAge=4 rpm=-41 dist=169mm iA=0.14 fault=0 armed=1 rx=100 tel=100 bad=0
+[1774721914321] [UI] control action=toggle
+[1774721914322] [GATE] STOP reason=user telAgeMs=33 stallAgeMs=23
+[1774721914323] [GATE] STOP mode=hard_immediate reason=user
+[1774721914324] [UI] control result=toggle applied=1
+[1774721914667] [UI] control action=open
+[1774721914668] [UI] control result=open applied=1
+[1774721914819] [GATE] state=opening pos=0.102m target=3.000m max=3.000m stopReason=none err=0
+[1774721914822] [HB] telAge=58 cmdAge=6 rpm=0 dist=102mm iA=0.04 fault=0 armed=1 rx=116 tel=116 bad=0
+[1774721915818] [GATE] state=opening pos=0.137m target=3.000m max=3.000m stopReason=none err=0
+[1774721915819] [HB] telAge=-1 cmdAge=17 rpm=38 dist=142mm iA=0.10 fault=0 armed=1 rx=134 tel=134 bad=0
+[1774721916778] [UI] control action=stop
+[1774721916779] [GATE] STOP reason=user telAgeMs=9 stallAgeMs=68
+[1774721916781] [GATE] STOP mode=hard_immediate reason=user
+[1774721916782] [UI] control result=stop applied=1
+[1774721916845] [GATE] state=stopped pos=0.296m target=0.296m max=3.000m stopReason=user err=0
+[1774721916846] [HB] telAge=20 cmdAge=21 rpm=103 dist=311mm iA=0.16 fault=0 armed=1 rx=151 tel=151 bad=0
+[1774721917123] [UI] control action=open
+[1774721917123] [UI] control result=open applied=1
+[1774721917844] [GATE] state=opening pos=0.350m target=3.000m max=3.000m stopReason=none err=0
+[1774721917845] [HB] telAge=26 cmdAge=17 rpm=24 dist=351mm iA=0.08 fault=0 armed=1 rx=168 tel=168 bad=0
+[1774721918843] [GATE] state=opening pos=0.458m target=3.000m max=3.000m stopReason=none err=0
+[1774721918845] [HB] telAge=25 cmdAge=18 rpm=75 dist=458mm iA=0.18 fault=0 armed=1 rx=185 tel=185 bad=0
+[1774721919841] [GATE] state=opening pos=0.694m target=3.000m max=3.000m stopReason=none err=0
+[1774721919864] [HB] telAge=19 cmdAge=13 rpm=109 dist=694mm iA=0.38 fault=0 armed=1 rx=202 tel=202 bad=0
+[1774721920844] [GATE] state=opening pos=0.952m target=3.000m max=3.000m stopReason=none err=0
+[1774721920845] [HB] telAge=19 cmdAge=7 rpm=109 dist=952mm iA=0.26 fault=0 armed=1 rx=219 tel=219 bad=0
+[1774721921844] [GATE] state=opening pos=1.211m target=3.000m max=3.000m stopReason=none err=0
+[1774721921845] [HB] telAge=13 cmdAge=14 rpm=109 dist=1211mm iA=0.38 fault=0 armed=1 rx=236 tel=236 bad=0
+[1774721922520] [UI] control action=stop
+[1774721922521] [GATE] STOP reason=user telAgeMs=48 stallAgeMs=38
+[1774721922521] [GATE] STOP mode=hard_immediate reason=user
+[1774721922522] [UI] control result=stop applied=1
+[1774721922844] [GATE] state=stopped pos=1.428m target=1.428m max=3.000m stopReason=user err=0
+[1774721922845] [HB] telAge=10 cmdAge=15 rpm=17 dist=1428mm iA=0.04 fault=0 armed=1 rx=253 tel=253 bad=0
+[1774721922985] [UI] control action=open
+[1774721922986] [UI] control result=open applied=1
+[1774721923872] [GATE] state=opening pos=1.447m target=3.000m max=3.000m stopReason=none err=0
+[1774721923873] [HB] telAge=2 cmdAge=12 rpm=24 dist=1449mm iA=0.12 fault=0 armed=1 rx=270 tel=270 bad=0
+[1774721924843] [GATE] state=opening pos=1.574m target=3.000m max=3.000m stopReason=none err=0
+[1774721924844] [HB] telAge=8 cmdAge=7 rpm=83 dist=1576mm iA=0.18 fault=0 armed=1 rx=287 tel=287 bad=0
+[1774721925321] [UI] control action=toggle
+[1774721925321] [GATE] STOP reason=user telAgeMs=17 stallAgeMs=7
+[1774721925322] [GATE] STOP mode=hard_immediate reason=user
+[1774721925322] [UI] control result=toggle applied=1
+[1774721925734] [UI] control action=open
+[1774721925734] [UI] control result=open applied=1
+[1774721925843] [GATE] state=opening pos=1.726m target=3.000m max=3.000m stopReason=none err=0
+[1774721925845] [HB] telAge=1 cmdAge=2 rpm=0 dist=1726mm iA=0.04 fault=0 armed=1 rx=304 tel=304 bad=0
+[1774721926844] [GATE] state=opening pos=1.765m target=3.000m max=3.000m stopReason=none err=0
+[1774721926845] [HB] telAge=61 cmdAge=4 rpm=37 dist=1765mm iA=0.16 fault=0 armed=1 rx=320 tel=320 bad=0
+[1774721927834] [UI] control action=stop
+[1774721927835] [GATE] STOP reason=user telAgeMs=57 stallAgeMs=48
+[1774721927835] [GATE] STOP mode=hard_immediate reason=user
+[1774721927836] [UI] control result=stop applied=1
+[1774721927868] [GATE] state=stopped pos=1.929m target=1.929m max=3.000m stopReason=user err=0
+[1774721927909] [HB] telAge=20 cmdAge=26 rpm=105 dist=1944mm iA=0.38 fault=0 armed=1 rx=338 tel=338 bad=0
+[1774721928384] [UI] control action=stop
+[1774721928385] [UI] control result=stop applied=0
+[1774721928902] [GATE] state=stopped pos=1.975m target=1.975m max=3.000m stopReason=user err=0
+[1774721928903] [HB] telAge=60 cmdAge=9 rpm=0 dist=1975mm iA=0.06 fault=0 armed=1 rx=355 tel=355 bad=0
+[1774721929900] [GATE] state=stopped pos=1.975m target=1.975m max=3.000m stopReason=user err=0
+[1774721929902] [HB] telAge=0 cmdAge=17 rpm=0 dist=1975mm iA=0.14 fault=0 armed=1 rx=373 tel=373 bad=0
+[1774721930163] [UI] control action=open
+[1774721930163] [UI] control result=open applied=1
+[1774721930902] [GATE] state=opening pos=1.992m target=3.000m max=3.000m stopReason=none err=0
+[1774721930904] [HB] telAge=59 cmdAge=19 rpm=25 dist=1992mm iA=0.10 fault=0 armed=1 rx=389 tel=389 bad=0
+[1774721931901] [GATE] state=opening pos=2.115m target=3.000m max=3.000m stopReason=none err=0
+[1774721931904] [HB] telAge=51 cmdAge=3 rpm=81 dist=2115mm iA=0.34 fault=0 armed=1 rx=406 tel=406 bad=0
+[1774721932100] [UI] control action=stop
+[1774721932101] [GATE] STOP reason=user telAgeMs=23 stallAgeMs=14
+[1774721932102] [GATE] STOP mode=hard_immediate reason=user
+[1774721932104] [UI] control result=stop applied=1
+[1774721932877] [UI] control action=close
+[1774721932878] [UI] control result=close applied=1
+[1774721932900] [GATE] state=closing pos=2.204m target=0.000m max=3.000m stopReason=none err=0
+[1774721932940] [HB] telAge=51 cmdAge=14 rpm=0 dist=2204mm iA=0.04 fault=0 armed=1 rx=423 tel=423 bad=0
+[1774721934026] [GATE] state=closing pos=2.179m target=0.000m max=3.000m stopReason=none err=0
+[1774721934027] [HB] telAge=34 cmdAge=29 rpm=-30 dist=2170mm iA=0.22 fault=0 armed=1 rx=442 tel=442 bad=0
+[1774721935025] [GATE] state=closing pos=2.018m target=0.000m max=3.000m stopReason=none err=0
+[1774721935026] [HB] telAge=42 cmdAge=5 rpm=-95 dist=2018mm iA=0.34 fault=0 armed=1 rx=459 tel=459 bad=0
+[1774721935560] [UI] control action=stop
+[1774721935560] [GATE] STOP reason=user telAgeMs=56 stallAgeMs=47
+[1774721935561] [GATE] STOP mode=hard_immediate reason=user
+[1774721935561] [UI] control result=stop applied=1
+[1774721936277] [GATE] state=stopped pos=1.884m target=1.884m max=3.000m stopReason=user err=0
+[1774721936278] [HB] telAge=5 cmdAge=18 rpm=0 dist=1833mm iA=0.06 fault=0 armed=1 rx=481 tel=481 bad=0
+[1774721936445] [UI] control action=open
+[1774721936446] [UI] control result=open applied=1
+[1774721937303] [GATE] state=opening pos=1.846m target=3.000m max=3.000m stopReason=none err=0
+[1774721937345] [HB] telAge=33 cmdAge=10 rpm=27 dist=1850mm iA=0.08 fault=0 armed=1 rx=498 tel=498 bad=0
+[1774721938282] [UI] control action=stop
+[1774721938284] [GATE] STOP reason=user telAgeMs=3 stallAgeMs=115
+[1774721938285] [GATE] STOP mode=hard_immediate reason=user
+[1774721938288] [UI] control result=stop applied=1
+[1774721938317] [GATE] state=stopped pos=1.954m target=1.954m max=3.000m stopReason=user err=0
+[1774721938357] [HB] telAge=35 cmdAge=8 rpm=76 dist=1962mm iA=0.28 fault=0 armed=1 rx=515 tel=515 bad=0
+[1774721938829] [UI] control action=close
+[1774721938830] [UI] control result=close applied=1
+[1774721939318] [GATE] state=closing pos=1.988m target=0.000m max=3.000m stopReason=none err=0
+[1774721939321] [HB] telAge=34 cmdAge=15 rpm=-12 dist=1988mm iA=0.06 fault=0 armed=1 rx=532 tel=532 bad=0
