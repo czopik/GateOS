@@ -1,56 +1,48 @@
+```
+# Build artifacts
+build/
+dist/
+
+# Dependencies
 .pio/
-.pioenvs/
-.piolibdeps/
+.platformio/
+lib/
+pioenvs/
+piolibdeps/
 
-# PlatformIO / tool outputs
-*.bin
-*.elf
-*.map
-*.hex
-*.obj
-*.o
-*.d
+# Logs
+*.log
 
-# VS Code local-only files
-.vscode/.browse.c_cpp.db*
-.vscode/c_cpp_properties.json
-.vscode/launch.json
-.vscode/ipch
-.vscode/settings.json
+# Temporary files
+*.tmp
+*.swp
 
-# Python cache / virtual env
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.pytest_cache/
-.mypy_cache/
-.venv/
-venv/
-
-# OS / editor noise
-Thumbs.db
-Desktop.ini
-*.tmp
-*.bak
-*.swp
-*.swo
-
-# Generated logs / reports / local captures
-scripts/*.txt
-scripts/*results.json
-scripts/*report.txt
-scripts/debug_*_config.json
-scripts/debug_*_remotes.json
-scripts/monitor_*.txt
-scripts/monitor_*_err.txt
-scripts/motor_roundtrip_test.json
-screenshots/
-
-# Local / private configuration snapshots
-data.local.json
-config.local.json
-secrets.*
-
-# GitHub / release packaging leftovers
-*.zip
+.Python
+*.so
+.Python
+*.egg-info/
+.eggs/
+```
