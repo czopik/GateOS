@@ -86,6 +86,13 @@ build_stm32() {
     
     cd "$STM32_DIR"
     
+    # Use the dedicated STM32 build script if available
+    if [ -f "$SCRIPT_DIR/build_stm32.sh" ]; then
+        bash "$SCRIPT_DIR/build_stm32.sh" build
+        log_info "STM32 build complete"
+        return
+    fi
+    
     # Check for Makefile or IDE project
     if [ -f "Makefile" ]; then
         make clean
@@ -99,6 +106,7 @@ build_stm32() {
     else
         log_warn "No build system detected for STM32"
         log_info "Expected: Makefile, STM32CubeIDE project, or Keil project"
+        log_info "GateOS modules compiled separately (see scripts/build_stm32.sh)"
     fi
     
     log_info "STM32 build complete (or skipped)"

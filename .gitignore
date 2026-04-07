@@ -2,47 +2,39 @@
 # Build artifacts
 build/
 dist/
+*.o
+*.obj
+*.out
 
 # Dependencies
-.pio/
-.platformio/
-lib/
-pioenvs/
-piolibdeps/
+node_modules/
+venv/
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
 
 # Logs
 *.log
 
-# Temporary files
-*.tmp
-*.swp
-
-# Environment
+# Environment files
 .env
 .env.local
 *.env.*
 
-# Editors
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Coverage
-.coverage
+# Coverage reports
 coverage/
 htmlcov/
+.coverage
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.Python
-*.egg-info/
-.eggs/
+# System files
+.DS_Store
+Thumbs.db
 ```
