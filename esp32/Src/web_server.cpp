@@ -9,6 +9,7 @@
 
 extern void scheduleRestart(uint32_t delayMs);
 extern void scheduleFactoryReset(uint32_t delayMs);
+extern void scheduleRuntimeConfigApply();
 
 void WebServerManager::setOtaActiveCallback(OtaActiveCb cb) { otaActiveCb = cb; }
 
@@ -345,20 +346,8 @@ void WebServerManager::setupRoutes() {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"fs_write_failed\"}");
       return;
     }
-    *cfg = updated;
-    if (mqtt) {
-      mqtt->applyConfig(cfg->mqttConfig);
-    }
-    if (led) {
-      led->applyConfig(cfg->ledConfig);
-      led->setMqttEnabled(cfg->mqttConfig.enabled);
-    }
-    if (motor) {
-      motor->applyConfig(cfg->motorConfig, cfg->gpioConfig, cfg->hoverUartConfig);
-      motor->setInvertDir(cfg->motorConfig.invertDir);
-      motor->setMotionProfile(cfg->motionProfile());
-    }
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
+    scheduleRuntimeConfigApply();
+    request->send(200, "application/json", "{\"status\":\"ok\",\"apply\":\"scheduled\"}");
   });
 
   server.on("/api/config/validate", HTTP_POST, [this](AsyncWebServerRequest *request){
@@ -464,11 +453,8 @@ void WebServerManager::setupRoutes() {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"fs_write_failed\"}");
       return;
     }
-    *cfg = updated;
-    if (motor) {
-      motor->setMotionProfile(cfg->motionProfile());
-    }
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
+    scheduleRuntimeConfigApply();
+    request->send(200, "application/json", "{\"status\":\"ok\",\"apply\":\"scheduled\"}");
   });
 
   server.on("/api/motion/test", HTTP_POST, [this](AsyncWebServerRequest *request){

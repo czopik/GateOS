@@ -168,6 +168,8 @@ static bool restartPending = false;
 static uint32_t restartAtMs = 0;
 static bool factoryResetPending = false;
 static uint32_t factoryResetAtMs = 0;
+static volatile bool runtimeConfigApplyPending = false;
+static uint32_t runtimeConfigApplyRequestedMs = 0;
 
 static volatile long hallCount = 0;
 static portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
@@ -267,6 +269,11 @@ void scheduleFactoryReset(uint32_t delayMs) {
   factoryResetAtMs = millis() + delayMs;
 }
 
+void scheduleRuntimeConfigApply() {
+  runtimeConfigApplyPending = true;
+  runtimeConfigApplyRequestedMs = millis();
+}
+
 TaskHandle_t gateTaskHandle = NULL;
 
 ControlResult handleControlCmd(const char* action);
@@ -284,6 +291,7 @@ void updatePositionPercent();
 void updateFsStats(uint32_t nowMs);
 void scheduleRestart(uint32_t delayMs);
 void scheduleFactoryReset(uint32_t delayMs);
+void scheduleRuntimeConfigApply();
 void handleLd2410Trigger(uint32_t nowMs);
 void onGateStatusChanged(const GateStatus& status, void* ctx);
 void fillDiagnostics(JsonObject& out);
@@ -2068,6 +2076,46 @@ ControlResult handleControlCmd(const char* action) {
   return makeControlResult(true, r.applied, 200, "ok");
 }
 
+static void processPendingRuntimeConfigApply(uint32_t nowMs) {
+  if (!runtimeConfigApplyPending) return;
+  if (otaActive || calibration.isRunning() || homingActive) return;
+  if (gate && gate->isMoving()) return;
+
+  runtimeConfigApplyPending = false;
+  const uint32_t reqAgeMs =
+    (runtimeConfigApplyRequestedMs != 0 && nowMs >= runtimeConfigApplyRequestedMs)
+      ? (nowMs - runtimeConfigApplyRequestedMs)
+      : 0;
+  Serial.printf("[CFG_APPLY] start reqAgeMs=%lu\n",
+                (unsigned long)reqAgeMs);
+
+  if (gateTaskHandle != NULL) {
+    vTaskSuspend(gateTaskHandle);
+  }
+
+  config.load();
+  setupInputs();
+  updateHallAttachment();
+
+  mqtt.applyConfig(config.mqttConfig);
+  led.applyConfig(config.ledConfig);
+  led.setMqttEnabled(config.mqttConfig.enabled);
+
+  if (motor) {
+    motor->applyConfig(config.motorConfig, config.gpioConfig, config.hoverUartConfig);
+    motor->setInvertDir(config.motorConfig.invertDir);
+    motor->setMotionProfile(config.motionProfile());
+  }
+
+  if (gateTaskHandle != NULL) {
+    vTaskResume(gateTaskHandle);
+  }
+
+  Serial.printf("[CFG_APPLY] done rev=%lu heap=%u\n",
+                (unsigned long)config.getRevision(),
+                (unsigned)ESP.getFreeHeap());
+}
+
 ControlResult handleControlWrapper(const String& action) {
   return handleControlCmd(action.c_str());
 }
@@ -2410,6 +2458,7 @@ void loop() {
   handleLd2410Trigger(now);
   maybePersistPosition(now);
   updateFsStats(now);
+  processPendingRuntimeConfigApply(now);
 
   mqtt.setConnectAllowed(!gate || !gate->isMoving());
   mqtt.loop();
