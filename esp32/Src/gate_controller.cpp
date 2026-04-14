@@ -682,12 +682,14 @@ void GateController::setPosition(float position, float maxDistance) {
     status.positionPercent = -1;
   }
 
-  if (state == GATE_OPENING) {
-    status.targetPosition = status.maxDistance;
-  } else if (state == GATE_CLOSING) {
-    status.targetPosition = 0.0f;
-  } else {
-    status.targetPosition = status.position;
+  if (!moving && !pendingStop) {
+    if (state == GATE_OPENING) {
+      status.targetPosition = status.maxDistance;
+    } else if (state == GATE_CLOSING) {
+      status.targetPosition = 0.0f;
+    } else {
+      status.targetPosition = status.position;
+    }
   }
 
   if (moving) {

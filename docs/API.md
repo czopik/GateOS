@@ -24,12 +24,18 @@ Send gate control commands.
 }
 ```
 
+Alternative shorthand is also accepted:
+
+```json
+{
+  "position": 1.25
+}
+```
+
 **Response:**
 ```json
 {
-  "success": true,
-  "state": "OPENING",
-  "message": "Command accepted"
+  "status": "ok"
 }
 ```
 
@@ -38,6 +44,8 @@ Send gate control commands.
 - `close` - Start closing gate  
 - `stop` - Stop movement immediately
 - `toggle` - Toggle between open/close
+- `position` / `target` - Move to a position in meters
+- `positionMm` / `targetMm` - Move to a position in millimeters
 
 ---
 
@@ -58,9 +66,7 @@ Move to specific position.
 **Response:**
 ```json
 {
-  "success": true,
-  "target": 2.5,
-  "estimated_time": 15.0
+  "status": "ok"
 }
 ```
 

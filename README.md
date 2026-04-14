@@ -1,4 +1,4 @@
-# GateOS - Production-Ready Sliding Gate Controller
+# GateOS - Test Version Sliding Gate Controller
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Version](https://img.shields.io/badge/version-2.0.0-blue)]()
@@ -6,17 +6,17 @@
 
 ## Overview
 
-GateOS is a stable, deterministic, and safe sliding gate controller system using:
+GateOS is a test-version sliding gate controller system using:
 - **ESP32**: Main controller with web UI, API, and connectivity
 - **STM32**: Motor controller based on hoverboard firmware (FOC motor control)
 
 ## Key Features
 
-✅ **Stable** - No freezes, no random stops  
-✅ **Deterministic** - Repeatable positioning (<50mm variance)  
+✅ **Bench-Tested** - Verified on live ESP32 + motor test setup  
+✅ **Deterministic** - Repeatable positioning and direction-aware limits  
 ✅ **Safe** - Multiple safety layers, fault detection, emergency stop  
+✅ **Recoverable** - Startup homing restores position reference after uncertain reboot  
 ✅ **Modular** - Clean architecture with FreeRTOS tasks  
-✅ **Testable** - Automated test suite included  
 
 ## Quick Start
 
@@ -53,6 +53,13 @@ curl http://gate.local/api/status
 # Move to position
 curl -X POST http://gate.local/api/move -d '{"position":2.5}'
 ```
+
+## Startup Homing
+
+- If `CLOSE` is active at boot, position is accepted immediately as `0 m`.
+- If `OPEN` is active at boot, position is accepted immediately as `maxDistance`.
+- If neither limit is active at boot, the controller starts slow startup homing toward `OPEN`.
+- During uncertain startup, the UI exposes a temporary helper position of `100 mm` until reference is found.
 
 ## Documentation
 

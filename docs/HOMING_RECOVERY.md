@@ -6,7 +6,8 @@ Implemented mainly in [`runStartupHoming()`](Src/app_main.cpp:468).
 
 ### Goals
 
-- establish a reliable CLOSE reference after reboot
+- accept an already-active limit as a trusted startup reference
+- establish a reliable OPEN reference after reboot when neither limit is active
 - avoid false certainty when position is unknown
 - allow retry if telemetry starts late
 
@@ -14,9 +15,23 @@ Implemented mainly in [`runStartupHoming()`](Src/app_main.cpp:468).
 
 When both limits are inactive and position is uncertain, the runtime exposes a temporary helper distance of 100 mm. This is not treated as a trusted reference.
 
-## CLOSE reference acquisition
+## Direct startup reference
 
-After reaching CLOSE:
+If a single limit is already active at boot:
+
+- `CLOSE` active -> position is immediately resynced to `0 m`
+- `OPEN` active -> position is immediately resynced to `maxDistance`
+- no startup homing move is started
+
+## OPEN reference acquisition
+
+If both limits are inactive at boot:
+
+- the runtime exposes a temporary helper position of `100 mm`
+- a slow startup homing move is started toward `OPEN`
+- after reaching `OPEN`, position becomes certain and is resynced to `maxDistance`
+
+After reaching OPEN:
 
 - control position is resynced
 - position becomes certain

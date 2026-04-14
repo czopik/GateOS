@@ -1069,7 +1069,76 @@ void WebServerManager::setupRoutes() {
     StaticJsonDocument<128> doc;
     if (!parseJsonBody(request, doc, "api_control_post")) { request->send(400, "application/json", "{\"status\":\"bad_json\"}"); return; }
     String action = normalizeAction(String((const char*)(doc["action"] | doc["cmd"] | "")));
-    if (controlCb && action.length() > 0) controlCb(action);
+    if (action.length() == 0) {
+      if (doc.containsKey("position")) {
+        float pos = doc["position"] | NAN;
+        if (!isnan(pos)) {
+          action = String("goto:") + String(pos, 3);
+        }
+      } else if (doc.containsKey("target")) {
+        float pos = doc["target"] | NAN;
+        if (!isnan(pos)) {
+          action = String("goto:") + String(pos, 3);
+        }
+      } else if (doc.containsKey("positionMm")) {
+        long posMm = doc["positionMm"] | LONG_MIN;
+        if (posMm != LONG_MIN) {
+          action = String("goto_mm:") + String(posMm);
+        }
+      } else if (doc.containsKey("targetMm")) {
+        long posMm = doc["targetMm"] | LONG_MIN;
+        if (posMm != LONG_MIN) {
+          action = String("goto_mm:") + String(posMm);
+        }
+      }
+    }
+    if (!controlCb || action.length() == 0) {
+      request->send(422, "application/json", "{\"status\":\"invalid\",\"error\":\"missing_action_or_position\"}");
+      return;
+    }
+    controlCb(action);
+    request->send(200, "application/json", "{\"status\":\"ok\"}");
+  });
+
+  server.on("/api/move", HTTP_POST, [this](AsyncWebServerRequest *request){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    if (otaActiveCb && otaActiveCb()) {
+      request->send(423, "application/json", "{\"status\":\"blocked\",\"error\":\"ota_active\"}");
+      return;
+    }
+    BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
+    if (!buf) return;
+    if (index + len != total) return;
+
+    StaticJsonDocument<160> doc;
+    if (!parseJsonBody(request, doc, "api_move_post")) {
+      request->send(400, "application/json", "{\"status\":\"bad_json\"}");
+      return;
+    }
+
+    String action;
+    if (doc.containsKey("position")) {
+      float pos = doc["position"] | NAN;
+      if (!isnan(pos)) action = String("goto:") + String(pos, 3);
+    } else if (doc.containsKey("target")) {
+      float pos = doc["target"] | NAN;
+      if (!isnan(pos)) action = String("goto:") + String(pos, 3);
+    } else if (doc.containsKey("positionMm")) {
+      long posMm = doc["positionMm"] | LONG_MIN;
+      if (posMm != LONG_MIN) action = String("goto_mm:") + String(posMm);
+    } else if (doc.containsKey("targetMm")) {
+      long posMm = doc["targetMm"] | LONG_MIN;
+      if (posMm != LONG_MIN) action = String("goto_mm:") + String(posMm);
+    }
+
+    if (!controlCb || action.length() == 0) {
+      request->send(422, "application/json", "{\"status\":\"invalid\",\"error\":\"missing_position\"}");
+      return;
+    }
+
+    controlCb(action);
     request->send(200, "application/json", "{\"status\":\"ok\"}");
   });
 

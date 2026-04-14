@@ -27,11 +27,11 @@ The system is split into a high-level controller on [`ESP32`](Src/app_main.cpp) 
 
 ## Startup homing flow
 
-- determine whether CLOSE limit already gives a reference
+- determine whether OPEN or CLOSE limit already gives a reference
 - if position is uncertain, expose temporary helper state
 - wait for startup telemetry health
-- move toward CLOSE using reduced profile
-- zero reference on CLOSE resync
+- move toward OPEN using reduced profile when neither limit is active
+- resync to `0 m` on CLOSE or to `maxDistance` on OPEN
 
 ## Safety paths
 

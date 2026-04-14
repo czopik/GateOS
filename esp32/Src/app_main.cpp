@@ -231,6 +231,7 @@ static bool homingProfileApplied = false;
 static bool homingSoftLimitsOverridden = false;
 static bool homingSoftLimitsPrev = true;
 static int homingForceCmd = 80;
+static bool homingSearchOpen = false;
 static char homingReason[24] = "none";
 static char homingResult[24] = "idle";
 static uint32_t homingLastChangeMs = 0;
@@ -420,7 +421,7 @@ static void applySlowHomingProfile() {
   if (p.minSpeed > p.maxSpeedClose - 1) p.minSpeed = max(1, p.maxSpeedClose - 1);
   if (p.minSpeed > p.maxSpeedOpen - 1) p.minSpeed = max(1, p.maxSpeedOpen - 1);
   motor->setMotionProfile(p);
-  homingForceCmd = max(70, p.maxSpeedClose);
+  homingForceCmd = max(70, max(p.maxSpeedClose, p.maxSpeedOpen));
   Serial.printf("[HOMING] slow profile applied open=%d close=%d min=%d forceCmd=%d (orig open=%d close=%d min=%d)\n",
                 p.maxSpeedOpen, p.maxSpeedClose, p.minSpeed, homingForceCmd,
                 normalMotionProfile.maxSpeedOpen, normalMotionProfile.maxSpeedClose, normalMotionProfile.minSpeed);
@@ -440,11 +441,12 @@ static void applyStartupLimitReference() {
     homingChecked = true;
     startupLimitRefDone = true;
   } else if (openActive && !closeActive) {
-    // OPEN switch alone does not grant safety-ready state.
-    // Safer policy: still require CLOSE homing before normal readiness.
-    setStartupSafetyState(false, false, "open_limit_requires_close_homing");
-    setHomingResult("pending", "open_limit_requires_close_homing");
-    Serial.println("[HOMING] OPEN active at boot -> require CLOSE homing before readiness");
+    gate->onLimitOpen();
+    positionTracker.requestResyncOpen();
+    setStartupSafetyState(true, false, "open_limit_reference");
+    setHomingResult("skip", "open_limit_active");
+    Serial.println("[HOMING] startup reference from OPEN limit (position certain)");
+    homingChecked = true;
     startupLimitRefDone = true;
   } else if (openActive && closeActive) {
     gate->setError(GATE_ERR_LIMITS_INVALID, GATE_STOP_ERROR);
@@ -455,12 +457,13 @@ static void applyStartupLimitReference() {
     startupLimitRefDone = true;
   } else {
     // Both limits inactive at restart -> unknown position.
-    // Use temporary 100 mm helper distance until CLOSE reference is found.
+    // Use temporary 100 mm helper distance until OPEN reference is found.
     startupUiUnknownPos10 = true;
     Serial.printf("[HOMING_TMP_POS] set mode=temp_100mm reason=limits_inactive_unknown_position mm=%ld\n",
                   (long)lroundf(kStartupTempDistanceMeters * 1000.0f));
     setStartupSafetyState(false, false, "limits_inactive_unknown_position");
     setHomingResult("pending", "limits_inactive_unknown_position");
+    homingSearchOpen = true;
     startupLimitRefDone = true;
   }
 }
@@ -554,18 +557,23 @@ static void runStartupHoming(uint32_t nowMs) {
     applySlowHomingProfile();
     setHomingSoftLimitsOverride(true);
     bool started = false;
+    const bool searchOpen = homingSearchOpen;
     if (motor) {
-      motor->setDirection(false);
+      motor->setDirection(searchOpen);
       if (motor->isHoverUart()) {
         motor->hoverArm();
-        motor->setHoverTargetSpeed((int16_t)(-homingForceCmd));
+        motor->setHoverTargetSpeed((int16_t)(searchOpen ? homingForceCmd : -homingForceCmd));
         started = true;
-        Serial.printf("[HOMING] force start CLOSE via hover speed=%d\n", -homingForceCmd);
+        Serial.printf("[HOMING] force start %s via hover speed=%d\n",
+                      searchOpen ? "OPEN" : "CLOSE",
+                      searchOpen ? homingForceCmd : -homingForceCmd);
       } else {
-        int duty = -max(40, homingForceCmd);
+        int duty = searchOpen ? max(40, homingForceCmd) : -max(40, homingForceCmd);
         motor->setDuty(duty);
         started = true;
-        Serial.printf("[HOMING] force start CLOSE via PWM duty=%d\n", duty);
+        Serial.printf("[HOMING] force start %s via PWM duty=%d\n",
+                      searchOpen ? "OPEN" : "CLOSE",
+                      duty);
       }
     }
     if (!started) {
@@ -581,24 +589,30 @@ static void runStartupHoming(uint32_t nowMs) {
     homingStartMs = nowMs;
     moveStartPosition = gate->getControlPosition();
     setStartupSafetyState(false, false, "homing_running");
-    setHomingResult("running", "search_close_limit");
-    Serial.println("[HOMING] start -> CLOSE at slow profile");
+    setHomingResult("running", searchOpen ? "search_open_limit" : "search_close_limit");
+    Serial.printf("[HOMING] start -> %s at slow profile\n", searchOpen ? "OPEN" : "CLOSE");
     return;
   }
 
   // Active homing supervision.
+  const bool searchOpen = homingSearchOpen;
   if (motor) {
-    motor->setDirection(false);
+    motor->setDirection(searchOpen);
     if (motor->isHoverUart()) {
       motor->hoverArm();
-      motor->setHoverTargetSpeed((int16_t)(-homingForceCmd));
+      motor->setHoverTargetSpeed((int16_t)(searchOpen ? homingForceCmd : -homingForceCmd));
     } else {
-      motor->setDuty(-max(40, homingForceCmd));
+      motor->setDuty(searchOpen ? max(40, homingForceCmd) : -max(40, homingForceCmd));
     }
   }
-  if (closeActive) {
-    gate->onLimitClose();
-    positionTracker.requestResyncClose();
+  if (searchOpen ? openActive : closeActive) {
+    if (searchOpen) {
+      gate->onLimitOpen();
+      positionTracker.requestResyncOpen();
+    } else {
+      gate->onLimitClose();
+      positionTracker.requestResyncClose();
+    }
     if (motor) {
       if (motor->isHoverUart()) motor->setHoverTargetSpeed(0);
       motor->stopHard();
@@ -607,9 +621,9 @@ static void runStartupHoming(uint32_t nowMs) {
     homingChecked = true;
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
-    setStartupSafetyState(true, false, "close_limit_found");
-    setHomingResult("success", "close_limit_found");
-    Serial.println("[HOMING] success (close limit)");
+    setStartupSafetyState(true, false, searchOpen ? "open_limit_found" : "close_limit_found");
+    setHomingResult("success", searchOpen ? "open_limit_found" : "close_limit_found");
+    Serial.printf("[HOMING] success (%s limit)\n", searchOpen ? "open" : "close");
     return;
   }
 
