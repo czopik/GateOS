@@ -269,7 +269,7 @@ void scheduleFactoryReset(uint32_t delayMs) {
 
 TaskHandle_t gateTaskHandle = NULL;
 
-void handleControlCmd(const char* action);
+ControlResult handleControlCmd(const char* action);
 void mqttPublishEvent(const char* level, const char* message);
 void mqttPublishLedState();
 void mqttPublishTelemetry();
@@ -289,6 +289,29 @@ void onGateStatusChanged(const GateStatus& status, void* ctx);
 void fillDiagnostics(JsonObject& out);
 void syncLegacyPositionState();
 const char* resetReasonToString(esp_reset_reason_t reason);
+
+static const char* effectiveGateStateString() {
+  if (homingActive) return "homing";
+  return gate ? gate->getStateString() : "unknown";
+}
+
+static bool effectiveGateMoving() {
+  return homingActive || (gate && gate->isMoving());
+}
+
+static ControlResult makeControlResult(bool ok,
+                                       bool applied,
+                                       int httpCode,
+                                       const char* status,
+                                       const char* error = "") {
+  ControlResult result;
+  result.ok = ok;
+  result.applied = applied;
+  result.httpCode = httpCode;
+  result.status = status;
+  result.error = error;
+  return result;
+}
 
 static void setHomingResult(const char* result, const char* reason) {
   strncpy(homingResult, result ? result : "", sizeof(homingResult) - 1);
@@ -789,8 +812,8 @@ void mqttPublishStatus() {
   const char* topic = mqtt.topicState();
   if (!mqtt.connected() || !topic || topic[0] == '\0') return;
   StaticJsonDocument<256> doc;
-  doc["state"] = gate ? gate->getStateString() : "unknown";
-  doc["moving"] = gate ? gate->isMoving() : false;
+  doc["state"] = effectiveGateStateString();
+  doc["moving"] = effectiveGateMoving();
   doc["uptimeMs"] = millis();
   doc["wifiRssi"] = WiFiManager.isConnected() ? WiFi.RSSI() : 0;
   char payload[256];
@@ -817,8 +840,8 @@ void mqttPublishTelemetry() {
   JsonObject gateObj = doc.createNestedObject("gate");
   if (gate) {
     const GateStatus& st = gate->getStatus();
-    gateObj["state"] = gate->getStateString();
-    gateObj["moving"] = gate->isMoving();
+    gateObj["state"] = effectiveGateStateString();
+    gateObj["moving"] = effectiveGateMoving();
     gateObj["position"] = st.position;
     gateObj["positionPercent"] = st.positionPercent;
     gateObj["targetPosition"] = st.targetPosition;
@@ -917,7 +940,7 @@ void logSummary1Hz() {
                 (unsigned long)ws.maxStatusDurationUs);
   if (gate) {
     Serial.printf("[GATE] state=%s pos=%.3fm target=%.3fm max=%.3fm stopReason=%s err=%d\n",
-                  gate->getStateString(),
+                  effectiveGateStateString(),
                   gate->getPosition(),
                   gate->getTargetPosition(),
                   gate->getMaxDistance(),
@@ -948,8 +971,8 @@ void mqttPublishMotionState() {
   JsonObject gateObj = doc.createNestedObject("gate");
   if (gate) {
     const GateStatus& st = gate->getStatus();
-    gateObj["state"] = gate->getStateString();
-    gateObj["moving"] = gate->isMoving();
+    gateObj["state"] = effectiveGateStateString();
+    gateObj["moving"] = effectiveGateMoving();
     gateObj["position"] = st.position;
     gateObj["positionPercent"] = st.positionPercent;
     gateObj["targetPosition"] = st.targetPosition;
@@ -973,7 +996,7 @@ void mqttPublishMotionPosition() {
   long mm = (long)(positionMeters * 1000.0f);
   doc["mm"] = mm;
   doc["percent"] = positionPercent;
-  doc["state"] = gate ? gate->getStateString() : "unknown";
+  doc["state"] = effectiveGateStateString();
   doc["ts"] = millis();
   char payload[128];
   serializeJson(doc, payload, sizeof(payload));
@@ -1727,8 +1750,8 @@ void fillStatus(JsonObject& out) {
   JsonObject gateObj = out.createNestedObject("gate");
   if (gate) {
     const GateStatus& st = gate->getStatus();
-    gateObj["state"] = gate->getStateString();
-    gateObj["moving"] = gate->isMoving();
+    gateObj["state"] = effectiveGateStateString();
+    gateObj["moving"] = effectiveGateMoving();
     gateObj["position"] = st.position;
     gateObj["positionPercent"] = st.positionPercent;
     gateObj["targetPosition"] = st.targetPosition;
@@ -1920,8 +1943,8 @@ void fillStatusLite(JsonObject& out) {
   syncLegacyPositionState();
   if (gate) {
     const GateStatus& st = gate->getStatus();
-    out["state"] = gate->getStateString();
-    out["moving"] = gate->isMoving();
+    out["state"] = effectiveGateStateString();
+    out["moving"] = effectiveGateMoving();
     if (startupUiUnknownPos10 && !startupPositionCertain) {
       const float maxD = st.maxDistance > 0.0f ? st.maxDistance : maxDistanceMeters;
       float synthetic = kStartupTempDistanceMeters;
@@ -1971,46 +1994,48 @@ void fillRemoteState(JsonObject& out) {
   }
 }
 
-void handleControlCmd(const char* action) {
-  if (!gate || !action) return;
+ControlResult handleControlCmd(const char* action) {
+  if (!gate) return makeControlResult(false, false, 503, "error", "gate_not_ready");
+  if (!action || action[0] == '\0') return makeControlResult(false, false, 422, "invalid", "missing_action");
   if (startupHomingEnabled && !startupPositionCertain) {
     pushEvent("warn", "control blocked: position not referenced");
     Serial.printf("[UI] control blocked: startup safety (reason=%s)\n", startupSafetyReason);
-    return;
+    return makeControlResult(false, false, 409, "blocked", "position_not_referenced");
   }
   if (startupSafetyLocked) {
     pushEvent("warn", "control blocked: startup safety lock");
     Serial.printf("[UI] control blocked: startup safety lock (reason=%s)\n", startupSafetyReason);
-    return;
+    return makeControlResult(false, false, 423, "blocked", "startup_safety_lock");
   }
   if (homingActive) {
     pushEvent("warn", "control blocked by homing");
     Serial.println("[UI] control blocked: homing active");
-    return;
+    return makeControlResult(false, false, 409, "blocked", "homing_active");
   }
   if (otaActive) {
     pushEvent("warn", "control blocked by ota");
     Serial.println("[UI] control blocked: OTA active");
-    return;
+    return makeControlResult(false, false, 423, "blocked", "ota_active");
   }
   Serial.printf("[UI] control action=%s\n", action);
   if (calibration.isRunning()) {
     pushEvent("warn", "control blocked by calibration");
-    return;
+    return makeControlResult(false, false, 423, "blocked", "calibration_active");
   }
   if (strcmp(action, "zero") == 0) {
     if (handleGateCalibrate("zero")) {
       pushEvent("info", "command zero");
+      return makeControlResult(true, true, 200, "ok");
     } else {
       pushEvent("warn", "command zero failed");
+      return makeControlResult(false, false, 409, "blocked", "zero_calibration_failed");
     }
-    return;
   }
   GateCommandResponse r = gate->handleCommand(action);
   if (r.result == GATE_CMD_UNKNOWN) {
     pushEvent("warn", "command unknown");
     Serial.printf("[UI] control result=unknown\n");
-    return;
+    return makeControlResult(false, false, 422, "invalid", "unknown_command");
   }
 
   if (r.result == GATE_CMD_BLOCKED) {
@@ -2020,7 +2045,7 @@ void handleControlCmd(const char* action) {
     else pushEvent("warn", "command blocked");
     led.setOverride("command_rejected", 600);
     Serial.printf("[UI] control result=blocked cmd=%d\n", (int)r.cmd);
-    return;
+    return makeControlResult(false, false, 409, "blocked", "command_blocked");
   }
 
   // OK
@@ -2040,10 +2065,11 @@ void handleControlCmd(const char* action) {
     pushEvent("info", "command ok");
     Serial.printf("[UI] control result=ok cmd=%d applied=%d\n", (int)r.cmd, r.applied ? 1 : 0);
   }
+  return makeControlResult(true, r.applied, 200, "ok");
 }
 
-void handleControlWrapper(const String& action) {
-  handleControlCmd(action.c_str());
+ControlResult handleControlWrapper(const String& action) {
+  return handleControlCmd(action.c_str());
 }
 
 void handleLedCmd(const char* payload) {

@@ -8,9 +8,17 @@ class MqttManager;
 class CalibrationManager;
 class LedController;
 
+struct ControlResult {
+  bool ok = false;
+  bool applied = false;
+  int httpCode = 500;
+  const char* status = "error";
+  const char* error = "not_ready";
+};
+
 typedef void(*LearnCb)(bool);
 typedef void(*TestCb)(unsigned long, unsigned long, bool, bool, bool);
-typedef void(*ControlCb)(const String& action);
+typedef ControlResult(*ControlCb)(const String& action);
 typedef void(*StatusCb)(JsonObject& out);
 typedef void(*StatusLiteCb)(JsonObject& out);
 typedef void(*RemoteStateCb)(JsonObject& out);

@@ -159,6 +159,16 @@ void sendSchemaError(AsyncWebServerRequest* request, const String& detail) {
   sendJson(request, doc, 422);
 }
 
+void sendControlResult(AsyncWebServerRequest* request, const ControlResult& result, const String& action) {
+  DynamicJsonDocument doc(256);
+  doc["status"] = result.status ? result.status : "error";
+  doc["ok"] = result.ok;
+  doc["applied"] = result.applied;
+  if (action.length() > 0) doc["action"] = action;
+  if (result.error && result.error[0] != '\0') doc["error"] = result.error;
+  sendJson(request, doc, result.httpCode);
+}
+
 String normalizeAction(const String& in) {
   String out = in;
   out.toLowerCase();
@@ -1096,8 +1106,7 @@ void WebServerManager::setupRoutes() {
       request->send(422, "application/json", "{\"status\":\"invalid\",\"error\":\"missing_action_or_position\"}");
       return;
     }
-    controlCb(action);
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
+    sendControlResult(request, controlCb(action), action);
   });
 
   server.on("/api/move", HTTP_POST, [this](AsyncWebServerRequest *request){
@@ -1138,17 +1147,19 @@ void WebServerManager::setupRoutes() {
       return;
     }
 
-    controlCb(action);
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
+    sendControlResult(request, controlCb(action), action);
   });
 
   server.on("/control", HTTP_GET, [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
     if (request->hasParam("command")) {
       String action = normalizeAction(request->getParam("command")->value());
-      if (controlCb && action.length() > 0) controlCb(action);
+      if (controlCb && action.length() > 0) {
+        sendControlResult(request, controlCb(action), action);
+        return;
+      }
     }
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
+    request->send(422, "application/json", "{\"status\":\"invalid\",\"error\":\"missing_action\"}");
   });
 
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request){
