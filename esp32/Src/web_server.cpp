@@ -354,6 +354,8 @@ void WebServerManager::setupRoutes() {
       led->setMqttEnabled(cfg->mqttConfig.enabled);
     }
     if (motor) {
+      motor->applyConfig(cfg->motorConfig, cfg->gpioConfig, cfg->hoverUartConfig);
+      motor->setInvertDir(cfg->motorConfig.invertDir);
       motor->setMotionProfile(cfg->motionProfile());
     }
     request->send(200, "application/json", "{\"status\":\"ok\"}");
