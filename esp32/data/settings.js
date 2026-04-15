@@ -112,6 +112,16 @@ function showToast(message) {
   setTimeout(() => toast.className = 'toast', 2400);
 }
 
+function redirectToPort(newPort) {
+  const port = Number(newPort);
+  if (!Number.isFinite(port) || port < 1 || port > 65535) return;
+  const protocol = window.location.protocol || 'http:';
+  const hostname = window.location.hostname || window.location.host;
+  const defaultPort = protocol === 'https:' ? 443 : 80;
+  const suffix = port === defaultPort ? '' : `:${port}`;
+  window.location.href = `${protocol}//${hostname}${suffix}/settings.html`;
+}
+
 function setLedStealthState(value) {
   ledStealth = value;
   if (!ledStealthBtn) return;
@@ -480,6 +490,11 @@ function validateLocal(cfg) {
     setError('led.nightMode.brightness', 'Jasnosc nocna 0-100');
     ok = false;
   }
+  const webPort = cfg.device?.webPort ?? 80;
+  if (webPort < 1 || webPort > 65535) {
+    setError('device.webPort', 'Port WWW 1-65535');
+    ok = false;
+  }
   const segParsed = ledSegmentsInput ? parseSegments(ledSegmentsInput.value) : [];
   if (segParsed === null) {
     showToast('Segmenty LED: format start:len, start:len');
@@ -590,7 +605,12 @@ async function saveConfig() {
   }
 
   try {
-    await postJson('/api/config', cfg);
+    const result = await postJson('/api/config', cfg);
+    if (result && result.apply === 'restart' && result.redirectPort) {
+      showToast(`Zapisano, restart i zmiana na port ${result.redirectPort}...`);
+      setTimeout(() => redirectToPort(result.redirectPort), 2500);
+      return;
+    }
     showToast('Zapisano');
     await loadConfig();
   } catch (err) {

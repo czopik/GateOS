@@ -166,6 +166,7 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
   JsonObject device = doc.createNestedObject("device");
   device["name"] = deviceConfig.name;
   device["hostname"] = deviceConfig.hostname;
+  device["webPort"] = deviceConfig.webPort;
 
   JsonObject wifi = doc.createNestedObject("wifi");
   wifi["ssid"] = wifiConfig.ssid;
@@ -598,6 +599,7 @@ bool ConfigManager::fromJsonVariant(JsonVariantConst root) {
     if (!device.isNull()) {
       deviceConfig.name = String((const char*)(device["name"] | deviceConfig.name.c_str()));
       deviceConfig.hostname = String((const char*)(device["hostname"] | deviceConfig.hostname.c_str()));
+      deviceConfig.webPort = device["webPort"] | deviceConfig.webPort;
     }
   }
 
@@ -994,6 +996,17 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
   if (version != CONFIG_VERSION) {
     error = "version_mismatch";
     return false;
+  }
+
+  if (obj.containsKey("device")) {
+    JsonObjectConst device = obj["device"];
+    if (!device.isNull()) {
+      int webPort = device["webPort"] | deviceConfig.webPort;
+      if (webPort < 1 || webPort > 65535) {
+        error = "device.webPort_out_of_range";
+        return false;
+      }
+    }
   }
 
   if (obj.containsKey("gate")) {

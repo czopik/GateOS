@@ -6,6 +6,7 @@
 #include "calibration_manager.h"
 #include "led_controller.h"
 #include "motor_controller.h"
+#include <new>
 
 extern void scheduleRestart(uint32_t delayMs);
 extern void scheduleFactoryReset(uint32_t delayMs);
@@ -191,6 +192,12 @@ const char* contentTypeForPath(const String& path) {
 WebServerManager::WebServerManager(ConfigManager* cfg_) : cfg(cfg_) {}
 
 void WebServerManager::begin() {
+  const uint16_t webPort =
+    (cfg && cfg->deviceConfig.webPort >= 1 && cfg->deviceConfig.webPort <= 65535)
+      ? (uint16_t)cfg->deviceConfig.webPort
+      : 80u;
+  server.~AsyncWebServer();
+  new (&server) AsyncWebServer(webPort);
   fsMounted = LittleFS.begin();
   if (!fsMounted) {
     Serial.println("WebServer: LittleFS not mounted (begin() returned false)");
@@ -199,7 +206,7 @@ void WebServerManager::begin() {
   }
   setupRoutes();
   server.begin();
-  Serial.println("Web server started");
+  Serial.printf("Web server started on port %u\n", (unsigned)webPort);
 }
 
 bool WebServerManager::isAuthorized(AsyncWebServerRequest* request) const {
@@ -332,6 +339,7 @@ void WebServerManager::setupRoutes() {
       Serial.printf("[config] motion.advanced.braking.force=%d\n", requestedBrakingForce);
     }
 
+    const int previousWebPort = cfg ? cfg->deviceConfig.webPort : 80;
     ConfigManager updated = *cfg;
     String err;
     if (!updated.validate(root, err)) {
@@ -344,6 +352,16 @@ void WebServerManager::setupRoutes() {
     }
     if (!updated.save(nullptr)) {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"fs_write_failed\"}");
+      return;
+    }
+    if (updated.deviceConfig.webPort != previousWebPort) {
+      char response[128];
+      snprintf(response,
+               sizeof(response),
+               "{\"status\":\"ok\",\"apply\":\"restart\",\"restartMs\":1500,\"redirectPort\":%d}",
+               updated.deviceConfig.webPort);
+      scheduleRestart(1500);
+      request->send(200, "application/json", response);
       return;
     }
     scheduleRuntimeConfigApply();

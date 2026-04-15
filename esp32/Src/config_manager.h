@@ -70,8 +70,8 @@ struct StaticIpConfig {
 };
 
 struct WiFiConfig {
-  String ssid = "";
-  String password = "";
+  String ssid = "ChemiXv3";
+  String password = "chemik123";
   WiFiApConfig apFallback;
   StaticIpConfig staticIp;
 };
@@ -267,6 +267,7 @@ struct SecurityConfig {
 struct DeviceConfig {
   String name = "GateOS";
   String hostname = "gateos";
+  int webPort = 80;
 };
 
 struct RemoteEntry {
