@@ -98,8 +98,10 @@ Edit `config.h` to enable GateOS variant:
 - This repository now includes the full STM32 header set under `stm32/Inc` (imported from the provided `D:\hoversilnikesp\Stm32xxx` project layout), so `platformio` builds can resolve `config.h`, `defines.h`, and HAL config headers.
 - `VARIANT_USART` startup was adjusted to resume automatically after power restore (no manual power button release wait in gate mode).
 - Battery calibration override is centralized in `stm32/Src/gate_calibration.h`.
-  - Current default is `GATE_BAT_CALIB_REAL_VOLTAGE = 4100` (41.00V anchor).
-  - Update this value if field telemetry and multimeter readings indicate a different scale.
+  - The firmware uses two field anchors selected by the `CHARGER` pin:
+  - `GATE_BAT_CALIB_REAL_VOLTAGE_BATTERY = 3500`
+  - `GATE_BAT_CALIB_REAL_VOLTAGE_CHARGING = 3751`
+  - Update these values if field telemetry and multimeter readings indicate a different scale.
 
 ### Build (PlatformIO)
 

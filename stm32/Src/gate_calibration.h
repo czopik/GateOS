@@ -5,7 +5,7 @@
  *
  * Field-calibrated two-point profile for this installation:
  * - Battery only:      multimeter ~35.0V
- * - Charger connected: multimeter ~41.0V
+ * - Charger connected: multimeter ~41.1V
  *
  * CHARGER pin selects calibration profile.
  */
@@ -15,7 +15,7 @@
 #endif
 
 #ifndef GATE_BAT_CALIB_REAL_VOLTAGE_CHARGING
-#define GATE_BAT_CALIB_REAL_VOLTAGE_CHARGING 4100
+#define GATE_BAT_CALIB_REAL_VOLTAGE_CHARGING 3751
 #endif
 
 #ifndef GATE_CHARGER_ACTIVE_LEVEL
