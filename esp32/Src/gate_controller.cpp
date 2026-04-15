@@ -548,9 +548,10 @@ void GateController::stop(GateStopReason reason) {
         motor->hoverDisarm();
       }
     }
-    if (state == GATE_OPENING) {
+    const GateDecisionContext ctx = decisionContext();
+    if (state == GATE_OPENING && (limitOpenActive || gateNearOpen(ctx, 0.02f))) {
       setTerminalState(GateTerminalState::FullyOpen);
-    } else if (state == GATE_CLOSING) {
+    } else if (state == GATE_CLOSING && (limitCloseActive || gateNearClosed(ctx, 0.02f))) {
       setTerminalState(GateTerminalState::FullyClosed);
     }
     moving = false;
@@ -935,6 +936,7 @@ GateCommandResponse GateController::handleObstacleTrip(const char* actionOverrid
     resp.cmd = GATE_CMD_OPEN;
   } else {
     resp.followUpBlocked = true;
+    Serial.println("[GATE] obstacle follow-up reopen blocked after successful stop");
   }
   return resp;
 }

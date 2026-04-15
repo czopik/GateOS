@@ -1,10 +1,11 @@
-```
 # Build artifacts
 build/
 dist/
 *.o
 *.obj
 *.out
+.pio/
+esp32/.pio/
 
 # Dependencies
 node_modules/
@@ -37,4 +38,3 @@ htmlcov/
 # System files
 .DS_Store
 Thumbs.db
-```

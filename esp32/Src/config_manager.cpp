@@ -8,6 +8,31 @@ void setError(String* out, const char* value) {
   if (out) *out = value;
 }
 
+bool writeJsonFile(const char* path, JsonDocument& doc, size_t* writtenOut = nullptr) {
+  File f = LittleFS.open(path, "w");
+  if (!f) return false;
+  const size_t written = serializeJson(doc, f);
+  f.flush();
+  f.close();
+  if (writtenOut) *writtenOut = written;
+  return written != 0;
+}
+
+bool readJsonFile(const char* path, DynamicJsonDocument& doc, String& error) {
+  File f = LittleFS.open(path, "r");
+  if (!f) {
+    setError(&error, "open_failed");
+    return false;
+  }
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) {
+    setError(&error, err.c_str());
+    return false;
+  }
+  return true;
+}
+
 String normalizeLabel(const String& value) {
   String tmp = value;
   tmp.toLowerCase();
@@ -144,17 +169,7 @@ void ConfigManager::resetToDefaults() {
 }
 
 bool ConfigManager::readConfigFileToDoc(DynamicJsonDocument& doc, String& error) {
-  File f = LittleFS.open(CONFIG_PATH, "r");
-  if (!f) {
-    setError(&error, "open_failed");
-    return false;
-  }
-  DeserializationError err = deserializeJson(doc, f);
-  f.close();
-  if (err) {
-    setError(&error, err.c_str());
-    return false;
-  }
+  if (!readJsonFile(CONFIG_PATH, doc, error)) return false;
   revision++;
   return true;
 }
@@ -505,8 +520,7 @@ bool ConfigManager::saveInternal(String* error, bool force) {
   DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
   buildJson(doc);
 
-  File tmp = LittleFS.open(CONFIG_TMP_PATH, "w");
-  if (!tmp) {
+  if (!writeJsonFile(CONFIG_TMP_PATH, doc, &written)) {
     lastSaveError = "open_tmp_failed";
     Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
     setError(error, lastSaveError.c_str());
@@ -514,37 +528,35 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     pendingSaveAtMs = millis();
     return false;
   }
-
-  written = serializeJson(doc, tmp);
-  tmp.flush();
-  tmp.close();
-  if (written == 0) {
-    lastSaveError = "serialize_failed";
-    Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
-    setError(error, lastSaveError.c_str());
+  DynamicJsonDocument verifyTmp(CONFIG_JSON_CAPACITY);
+  String verifyTmpErr;
+  if (!readJsonFile(CONFIG_TMP_PATH, verifyTmp, verifyTmpErr)) {
     LittleFS.remove(CONFIG_TMP_PATH);
+    lastSaveError = "tmp_readback_failed";
+    Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
+    setError(error, verifyTmpErr.c_str());
     pendingSave = true;
     pendingSaveAtMs = millis();
     return false;
   }
 
-  if (LittleFS.exists(CONFIG_PATH)) {
-    if (!LittleFS.remove(CONFIG_PATH)) {
-      lastSaveError = "remove_old_failed";
-      Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
-      setError(error, lastSaveError.c_str());
+  bool committed = false;
+  if (!LittleFS.exists(CONFIG_PATH)) {
+    committed = LittleFS.rename(CONFIG_TMP_PATH, CONFIG_PATH);
+  } else {
+    committed = LittleFS.rename(CONFIG_TMP_PATH, CONFIG_PATH);
+    if (!committed) {
+      // LittleFS may reject unlink/replace when another request still has CONFIG_PATH open.
+      // Fallback to an in-place rewrite to avoid "Has open FD" on remove(CONFIG_PATH).
+      Serial.printf("[save] rename fallback path errno=%d\n", errno);
+      committed = writeJsonFile(CONFIG_PATH, doc, &written);
       LittleFS.remove(CONFIG_TMP_PATH);
-      pendingSave = true;
-      pendingSaveAtMs = millis();
-      return false;
     }
   }
-
-  if (!LittleFS.rename(CONFIG_TMP_PATH, CONFIG_PATH)) {
-    lastSaveError = "rename_failed";
+  if (!committed) {
+    lastSaveError = "commit_failed";
     Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
     setError(error, lastSaveError.c_str());
-    LittleFS.remove(CONFIG_TMP_PATH);
     pendingSave = true;
     pendingSaveAtMs = millis();
     return false;

@@ -354,6 +354,7 @@ void WebServerManager::setupRoutes() {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"fs_write_failed\"}");
       return;
     }
+    cfg->adoptPersistenceMetaFrom(updated);
     if (updated.deviceConfig.webPort != previousWebPort) {
       char response[128];
       snprintf(response,
@@ -471,6 +472,7 @@ void WebServerManager::setupRoutes() {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"fs_write_failed\"}");
       return;
     }
+    cfg->adoptPersistenceMetaFrom(updated);
     scheduleRuntimeConfigApply();
     request->send(200, "application/json", "{\"status\":\"ok\",\"apply\":\"scheduled\"}");
   });
@@ -999,11 +1001,20 @@ void WebServerManager::setupRoutes() {
     StaticJsonDocument<512> doc;
     JsonArray arr = doc.createNestedArray("files");
     File root = LittleFS.open("/");
+    if (!root) {
+      doc["error"] = "fs_open_failed";
+      String out;
+      serializeJson(doc, out);
+      request->send(500, "application/json", out);
+      return;
+    }
     File file = root.openNextFile();
     while (file) {
       arr.add(String(file.name()));
+      file.close();
       file = root.openNextFile();
     }
+    root.close();
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);

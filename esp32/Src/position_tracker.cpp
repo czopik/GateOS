@@ -95,6 +95,7 @@ void PositionTracker::initializeFromConfig() {
 }
 
 bool PositionTracker::loadPositionSnapshot() {
+  if (!LittleFS.exists(kPositionSnapshotPath)) return false;
   File f = LittleFS.open(kPositionSnapshotPath, "r");
   if (!f) return false;
   PositionSnapshot snap{};

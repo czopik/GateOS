@@ -2511,7 +2511,6 @@ void loop() {
   config.processDeferredSave();
   if (factoryResetPending && (int32_t)(now - factoryResetAtMs) >= 0) {
     factoryResetPending = false;
-    LittleFS.remove(CONFIG_PATH);
     config.resetToDefaults();
     config.save(nullptr);
   }

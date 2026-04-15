@@ -320,6 +320,14 @@ public:
   const String& getLastRemotesSaveError() const { return lastRemotesSaveError; }
   uint32_t getRevision() const { return revision; }
   MotionAdvancedConfig motionProfile() const;
+  void adoptPersistenceMetaFrom(const ConfigManager& other) {
+    revision = other.revision;
+    lastSaveMs = other.lastSaveMs;
+    lastSaveError = other.lastSaveError;
+    lastRemotesSaveOk = other.lastRemotesSaveOk;
+    lastRemotesSaveMs = other.lastRemotesSaveMs;
+    lastRemotesSaveError = other.lastRemotesSaveError;
+  }
 
   // Remote management
   bool addRemote(unsigned long serial, const String& name = "");
