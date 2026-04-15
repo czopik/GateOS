@@ -118,11 +118,12 @@ function setChip(el, text, state) {
   if (state) el.classList.add(state);
 }
 
-function setGatePercent(percent) {
+function setGatePercent(percent, reverse = false) {
   const p = Math.max(0, Math.min(100, percent));
-  const width = `${p}%`;
+  const shown = reverse ? (100 - p) : p;
+  const width = `${shown}%`;
   if (ui.gateProgress.style.width !== width) ui.gateProgress.style.width = width;
-  if (ui.gatePercent.textContent !== `${p}`) ui.gatePercent.textContent = `${p}`;
+  if (ui.gatePercent.textContent !== `${shown}`) ui.gatePercent.textContent = `${shown}`;
 }
 
 function addEvent(ev) {
@@ -170,7 +171,8 @@ function updateStatus(data) {
 
   const gateState = (gate.state || 'unknown').toUpperCase();
   if (ui.gateState.textContent !== gateState) ui.gateState.textContent = gateState;
-  setGatePercent(gate.positionPercent >= 0 ? gate.positionPercent : 0);
+  const reverseProgress = (gate.state || '').toString().toLowerCase() === 'closing';
+  setGatePercent(gate.positionPercent >= 0 ? gate.positionPercent : 0, reverseProgress);
 
   setChip(ui.wifiChip, `WiFi: ${wifi.connected ? (wifi.ssid || 'OK') : 'OFF'}`, wifi.connected ? 'success' : 'warn');
   setChip(ui.mqttChip, `MQTT: ${mqtt.connected ? 'OK' : 'OFF'}`, mqtt.connected ? 'success' : 'warn');
@@ -271,7 +273,8 @@ function updateStatusLite(data) {
   if (ui.gateState.textContent !== gateState) ui.gateState.textContent = gateState;
 
   const pct = typeof data.positionPercent === 'number' ? data.positionPercent : 0;
-  setGatePercent(pct >= 0 ? pct : 0);
+  const reverseProgress = rawState.toLowerCase() === 'closing';
+  setGatePercent(pct >= 0 ? pct : 0, reverseProgress);
 
   const limitOpen = Boolean(data.limitOpen);
   const limitClose = Boolean(data.limitClose);

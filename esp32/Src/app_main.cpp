@@ -238,6 +238,49 @@ static char homingReason[24] = "none";
 static char homingResult[24] = "idle";
 static uint32_t homingLastChangeMs = 0;
 static char startupSafetyReason[32] = "boot_pending";
+static bool chargerConnected = false;
+static bool chargerStateKnown = false;
+static bool chargerPending = false;
+static bool chargerPendingState = false;
+static uint32_t chargerPendingSinceMs = 0;
+static constexpr float kChargerConnectV = 40.2f;
+static constexpr float kChargerDisconnectV = 39.2f;
+static constexpr uint32_t kChargerDebounceMs = 1200;
+
+static void updateChargerConnectedFromTelemetry(const HoverTelemetry& tel, uint32_t nowMs) {
+  if (!tel.batValid || tel.batV <= 0.0f || !isfinite(tel.batV)) {
+    chargerPending = false;
+    return;
+  }
+
+  if (!chargerStateKnown) {
+    chargerConnected = tel.batV >= ((kChargerConnectV + kChargerDisconnectV) * 0.5f);
+    chargerStateKnown = true;
+    chargerPending = false;
+    return;
+  }
+
+  bool desired = chargerConnected;
+  if (!chargerConnected && tel.batV >= kChargerConnectV) desired = true;
+  if (chargerConnected && tel.batV <= kChargerDisconnectV) desired = false;
+
+  if (desired == chargerConnected) {
+    chargerPending = false;
+    return;
+  }
+
+  if (!chargerPending || chargerPendingState != desired) {
+    chargerPending = true;
+    chargerPendingState = desired;
+    chargerPendingSinceMs = nowMs;
+    return;
+  }
+
+  if ((nowMs - chargerPendingSinceMs) >= kChargerDebounceMs) {
+    chargerConnected = desired;
+    chargerPending = false;
+  }
+}
 
 
 static long readHallCountAtomic() {
@@ -539,7 +582,7 @@ static void runStartupHoming(uint32_t nowMs) {
       Serial.println("[HOMING] close limit active -> reference set, no movement");
       return;
     }
-    if (obstacle) {
+    if (obstacle && !homingSearchOpen) {
       setStartupSafetyState(false, false, "obstacle_active");
       setHomingResult("blocked", "obstacle_active");
       return;
@@ -658,7 +701,7 @@ static void runStartupHoming(uint32_t nowMs) {
     return;
   }
 
-  if (obstacle) {
+  if (obstacle && !searchOpen) {
     gate->stop(GATE_STOP_OBSTACLE);
     gate->setError(GATE_ERR_OBSTACLE, GATE_STOP_OBSTACLE);
     homingActive = false;
@@ -870,6 +913,7 @@ void mqttPublishTelemetry() {
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
     hbObj["enabled"] = true;
     const HoverTelemetry& tel = motor->hoverTelemetry();
+    updateChargerConnectedFromTelemetry(tel, millis());
     hbObj["dir"] = tel.dir;
     hbObj["rpm"] = tel.rpm;
     // Normalized distance in mm (0..max). This matches the gate position and doesn't go negative.
@@ -892,6 +936,9 @@ void mqttPublishTelemetry() {
     hbObj["cmdAgeMs"] = tel.cmdAgeMs;
     hbObj["lastTelMs"] = tel.lastTelMs;
     hbObj["telAgeMs"] = (tel.lastTelMs == 0) ? -1 : (long)(millis() - tel.lastTelMs);
+    hbObj["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
+    hbObj["chargerKnown"] = chargerStateKnown;
+    hbObj["chargerPending"] = chargerPending;
   } else {
     hbObj["enabled"] = false;
     hbObj["dir"] = 0;
@@ -909,6 +956,9 @@ void mqttPublishTelemetry() {
     hbObj["cmdAgeMs"] = -1;
     hbObj["lastTelMs"] = 0;
     hbObj["telAgeMs"] = -1;
+    hbObj["chargerConnected"] = false;
+    hbObj["chargerKnown"] = false;
+    hbObj["chargerPending"] = false;
   }
 
   doc["ts"] = millis();
@@ -1657,6 +1707,7 @@ void fillDiagnostics(JsonObject& out) {
   JsonObject hoverObj = out.createNestedObject("hoverUart");
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
     const HoverTelemetry& tel = motor->hoverTelemetry();
+    updateChargerConnectedFromTelemetry(tel, millis());
     uint32_t now = millis();
     hoverObj["enabled"] = true;
     hoverObj["lastTelMs"] = tel.lastTelMs;
@@ -1674,6 +1725,9 @@ void fillDiagnostics(JsonObject& out) {
     else hoverObj["iA"] = -1.0f;
     hoverObj["fault"] = tel.fault;
     hoverObj["armed"] = tel.armed;
+    hoverObj["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
+    hoverObj["chargerKnown"] = chargerStateKnown;
+    hoverObj["chargerPending"] = chargerPending;
     hoverObj["lastCmdSpeed"] = motor->hoverLastCmdSpeed();
     hoverObj["cmdAgeMs"] = tel.cmdAgeMs;
     hoverObj["rxLines"] = motor->hoverRxLines();
@@ -1682,6 +1736,9 @@ void fillDiagnostics(JsonObject& out) {
   } else {
     hoverObj["enabled"] = false;
     hoverObj["iA"] = -1.0f;
+    hoverObj["chargerConnected"] = false;
+    hoverObj["chargerKnown"] = false;
+    hoverObj["chargerPending"] = false;
   }
 
   JsonObject positionObj = out.createNestedObject("position");
@@ -1826,6 +1883,7 @@ void fillStatus(JsonObject& out) {
   JsonObject hbObj = out.createNestedObject("hb");
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
     const HoverTelemetry& tel = motor->hoverTelemetry();
+    updateChargerConnectedFromTelemetry(tel, millis());
     hbObj["enabled"] = true;
     hbObj["dir"] = tel.dir;
     hbObj["rpm"] = tel.rpm;
@@ -1843,6 +1901,9 @@ void fillStatus(JsonObject& out) {
     hbObj["lastTelMs"] = tel.lastTelMs;
     hbObj["cmdAgeMs"] = tel.cmdAgeMs;
     hbObj["telAgeMs"] = (tel.lastTelMs == 0) ? -1 : (long)(millis() - tel.lastTelMs);
+    hbObj["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
+    hbObj["chargerKnown"] = chargerStateKnown;
+    hbObj["chargerPending"] = chargerPending;
   } else {
     hbObj["enabled"] = false;
     hbObj["dir"] = 0;
@@ -1857,6 +1918,9 @@ void fillStatus(JsonObject& out) {
     hbObj["lastTelMs"] = 0;
     hbObj["cmdAgeMs"] = -1;
     hbObj["telAgeMs"] = -1;
+    hbObj["chargerConnected"] = false;
+    hbObj["chargerKnown"] = false;
+    hbObj["chargerPending"] = false;
   }
 
   JsonObject ledObj = out.createNestedObject("led");
@@ -1978,11 +2042,18 @@ void fillStatusLite(JsonObject& out) {
 
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
     const HoverTelemetry& tel = motor->hoverTelemetry();
+    updateChargerConnectedFromTelemetry(tel, millis());
     out["rpm"] = tel.rpm;
     out["iA"] = tel.iA_x100 >= 0 ? ((float)tel.iA_x100) / 100.0f : -1.0f;
+    out["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
+    out["chargerKnown"] = chargerStateKnown;
+    out["chargerPending"] = chargerPending;
   } else {
     out["rpm"] = 0;
     out["iA"] = -1.0f;
+    out["chargerConnected"] = false;
+    out["chargerKnown"] = false;
+    out["chargerPending"] = false;
   }
 }
 
