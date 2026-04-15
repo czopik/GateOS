@@ -3,6 +3,7 @@
 #include <math.h>
 #include "motor_controller.h"
 #include "config_manager.h"
+#include "gate_logic_rules.h"
 
 enum GateState {
   GATE_STOPPED,
@@ -96,6 +97,9 @@ struct GateCommandResponse {
   GateCommandResult result = GATE_CMD_OK;
   // True if the command resulted in an actual state change (movement start/stop).
   bool applied = false;
+  // Optional follow-up action attempted after the primary state change.
+  GateCommand followUpCmd = GATE_CMD_NONE;
+  bool followUpBlocked = false;
 };
 
 // GateController - gate logic, timeouts, watchdog
@@ -145,6 +149,7 @@ public:
   void setConnectivity(bool wifi, bool mqtt, bool apMode);
   void setOtaActive(bool active);
   void setStatusCallback(GateStatusCallback cb, void* ctx);
+  void updateLimitState(bool limitOpenActive, bool limitCloseActive);
 
   // Unified safety/event entry points
   void onLimitOpen();
@@ -153,6 +158,7 @@ public:
   // - active only while closing
   // - when triggered during closing: hard stop + immediate open
   GateCommandResponse onObstacle(bool active);
+  GateCommandResponse handleObstacleTrip(const char* actionOverride = nullptr, bool immediateFollowUp = true);
   void onStopInput();
   void onLimitsInvalid();
 
@@ -161,10 +167,14 @@ public:
 
 private:
   bool startMoveTo(float target, bool forward, GateState nextState);
+  bool startMove(GateMoveDirection dir, float target, GateState nextState);
   void setState(GateState next);
   void publishStatusIfChanged();
   float configuredMaxDistance() const;
   bool canMove() const;
+  GateDecisionContext decisionContext() const;
+  void setTerminalState(GateTerminalState next);
+  void refreshTerminalStateFromPosition();
 
   MotorController* motor;
   ConfigManager* cfg;
@@ -200,4 +210,7 @@ private:
 
   bool lastObstacle = false;
   uint32_t obstacleRefractoryUntilMs = 0;
+  bool limitOpenActive = false;
+  bool limitCloseActive = false;
+  GateTerminalState terminalState = GateTerminalState::Unknown;
 };

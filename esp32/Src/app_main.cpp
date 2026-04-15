@@ -246,6 +246,40 @@ static uint32_t chargerPendingSinceMs = 0;
 static constexpr float kChargerConnectV = 40.2f;
 static constexpr float kChargerDisconnectV = 39.2f;
 static constexpr uint32_t kChargerDebounceMs = 1200;
+static bool ld2410FirmwareDisabledLogged = false;
+
+static void forceDisableLd2410Runtime() {
+  config.sensorsConfig.ld2410.enabled = false;
+  config.sensorsConfig.ld2410.triggerEnabled = false;
+  ld2410Status.available = false;
+  ld2410Status.present = false;
+  ld2410Status.moving = false;
+  ld2410Status.stationary = false;
+  ld2410Status.distanceCm = -1;
+  ld2410Status.movingDistanceCm = -1;
+  ld2410Status.stationaryDistanceCm = -1;
+  ld2410Status.movingSignal = -1;
+  ld2410Status.stationarySignal = -1;
+  ld2410Status.lastUpdateMs = 0;
+  ld2410TriggerArmed = false;
+  ld2410ReversePending = false;
+  ld2410TriggerCooldownUntilMs = 0;
+  if (ld2410Active) {
+    ld2410.end();
+    ld2410Active = false;
+  }
+  ld2410RxPin = -1;
+  ld2410TxPin = -1;
+  ld2410Baud = -1;
+  ld2410MovingGate = -1;
+  ld2410StationaryGate = -1;
+  ld2410NoOneWindow = -1;
+  ld2410Mode = "";
+  if (!ld2410FirmwareDisabledLogged) {
+    Serial.println("[LD2410] disabled in firmware for stability");
+    ld2410FirmwareDisabledLogged = true;
+  }
+}
 
 static void updateChargerConnectedFromTelemetry(const HoverTelemetry& tel, uint32_t nowMs) {
   bool desiredKnown = false;
@@ -1191,6 +1225,7 @@ void handleInputs() {
 
   InputEvents ev = inputManager.poll(config, millis());
   const bool photocellEnabled = config.sensorsConfig.photocell.enabled;
+  gate->updateLimitState(inputManager.limitOpenActive(config), inputManager.limitCloseActive(config));
 
   if (ev.stopPressed) {
     gate->onStopInput();
@@ -1201,11 +1236,15 @@ void handleInputs() {
     if (photocellEnabled) {
       GateCommandResponse r = gate->onObstacle(ev.obstacleActive);
       if (ev.obstacleActive) {
-        if (r.result == GATE_CMD_OK && r.applied) {
+        if (r.applied) {
           if (r.cmd == GATE_CMD_OPEN) pushEvent("warn", "obstacle -> open");
           else if (r.cmd == GATE_CMD_CLOSE) pushEvent("warn", "obstacle -> close");
           else if (r.cmd == GATE_CMD_STOP) pushEvent("warn", "obstacle -> stop");
           else pushEvent("warn", "obstacle");
+          if (r.followUpBlocked) {
+            pushEvent("warn", "obstacle reopen blocked");
+            led.setOverride("command_rejected", 600);
+          }
         } else if (r.result == GATE_CMD_BLOCKED) {
           pushEvent("warn", "obstacle action blocked");
           led.setOverride("command_rejected", 600);
@@ -1286,204 +1325,7 @@ void updatePositionPercent() {
   }
   positionTracker.updatePosition(calibration.isRunning());
   syncLegacyPositionState();
-  return;
-  if (!gate) return;
-
-  bool resyncClose = resyncAtCloseLimit;
-  bool resyncOpen = resyncAtOpenLimit;
-  resyncAtCloseLimit = false;
-  resyncAtOpenLimit = false;
-
-  auto syncConfigPosition = []() {
-    config.gateConfig.position = positionMeters;
-    config.gateConfig.maxDistance = maxDistanceMeters;
-    config.gateConfig.totalDistance = maxDistanceMeters;
-  };
-
-  float maxDistance = config.gateConfig.maxDistance > 0.0f ?
-    config.gateConfig.maxDistance : config.gateConfig.totalDistance;
-  if (maxDistance < 0.0f) maxDistance = 0.0f;
-  maxDistanceMeters = maxDistance;
-
-  if (positionMeters < 0.0f) positionMeters = 0.0f;
-  if (maxDistanceMeters > 0.0f && positionMeters > maxDistanceMeters) {
-    positionMeters = maxDistanceMeters;
-  }
-  positionMetersRaw = positionMeters;
-
-  float pulsesPerMeter = 0.0f;
-  long totalCounts = 0;
-  if (config.sensorsConfig.hall.enabled &&
-      config.sensorsConfig.hall.pin >= 0 &&
-      maxDistanceMeters > 0.0f &&
-      config.gateConfig.wheelCircumference > 0.0f &&
-      config.gateConfig.pulsesPerRevolution > 0) {
-    pulsesPerMeter = (float)config.gateConfig.pulsesPerRevolution / config.gateConfig.wheelCircumference;
-    totalCounts = (long)(maxDistanceMeters * pulsesPerMeter);
-  }
-
-  // One-shot hard resync when a limit edge is detected (handled via GateController).
-  if (resyncClose) {
-    positionMeters = 0.0f;
-    positionMetersRaw = 0.0f;
-    if (totalCounts > 0) hallPosition = 0;
-  }
-  if (resyncOpen) {
-    positionMeters = maxDistanceMeters;
-    positionMetersRaw = maxDistanceMeters;
-    if (totalCounts > 0) hallPosition = totalCounts;
-  }
-
-  if (calibration.isRunning()) {
-    syncConfigPosition();
-    positionMetersRaw = positionMeters;
-    gate->setPosition(positionMeters, maxDistanceMeters);
-    gate->setControlPosition(positionMetersRaw);
-    return;
-  }
-
-  const bool preferHover = (config.gateConfig.positionSource == "hoverboard_tel");
-  const bool hallAvailable = (hallAttached && totalCounts > 0 && pulsesPerMeter > 0.0f);
-  const bool hoverAvailable = (motor && motor->isHoverUart() && motor->hoverEnabled());
-
-  if (!preferHover && hallAvailable) {
-    long current = readHallCountAtomic();
-    long delta = current - hallCountLast;
-    hallCountLast = current;
-    if (gate->isMoving() && delta != 0) {
-      int dir = gate->getLastDirection() >= 0 ? 1 : -1;
-      hallPosition += delta * dir;
-      if (hallPosition < 0) hallPosition = 0;
-      if (hallPosition > totalCounts) hallPosition = totalCounts;
-      positionMeters = (float)hallPosition / pulsesPerMeter;
-    }
-    positionMetersRaw = positionMeters;
-    positionPercent = (maxDistanceMeters > 0.0f) ?
-      (int)((positionMeters * 100.0f) / maxDistanceMeters + 0.5f) : -1;
-    syncConfigPosition();
-    gate->setPosition(positionMeters, maxDistanceMeters);
-    gate->setControlPosition(positionMetersRaw);
-    return;
-  }
-
-  if (preferHover && hoverAvailable) {
-    const HoverTelemetry& tel = motor->hoverTelemetry();
-    const uint32_t now = millis();
-
-    // Basic telemetry watchdog
-    uint32_t telTimeoutMs = config.gateConfig.telemetryTimeoutMs > 0 ? config.gateConfig.telemetryTimeoutMs : 1000;
-    if (tel.lastTelMs != 0 && !motor->hoverTelemetryTimedOut(now, telTimeoutMs)) {
-        // Raw distance from hover telemetry
-        const float pos_raw = (float)tel.distMm / 1000.0f;
-        float pos_raw_adj = pos_raw;
-        if (!hoverOffsetValid && config.gateConfig.hbOriginDistMm != 0) {
-          hoverOffsetMeters = -((float)config.gateConfig.hbOriginDistMm) / 1000.0f;
-          hoverOffsetValid = true;
-        }
-        if (hoverOffsetValid) {
-          pos_raw_adj += hoverOffsetMeters;
-        }
-
-        // --- Filtering & sanity check (prevents jumps / frame glitches) ---
-        static bool posFilterInit = false;
-        static float pos_f = 0.0f;
-        static uint32_t lastTelMs = 0;
-
-      float dt = 0.0f;
-      if (lastTelMs != 0 && tel.lastTelMs >= (long)lastTelMs) {
-        dt = (float)(tel.lastTelMs - (long)lastTelMs) / 1000.0f;
-      }
-      // Conservative max speed used for sanity (m/s). Tune if you want.
-        const float vMax_m_s = 1.5f;
-        const float maxJump = (dt > 0.0f) ? (vMax_m_s * dt * 1.5f) : 0.20f; // 20 cm fallback
-
-        if (!posFilterInit) {
-          pos_f = pos_raw_adj;
-          posFilterInit = true;
-        } else {
-          const float diff = fabsf(pos_raw_adj - pos_f);
-          if (diff <= maxJump) {
-            const float alpha = 0.25f; // EMA coefficient (0..1), bigger = more responsive
-            pos_f = pos_f + alpha * (pos_raw_adj - pos_f);
-          } else {
-            // Drop outlier sample (do not update pos_f)
-          }
-        }
-
-        if (resyncClose || resyncOpen) {
-        if (resyncClose) {
-          hoverOffsetMeters = -pos_raw;
-          hoverOffsetValid = true;
-          config.gateConfig.hbOriginDistMm = (int32_t)lroundf(pos_raw * 1000.0f);
-        } else if (resyncOpen && maxDistanceMeters > 0.0f) {
-          hoverOffsetMeters = maxDistanceMeters - pos_raw;
-          hoverOffsetValid = true;
-          config.gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters) * 1000.0f);
-        }
-          if (hoverOffsetValid) {
-            pos_raw_adj = pos_raw + hoverOffsetMeters;
-            pos_f = pos_raw_adj;
-            posFilterInit = true;
-          }
-        }
-
-        lastTelMs = (uint32_t)tel.lastTelMs;
-
-        positionMeters = pos_f;
-        positionMetersRaw = pos_raw_adj;
-
-        // Clamp BOTH filtered and raw positions to [0..max].
-        // The raw telemetry distance can briefly go slightly negative or exceed max due to overshoot
-        // and integration drift. For UI/logic we want a stable 0..max that decreases to 0 on close
-        // and stays at 0 when fully closed.
-        if (positionMeters < 0.0f) positionMeters = 0.0f;
-        if (maxDistanceMeters > 0.0f && positionMeters > maxDistanceMeters) {
-          positionMeters = maxDistanceMeters;
-        }
-        if (positionMetersRaw < 0.0f) positionMetersRaw = 0.0f;
-        if (maxDistanceMeters > 0.0f && positionMetersRaw > maxDistanceMeters) {
-          positionMetersRaw = maxDistanceMeters;
-        }
-
-        // Auto-resync offset when stopped near the ends to prevent the raw value from drifting
-        // below 0 or above max after the gate finishes moving.
-        if (gate && !gate->isMoving() && maxDistanceMeters > 0.0f) {
-          const float endEps = 0.02f;      // 2 cm
-          const float snapWindow = 0.35f;  // 35 cm window for safe snap
-          if (positionMeters <= endEps && fabsf(pos_raw_adj) <= snapWindow) {
-            hoverOffsetMeters = -pos_raw;
-            hoverOffsetValid = true;
-            config.gateConfig.hbOriginDistMm = (int32_t)lroundf(pos_raw * 1000.0f);
-            pos_f = 0.0f;
-            positionMeters = 0.0f;
-            positionMetersRaw = 0.0f;
-            posFilterInit = true;
-          } else if (positionMeters >= (maxDistanceMeters - endEps) &&
-                     fabsf(maxDistanceMeters - pos_raw_adj) <= snapWindow) {
-            hoverOffsetMeters = maxDistanceMeters - pos_raw;
-            hoverOffsetValid = true;
-            config.gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters) * 1000.0f);
-            pos_f = maxDistanceMeters;
-            positionMeters = maxDistanceMeters;
-            positionMetersRaw = maxDistanceMeters;
-            posFilterInit = true;
-          }
-        }
-        positionPercent = (maxDistanceMeters > 0.0f) ?
-          (int)((positionMeters * 100.0f) / maxDistanceMeters + 0.5f) : -1;
-        syncConfigPosition();
-        gate->setPosition(positionMeters, maxDistanceMeters);
-        gate->setControlPosition(positionMetersRaw);
-        return;
-      }
-    }
-
-    // No sensor/telemetry available: do NOT simulate movement. Keep last known position.
-    syncConfigPosition();
-    positionMetersRaw = positionMeters;
-    gate->setPosition(positionMeters, maxDistanceMeters);
-    gate->setControlPosition(positionMetersRaw);
-  }
+}
 
 void updateHallStats(uint32_t nowMs) {
   positionTracker.updateHallStats(nowMs);
@@ -1499,6 +1341,10 @@ static int ld2410GateFromCm(int distanceCm) {
 }
 
 static bool applyLd2410Config(const Ld2410Config& cfg) {
+  (void)cfg;
+  forceDisableLd2410Runtime();
+  return false;
+#if 0
   bool enabled = cfg.enabled && cfg.rxPin >= 0 && cfg.txPin >= 0;
   if (!enabled) {
     if (ld2410Active) {
@@ -1586,9 +1432,14 @@ static bool applyLd2410Config(const Ld2410Config& cfg) {
                 stationaryGate,
                 ld2410Mode.c_str());
   return true;
+#endif
 }
 
 void updateLd2410Status(uint32_t nowMs) {
+  (void)nowMs;
+  forceDisableLd2410Runtime();
+  return;
+#if 0
   const auto& cfg = config.sensorsConfig.ld2410;
   const uint32_t rev = config.getRevision();
   bool needApply = (rev != ld2410CfgRevision);
@@ -1652,9 +1503,14 @@ void updateLd2410Status(uint32_t nowMs) {
     ld2410Status.stationarySignal = stationarySignal;
     ld2410Status.lastUpdateMs = nowMs;
   }
+#endif
 }
 
 void handleLd2410Trigger(uint32_t nowMs) {
+  (void)nowMs;
+  forceDisableLd2410Runtime();
+  return;
+#if 0
   const auto& cfg = config.sensorsConfig.ld2410;
   if (!cfg.enabled || !cfg.triggerEnabled) {
     ld2410TriggerArmed = true;
@@ -1667,10 +1523,11 @@ void handleLd2410Trigger(uint32_t nowMs) {
                   ((mode == "moving") ? ld2410Status.moving :
                    (mode == "stationary") ? ld2410Status.stationary :
                    ld2410Status.present);
-  if (detected && ld2410TriggerArmed && gate && gate->isMoving() && nowMs >= ld2410TriggerCooldownUntilMs) {
-    gate->stop(GATE_STOP_OBSTACLE);
+  if (detected && ld2410TriggerArmed && gate && gate->isMoving() && gate->getState() == GATE_CLOSING && nowMs >= ld2410TriggerCooldownUntilMs) {
+    const String triggerAction = cfg.triggerAction;
+    GateCommandResponse r = gate->handleObstacleTrip(triggerAction.c_str(), false);
     pushEvent("warn", "ld2410 obstacle");
-    if (cfg.triggerAction == "open") {
+    if (triggerAction == "open" && r.applied) {
       uint32_t delayMs = cfg.triggerReverseDelayMs > 0 ? (uint32_t)cfg.triggerReverseDelayMs : 0;
       ld2410ReversePending = true;
       ld2410ReverseAtMs = nowMs + delayMs;
@@ -1688,6 +1545,7 @@ void handleLd2410Trigger(uint32_t nowMs) {
       ld2410ReversePending = false;
     }
   }
+#endif
 }
 
 void onGateStatusChanged(const GateStatus& status, void* ctx) {
@@ -2181,6 +2039,7 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
   }
 
   config.load();
+  forceDisableLd2410Runtime();
   setupInputs();
   updateHallAttachment();
 
@@ -2451,6 +2310,7 @@ void setup() {
 
   config.begin();
   config.load();
+  forceDisableLd2410Runtime();
   config.setSaveAllowedCallback(isSafeToSaveConfig);
   led.init(config.ledConfig);
   led.setOverride("boot", 1200);

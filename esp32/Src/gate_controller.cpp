@@ -12,6 +12,47 @@ GateController::GateController(MotorController* motor_, ConfigManager* cfg_) : m
   status.lastStopReason = GATE_STOP_NONE;
 }
 
+GateDecisionContext GateController::decisionContext() const {
+  GateDecisionContext ctx;
+  ctx.moving = moving;
+  ctx.pendingStop = pendingStop;
+  ctx.limitOpenActive = limitOpenActive;
+  ctx.limitCloseActive = limitCloseActive;
+  ctx.terminalState = terminalState;
+  ctx.position = status.position;
+  ctx.maxDistance = configuredMaxDistance();
+  ctx.lastDirection = lastDirection;
+  return ctx;
+}
+
+void GateController::setTerminalState(GateTerminalState next) {
+  if (terminalState == next) return;
+  terminalState = next;
+#if defined(GATE_DEBUG_UART)
+  Serial.printf("[GATE] terminal_state=%d pos=%.3fm moving=%d pendingStop=%d limitOpen=%d limitClose=%d\n",
+                (int)terminalState,
+                status.position,
+                moving ? 1 : 0,
+                pendingStop ? 1 : 0,
+                limitOpenActive ? 1 : 0,
+                limitCloseActive ? 1 : 0);
+#endif
+}
+
+void GateController::refreshTerminalStateFromPosition() {
+  if (limitOpenActive && !limitCloseActive) {
+    setTerminalState(GateTerminalState::FullyOpen);
+    return;
+  }
+  if (limitCloseActive && !limitOpenActive) {
+    setTerminalState(GateTerminalState::FullyClosed);
+    return;
+  }
+  // Terminal state is intentionally sticky. Once a physical end-stop or a trusted soft-limit
+  // establishes an end position, minor telemetry drift or filtered position wobble must not
+  // clear it. We only release the latch explicitly when a new move starts away from the end.
+}
+
 void GateController::begin() {
   if (cfg->safetyConfig.watchdogEnabled) {
     esp_task_wdt_init(10, true);
@@ -316,11 +357,11 @@ void GateController::loop() {
 
 bool GateController::open() {
   float target = configuredMaxDistance();
-  return startMoveTo(target, true, GATE_OPENING);
+  return startMove(GateMoveDirection::Open, target, GATE_OPENING);
 }
 
 bool GateController::close() {
-  return startMoveTo(0.0f, false, GATE_CLOSING);
+  return startMove(GateMoveDirection::Close, 0.0f, GATE_CLOSING);
 }
 
 bool GateController::moveTo(float targetMeters) {
@@ -338,7 +379,9 @@ bool GateController::moveTo(float targetMeters) {
   }
 
   const bool forward = target > pos;
-  return startMoveTo(target, forward, forward ? GATE_OPENING : GATE_CLOSING);
+  return startMove(forward ? GateMoveDirection::Open : GateMoveDirection::Close,
+                   target,
+                   forward ? GATE_OPENING : GATE_CLOSING);
 }
 
 void GateController::stop() {
@@ -346,6 +389,16 @@ void GateController::stop() {
 }
 
 bool GateController::startMoveTo(float target, bool forward, GateState nextState) {
+  return startMove(forward ? GateMoveDirection::Open : GateMoveDirection::Close, target, nextState);
+}
+
+bool GateController::startMove(GateMoveDirection dir, float target, GateState nextState) {
+  const GateDecisionContext ctx = decisionContext();
+  const GateMoveBlockReason block = validateMoveDirection(ctx, dir);
+  if (block != GateMoveBlockReason::None) {
+    Serial.printf("[GATE] startMove blocked: reason=%d target=%.3fm\n", (int)block, target);
+    return false;
+  }
   if (!canMove()) {
     Serial.printf("[GATE] startMove blocked: canMove=false target=%.3fm\n", target);
     return false;
@@ -354,10 +407,12 @@ bool GateController::startMoveTo(float target, bool forward, GateState nextState
     Serial.printf("[GATE] startMove blocked: hover offline target=%.3fm\n", target);
     return false;
   }
+  const bool forward = dir == GateMoveDirection::Open;
   moving = true;
   pendingStop = false;
   setState(nextState);
   lastDirection = forward ? 1 : -1;
+  setTerminalState(GateTerminalState::Unknown);
   stopConfirmCount = 0;
   lastStopTelMs = 0;
   moveStart = millis();
@@ -492,6 +547,11 @@ void GateController::stop(GateStopReason reason) {
       if (motor->isHoverUart()) {
         motor->hoverDisarm();
       }
+    }
+    if (state == GATE_OPENING) {
+      setTerminalState(GateTerminalState::FullyOpen);
+    } else if (state == GATE_CLOSING) {
+      setTerminalState(GateTerminalState::FullyClosed);
     }
     moving = false;
     pendingStop = false;
@@ -697,6 +757,8 @@ void GateController::setPosition(float position, float maxDistance) {
     }
   }
 
+  refreshTerminalStateFromPosition();
+
   if (moving) {
     const bool softLimitsEnabled = cfg ? cfg->gateConfig.softLimitsEnabled : true;
     if (softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && status.position >= status.maxDistance) {
@@ -747,6 +809,12 @@ void GateController::setStatusCallback(GateStatusCallback cb, void* ctx) {
   statusCb = cb;
   statusCtx = ctx;
   publishStatusIfChanged();
+}
+
+void GateController::updateLimitState(bool openActive, bool closeActive) {
+  limitOpenActive = openActive;
+  limitCloseActive = closeActive;
+  refreshTerminalStateFromPosition();
 }
 
 void GateController::setState(GateState next) {
@@ -809,6 +877,9 @@ bool GateController::clearError() {
 }
 
 void GateController::onLimitOpen() {
+  limitOpenActive = true;
+  limitCloseActive = false;
+  setTerminalState(GateTerminalState::FullyOpen);
   // Hard resync position at open limit
   float md = status.maxDistance > 0.0f ? status.maxDistance : configuredMaxDistance();
   if (md > 0.0f) {
@@ -824,6 +895,9 @@ void GateController::onLimitOpen() {
 }
 
 void GateController::onLimitClose() {
+  limitCloseActive = true;
+  limitOpenActive = false;
+  setTerminalState(GateTerminalState::FullyClosed);
   // Hard resync position at close limit
   status.position = 0.0f;
   status.targetPosition = 0.0f;
@@ -833,6 +907,36 @@ void GateController::onLimitClose() {
   } else {
     publishStatusIfChanged();
   }
+}
+
+GateCommandResponse GateController::handleObstacleTrip(const char* actionOverride, bool immediateFollowUp) {
+  GateCommandResponse resp;
+  resp.cmd = GATE_CMD_STOP;
+  resp.result = GATE_CMD_OK;
+  resp.applied = false;
+
+  if (!isMoving() || state != GATE_CLOSING) {
+    return resp;
+  }
+
+  stop(GATE_STOP_OBSTACLE);
+  resp.applied = true;
+
+  String action = actionOverride ? String(actionOverride)
+                                 : (cfg ? cfg->safetyConfig.obstacleAction : String("open"));
+  action.toLowerCase();
+  if (!immediateFollowUp || action != "open") {
+    return resp;
+  }
+
+  resp.followUpCmd = GATE_CMD_OPEN;
+  const bool ok = open();
+  if (ok) {
+    resp.cmd = GATE_CMD_OPEN;
+  } else {
+    resp.followUpBlocked = true;
+  }
+  return resp;
 }
 
 GateCommandResponse GateController::onObstacle(bool active) {
@@ -859,12 +963,7 @@ GateCommandResponse GateController::onObstacle(bool active) {
   }
   obstacleRefractoryUntilMs = nowMs + kObstacleRefractoryMs;
 
-  stop(GATE_STOP_OBSTACLE);
-  resp.cmd = GATE_CMD_OPEN;
-  const bool ok = open();
-  resp.applied = ok;
-  resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
-  return resp;
+  return handleObstacleTrip();
 }
 
 void GateController::onStopInput() {
@@ -966,34 +1065,13 @@ GateCommandResponse GateController::handleCommand(const char* cmd) {
       return resp;
     }
 
-    const float pos = getPosition();
-    const float maxDist = getMaxDistance();
-
-    // If position is unknown (maxDist==0) or very close to close end -> open.
-    if (pos <= 0.01f || maxDist <= 0.0f) {
-      bool ok = open();
-      resp.applied = ok;
-      resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
-      return resp;
+    const GateMoveDirection dir = resolveToggleDirection(decisionContext());
+    bool ok = false;
+    if (dir == GateMoveDirection::Open) {
+      ok = open();
+    } else if (dir == GateMoveDirection::Close) {
+      ok = close();
     }
-
-    // If close to open end -> close.
-    if (maxDist > 0.0f && pos >= maxDist - 0.01f) {
-      bool ok = close();
-      resp.applied = ok;
-      resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
-      return resp;
-    }
-
-    // Otherwise, invert last direction.
-    if (getLastDirection() >= 0) {
-      bool ok = close();
-      resp.applied = ok;
-      resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
-      return resp;
-    }
-
-    bool ok = open();
     resp.applied = ok;
     resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
     return resp;
