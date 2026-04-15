@@ -4,7 +4,6 @@
 #include <HardwareSerial.h>
 #include <esp_task_wdt.h>
 #endif
-#include <math.h>
 
 namespace {
 static constexpr uint16_t kStartFrame = 0xABCD;
@@ -30,9 +29,7 @@ struct SerialCommand {
 #pragma pack(pop)
 
 uint16_t checksumFor(const SerialCommand& cmd) {
-  return static_cast<uint16_t>(cmd.start ^
-                               static_cast<uint16_t>(cmd.steer) ^
-                               static_cast<uint16_t>(cmd.speed));
+  return static_cast<uint16_t>(cmd.start ^ static_cast<uint16_t>(cmd.steer) ^ static_cast<uint16_t>(cmd.speed));
 }
 
 HardwareSerial HoverSerial(2);
@@ -69,11 +66,6 @@ void HoverUartDriver::configure(const HoverUartConfig& cfgIn) {
   lastBadLines = 0;
   lastDiagPrintMs = 0;
   lastDiagOk = -2;
-  seqSeen = false;
-  lastSeq = 0;
-  lastSeqTelMs = 0;
-  seqIntervalEmaMs = 0.0f;
-  seqJitterEmaMs = 0;
 }
 
 void HoverUartDriver::begin() {
@@ -291,9 +283,7 @@ void HoverUartDriver::handleRx() {
       if (lineLen > 0) {
         rxLines++;
       }
-      char* telStart = (lineLen >= 4) ? strstr(lineBuf, "TEL,") : nullptr;
-      char* fltStart = (lineLen >= 4) ? strstr(lineBuf, "FLT,") : nullptr;
-      if (telStart) {
+      if (lineLen >= 4 && strncmp(lineBuf, "TEL,", 4) == 0) {
         // parse key=value pairs separated by commas for forward/backward compatibility
         int dir = tel.dir;
         int rpm = tel.rpm;
@@ -308,10 +298,6 @@ void HoverUartDriver::handleRx() {
         int armedVal = -1;
         int cmd_age_ms = -1;
         bool have_cmd_age = false;
-        int chg = tel.charger;
-        uint32_t seq = tel.seq;
-        bool have_seq = false;
-        int ack = tel.ackCmdId;
 
         // optional motor/HALL diagnostics
         int hall = tel.hall;
@@ -322,8 +308,8 @@ void HoverUartDriver::handleRx() {
         int diag_bad_seq = tel.diag_bad_seq;
         int diag_dir = tel.diag_dir;
 
-        char tmp[256];
-        strncpy(tmp, telStart + 4, sizeof(tmp) - 1);
+        char tmp[160];
+        strncpy(tmp, lineBuf + 4, sizeof(tmp) - 1);
         tmp[sizeof(tmp) - 1] = '\0';
         char* saveptr = nullptr;
         char* tok = strtok_r(tmp, ",", &saveptr);
@@ -337,9 +323,6 @@ void HoverUartDriver::handleRx() {
           else if (strncmp(tok, "iA=", 3) == 0) { iA_val = atoi(tok + 3); have_iA = true; }
           else if (strncmp(tok, "armed=", 6) == 0) { armedVal = atoi(tok + 6); }
           else if (strncmp(tok, "cmd_age_ms=", 11) == 0) { cmd_age_ms = atoi(tok + 11); have_cmd_age = true; }
-          else if (strncmp(tok, "chg=", 4) == 0) { chg = atoi(tok + 4); }
-          else if (strncmp(tok, "seq=", 4) == 0) { seq = (uint32_t)strtoul(tok + 4, nullptr, 10); have_seq = true; }
-          else if (strncmp(tok, "ack=", 4) == 0) { ack = atoi(tok + 4); }
           else if (strncmp(tok, "hall=", 5) == 0) { hall = atoi(tok + 5); }
           else if (strncmp(tok, "diag_ok=", 8) == 0) { diag_ok = atoi(tok + 8); }
           else if (strncmp(tok, "diag_reason=", 12) == 0) { diag_reason = atoi(tok + 12); }
@@ -390,51 +373,6 @@ void HoverUartDriver::handleRx() {
           tel.armed = (armedVal != 0);
         }
         tel.cmdAgeMs = have_cmd_age ? cmd_age_ms : -1;
-        tel.charger = chg;
-        tel.ackCmdId = ack;
-
-        if (ack >= 0) {
-          tel.ackRttMs = -1;
-        } else {
-          tel.ackRttMs = -1;
-        }
-
-        if (have_seq) {
-          tel.seq = seq;
-          tel.seqValid = true;
-          uint32_t now = millis();
-          if (seqSeen) {
-            uint32_t gap = seq - lastSeq;
-            if (gap > 1) {
-              tel.seqLoss += (gap - 1);
-            }
-            if (lastSeqTelMs != 0 && now >= lastSeqTelMs) {
-              uint32_t dt = now - lastSeqTelMs;
-              tel.telIntervalMs = (int)dt;
-              if (seqIntervalEmaMs <= 0.0f) {
-                seqIntervalEmaMs = (float)dt;
-              } else {
-                float diff = fabsf((float)dt - seqIntervalEmaMs);
-                seqIntervalEmaMs = (seqIntervalEmaMs * 0.875f) + ((float)dt * 0.125f);
-                seqJitterEmaMs = (uint32_t)((seqJitterEmaMs * 0.75f) + (diff * 0.25f));
-              }
-              tel.telJitterMs = (int)seqJitterEmaMs;
-            }
-          } else {
-            seqSeen = true;
-            tel.seqLoss = 0;
-            tel.telIntervalMs = -1;
-            tel.telJitterMs = -1;
-            seqIntervalEmaMs = 0.0f;
-            seqJitterEmaMs = 0;
-          }
-          lastSeq = seq;
-          lastSeqTelMs = now;
-        } else {
-          tel.seqValid = false;
-          tel.telIntervalMs = -1;
-          tel.telJitterMs = -1;
-        }
 
         // diagnostics (optional)
         tel.hall = hall;
@@ -472,43 +410,6 @@ void HoverUartDriver::handleRx() {
             }
           }
         }
-      } else if (fltStart) {
-        uint32_t seq = 0;
-        int code = tel.fltCode;
-        int rpm = tel.fltRpm;
-        int iA = tel.fltIA_x100;
-        int bat_cV = tel.fltBat_cV;
-        int cmd_age = tel.fltCmdAgeMs;
-        int ack = tel.fltAckCmdId;
-        int chg = tel.fltCharger;
-
-        char tmp[256];
-        strncpy(tmp, fltStart + 4, sizeof(tmp) - 1);
-        tmp[sizeof(tmp) - 1] = '\0';
-        char* saveptr = nullptr;
-        char* tok = strtok_r(tmp, ",", &saveptr);
-        while (tok) {
-          if (strncmp(tok, "seq=", 4) == 0) seq = (uint32_t)strtoul(tok + 4, nullptr, 10);
-          else if (strncmp(tok, "code=", 5) == 0) code = atoi(tok + 5);
-          else if (strncmp(tok, "rpm=", 4) == 0) rpm = atoi(tok + 4);
-          else if (strncmp(tok, "iA=", 3) == 0) iA = atoi(tok + 3);
-          else if (strncmp(tok, "bat_cV=", 7) == 0) bat_cV = atoi(tok + 7);
-          else if (strncmp(tok, "cmd_age_ms=", 11) == 0) cmd_age = atoi(tok + 11);
-          else if (strncmp(tok, "ack=", 4) == 0) ack = atoi(tok + 4);
-          else if (strncmp(tok, "chg=", 4) == 0) chg = atoi(tok + 4);
-          tok = strtok_r(nullptr, ",", &saveptr);
-        }
-
-        tel.fltSeq = seq;
-        tel.fltCode = code;
-        tel.fltRpm = rpm;
-        tel.fltIA_x100 = iA;
-        tel.fltBat_cV = bat_cV;
-        tel.fltCmdAgeMs = cmd_age;
-        tel.fltAckCmdId = ack;
-        tel.fltCharger = chg;
-        tel.fltCount++;
-        tel.fltLastMs = millis();
       }
       lineLen = 0;
       continue;

@@ -83,7 +83,6 @@ extern volatile uint8_t telemetry_get_req;
 extern volatile uint8_t hb_motor_armed;
 extern volatile uint8_t failsafe_active;
 extern volatile uint32_t last_cmd_ms;
-extern volatile uint16_t last_cmd_seq;
 extern char last_ascii_cmd[8];
 extern volatile uint8_t ascii_resp_pending;
 extern char ascii_resp_buf[128];
@@ -143,16 +142,10 @@ static int32_t dist_mm_x1000;
 static int32_t dist_mm;
 static uint32_t dist_last_ms;
 static uint16_t telemetry_tick;
-static uint32_t telemetry_seq;
-static uint32_t hb_cmd_age_ms;
 static uint8_t eb_pulse_active;
 static uint32_t eb_pulse_end_ms;
 static uint16_t last_eb_ms;
 static uint16_t last_eb_lvl;
-static int16_t rpm_tel_filt;
-static int16_t iA_tel_filt;
-static uint8_t tel_filter_init;
-static uint16_t last_fault_snapshot;
 #ifdef VARIANT_USART
 // Reversal guard thresholds (RPM)
 // - REV_GUARD_RPM: if command reverses sign above this speed, hold setpoint at 0 first
@@ -161,7 +154,6 @@ static uint16_t last_fault_snapshot;
 #define REV_ALLOW_RPM 12
 #define REV_BRAKE_LVL 120
 static uint8_t rev_guard_active;
-static int16_t gate_cmd_shaped;
 #endif
 #endif
 #if defined(FEEDBACK_SERIAL_USART2)
@@ -301,41 +293,14 @@ int main(void) {
     readCommand();                        // Read Command: input1[inIdx].cmd, input2[inIdx].cmd
     calcAvgSpeed();                       // Calculate average measured speed: speedAvg, speedAvgAbs
 
-    #ifdef VARIANT_USART
-      // Additional command shaping for smoother direction changes and less jerk.
-      // This is independent from the existing global filters and focuses on UART gate commands.
-      {
-        int16_t cmd_raw = input2[inIdx].cmd;
-        int16_t d = cmd_raw - gate_cmd_shaped;
-        const int16_t step_norm = 24;
-        const int16_t step_reverse = 12;
-        const uint8_t reversing =
-          ((gate_cmd_shaped > 40) && (cmd_raw < -40)) ||
-          ((gate_cmd_shaped < -40) && (cmd_raw > 40));
-
-        if (reversing) {
-          if (gate_cmd_shaped > 0) {
-            gate_cmd_shaped -= (gate_cmd_shaped > step_reverse) ? step_reverse : gate_cmd_shaped;
-          } else if (gate_cmd_shaped < 0) {
-            int16_t a = (int16_t)(-gate_cmd_shaped);
-            gate_cmd_shaped += (a > step_reverse) ? step_reverse : a;
-          }
-        } else {
-          if (d > step_norm) d = step_norm;
-          if (d < -step_norm) d = -step_norm;
-          gate_cmd_shaped += d;
-        }
-        input2[inIdx].cmd = gate_cmd_shaped;
-      }
-    #endif
-
     #if defined(FEEDBACK_SERIAL_USART2) || defined(FEEDBACK_SERIAL_USART3)
-      hb_cmd_age_ms = HAL_GetTick() - last_cmd_ms;
       // FAILSAFE based on last valid binary command timestamp
-      if (hb_motor_armed && (hb_cmd_age_ms > DISARM_CMD_MS)) {
+      uint32_t now_ms = HAL_GetTick();
+      uint32_t cmd_age = now_ms - last_cmd_ms;
+      if (hb_motor_armed && (cmd_age > DISARM_CMD_MS)) {
         hb_motor_armed = 0;
         failsafe_active = 1;
-      } else if (hb_motor_armed && (hb_cmd_age_ms > FAILSAFE_CMD_MS)) {
+      } else if (hb_motor_armed && (cmd_age > FAILSAFE_CMD_MS)) {
         failsafe_active = 1;
       } else {
         failsafe_active = 0;
@@ -764,7 +729,7 @@ int main(void) {
           int dir = 0;
           uint16_t fault = (uint16_t)rtY_Left.z_errCode;
           int iA = ABS(left_dc_curr);  // [A*100] Absolute DC link current of active (LEFT) channel
-          char tel_buf[220];
+          char tel_buf[160];
           const char *mode_str = "UNK";
 
           if (rpm_abs <= 5) {
@@ -784,35 +749,21 @@ int main(void) {
             mode_str = "VLT";
           }
 
-          if (!tel_filter_init) {
-            rpm_tel_filt = rpm_meas;
-            iA_tel_filt = iA;
-            tel_filter_init = 1;
-          } else {
-            rpm_tel_filt += (int16_t)((rpm_meas - rpm_tel_filt) / 4);
-            iA_tel_filt += (int16_t)((iA - iA_tel_filt) / 4);
-          }
-          telemetry_seq++;
-          uint8_t chg = (HAL_GPIO_ReadPin(CHARGER_PORT, CHARGER_PIN) == GATE_CHARGER_ACTIVE_LEVEL) ? 1u : 0u;
-
           int32_t bat_cV = (int32_t)batVoltageCalib;
           int len = snprintf(
             tel_buf,
             sizeof(tel_buf),
-            "TEL,seq=%lu,dir=%d,rpm=%d,dist_mm=%ld,fault=%u,bat_cV=%ld,iA=%d,armed=%u,mode=%s,eb=%u,cmd_age_ms=%lu,chg=%u,ack=%u\n",
-            (unsigned long)telemetry_seq,
+            "TEL,dir=%d,rpm=%d,dist_mm=%ld,fault=%u,bat_cV=%ld,iA=%d,armed=%u,mode=%s,eb=%u,cmd_age_ms=%lu\n",
             dir,
-            rpm_tel_filt,
+            rpm_meas,
             (long)dist_mm,
             (unsigned)fault,
             (long)bat_cV,
-            iA_tel_filt,
+            iA,
             (unsigned)hb_motor_armed,
             mode_str,
             (unsigned)eb_enabled,
-            (unsigned long)hb_cmd_age_ms,
-            (unsigned)chg,
-            (unsigned)last_cmd_seq
+            (unsigned long)cmd_age
           );
           if (len < 0) {
             len = 0;
@@ -830,34 +781,6 @@ int main(void) {
               HAL_UART_Transmit(&huart2, (uint8_t *)tel_buf, (uint16_t)len, 10);
             }
           #endif
-
-          // Send one-shot fault snapshot frame when fault edge appears.
-          if (fault != 0 && fault != last_fault_snapshot) {
-            char flt_buf[220];
-            int flt_len = snprintf(
-              flt_buf,
-              sizeof(flt_buf),
-              "FLT,seq=%lu,code=%u,rpm=%d,iA=%d,bat_cV=%ld,cmd_age_ms=%lu,ack=%u,chg=%u\n",
-              (unsigned long)telemetry_seq,
-              (unsigned)fault,
-              rpm_tel_filt,
-              iA_tel_filt,
-              (long)bat_cV,
-              (unsigned long)hb_cmd_age_ms,
-              (unsigned)last_cmd_seq,
-              (unsigned)chg
-            );
-            if (flt_len > 0) {
-              #if defined(FEEDBACK_SERIAL_USART3)
-                HAL_UART_Transmit(&huart3, (uint8_t *)flt_buf, (uint16_t)flt_len, 10);
-              #elif defined(FEEDBACK_SERIAL_USART2)
-                HAL_UART_Transmit(&huart2, (uint8_t *)flt_buf, (uint16_t)flt_len, 10);
-              #endif
-            }
-            last_fault_snapshot = fault;
-          } else if (fault == 0) {
-            last_fault_snapshot = 0;
-          }
         }
       }
     #endif

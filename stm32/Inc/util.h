@@ -107,7 +107,6 @@ extern volatile uint8_t telemetry_get_req;
 extern volatile uint8_t hb_motor_armed;
 extern volatile uint8_t failsafe_active;
 extern volatile uint32_t last_cmd_ms;
-extern volatile uint16_t last_cmd_seq;
 extern char last_ascii_cmd[8];
 extern volatile uint8_t ascii_resp_pending;
 extern char ascii_resp_buf[128];

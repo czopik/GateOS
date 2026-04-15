@@ -248,33 +248,21 @@ static constexpr float kChargerDisconnectV = 39.2f;
 static constexpr uint32_t kChargerDebounceMs = 1200;
 
 static void updateChargerConnectedFromTelemetry(const HoverTelemetry& tel, uint32_t nowMs) {
-  bool desiredFromStmKnown = tel.charger == 0 || tel.charger == 1;
-  bool desiredFromStm = tel.charger == 1;
-  bool desiredFromVoltage = false;
-  bool voltageKnown = tel.batValid && tel.batV > 0.0f && isfinite(tel.batV);
-
-  if (!desiredFromStmKnown && !voltageKnown) {
+  if (!tel.batValid || tel.batV <= 0.0f || !isfinite(tel.batV)) {
     chargerPending = false;
     return;
   }
 
   if (!chargerStateKnown) {
-    if (desiredFromStmKnown) chargerConnected = desiredFromStm;
-    else chargerConnected = tel.batV >= ((kChargerConnectV + kChargerDisconnectV) * 0.5f);
+    chargerConnected = tel.batV >= ((kChargerConnectV + kChargerDisconnectV) * 0.5f);
     chargerStateKnown = true;
     chargerPending = false;
     return;
   }
 
   bool desired = chargerConnected;
-  if (desiredFromStmKnown) {
-    desired = desiredFromStm;
-  } else if (voltageKnown) {
-    desiredFromVoltage = chargerConnected;
-    if (!chargerConnected && tel.batV >= kChargerConnectV) desiredFromVoltage = true;
-    if (chargerConnected && tel.batV <= kChargerDisconnectV) desiredFromVoltage = false;
-    desired = desiredFromVoltage;
-  }
+  if (!chargerConnected && tel.batV >= kChargerConnectV) desired = true;
+  if (chargerConnected && tel.batV <= kChargerDisconnectV) desired = false;
 
   if (desired == chargerConnected) {
     chargerPending = false;
@@ -948,14 +936,6 @@ void mqttPublishTelemetry() {
     hbObj["cmdAgeMs"] = tel.cmdAgeMs;
     hbObj["lastTelMs"] = tel.lastTelMs;
     hbObj["telAgeMs"] = (tel.lastTelMs == 0) ? -1 : (long)(millis() - tel.lastTelMs);
-    hbObj["seq"] = tel.seqValid ? tel.seq : 0;
-    hbObj["seqValid"] = tel.seqValid;
-    hbObj["seqLoss"] = tel.seqLoss;
-    hbObj["telIntervalMs"] = tel.telIntervalMs;
-    hbObj["telJitterMs"] = tel.telJitterMs;
-    hbObj["ackCmdId"] = tel.ackCmdId;
-    hbObj["ackRttMs"] = tel.ackRttMs;
-    hbObj["chg"] = tel.charger;
     hbObj["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
     hbObj["chargerKnown"] = chargerStateKnown;
     hbObj["chargerPending"] = chargerPending;
@@ -976,14 +956,6 @@ void mqttPublishTelemetry() {
     hbObj["cmdAgeMs"] = -1;
     hbObj["lastTelMs"] = 0;
     hbObj["telAgeMs"] = -1;
-    hbObj["seq"] = 0;
-    hbObj["seqValid"] = false;
-    hbObj["seqLoss"] = 0;
-    hbObj["telIntervalMs"] = -1;
-    hbObj["telJitterMs"] = -1;
-    hbObj["ackCmdId"] = -1;
-    hbObj["ackRttMs"] = -1;
-    hbObj["chg"] = -1;
     hbObj["chargerConnected"] = false;
     hbObj["chargerKnown"] = false;
     hbObj["chargerPending"] = false;
@@ -1753,24 +1725,6 @@ void fillDiagnostics(JsonObject& out) {
     else hoverObj["iA"] = -1.0f;
     hoverObj["fault"] = tel.fault;
     hoverObj["armed"] = tel.armed;
-    hoverObj["seq"] = tel.seqValid ? tel.seq : 0;
-    hoverObj["seqValid"] = tel.seqValid;
-    hoverObj["seqLoss"] = tel.seqLoss;
-    hoverObj["telIntervalMs"] = tel.telIntervalMs;
-    hoverObj["telJitterMs"] = tel.telJitterMs;
-    hoverObj["ackCmdId"] = tel.ackCmdId;
-    hoverObj["ackRttMs"] = tel.ackRttMs;
-    hoverObj["chg"] = tel.charger;
-    hoverObj["fltCode"] = tel.fltCode;
-    hoverObj["fltRpm"] = tel.fltRpm;
-    hoverObj["fltIA"] = tel.fltIA_x100 >= 0 ? ((float)tel.fltIA_x100) / 100.0f : -1.0f;
-    hoverObj["fltBat_cV"] = tel.fltBat_cV;
-    hoverObj["fltCmdAgeMs"] = tel.fltCmdAgeMs;
-    hoverObj["fltAckCmdId"] = tel.fltAckCmdId;
-    hoverObj["fltChg"] = tel.fltCharger;
-    hoverObj["fltSeq"] = tel.fltSeq;
-    hoverObj["fltCount"] = tel.fltCount;
-    hoverObj["fltLastMs"] = tel.fltLastMs;
     hoverObj["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
     hoverObj["chargerKnown"] = chargerStateKnown;
     hoverObj["chargerPending"] = chargerPending;
@@ -1782,24 +1736,6 @@ void fillDiagnostics(JsonObject& out) {
   } else {
     hoverObj["enabled"] = false;
     hoverObj["iA"] = -1.0f;
-    hoverObj["seq"] = 0;
-    hoverObj["seqValid"] = false;
-    hoverObj["seqLoss"] = 0;
-    hoverObj["telIntervalMs"] = -1;
-    hoverObj["telJitterMs"] = -1;
-    hoverObj["ackCmdId"] = -1;
-    hoverObj["ackRttMs"] = -1;
-    hoverObj["chg"] = -1;
-    hoverObj["fltCode"] = 0;
-    hoverObj["fltRpm"] = 0;
-    hoverObj["fltIA"] = -1.0f;
-    hoverObj["fltBat_cV"] = -1;
-    hoverObj["fltCmdAgeMs"] = -1;
-    hoverObj["fltAckCmdId"] = -1;
-    hoverObj["fltChg"] = -1;
-    hoverObj["fltSeq"] = 0;
-    hoverObj["fltCount"] = 0;
-    hoverObj["fltLastMs"] = 0;
     hoverObj["chargerConnected"] = false;
     hoverObj["chargerKnown"] = false;
     hoverObj["chargerPending"] = false;
@@ -1965,14 +1901,6 @@ void fillStatus(JsonObject& out) {
     hbObj["lastTelMs"] = tel.lastTelMs;
     hbObj["cmdAgeMs"] = tel.cmdAgeMs;
     hbObj["telAgeMs"] = (tel.lastTelMs == 0) ? -1 : (long)(millis() - tel.lastTelMs);
-    hbObj["seq"] = tel.seqValid ? tel.seq : 0;
-    hbObj["seqValid"] = tel.seqValid;
-    hbObj["seqLoss"] = tel.seqLoss;
-    hbObj["telIntervalMs"] = tel.telIntervalMs;
-    hbObj["telJitterMs"] = tel.telJitterMs;
-    hbObj["ackCmdId"] = tel.ackCmdId;
-    hbObj["ackRttMs"] = tel.ackRttMs;
-    hbObj["chg"] = tel.charger;
     hbObj["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
     hbObj["chargerKnown"] = chargerStateKnown;
     hbObj["chargerPending"] = chargerPending;
@@ -1990,14 +1918,6 @@ void fillStatus(JsonObject& out) {
     hbObj["lastTelMs"] = 0;
     hbObj["cmdAgeMs"] = -1;
     hbObj["telAgeMs"] = -1;
-    hbObj["seq"] = 0;
-    hbObj["seqValid"] = false;
-    hbObj["seqLoss"] = 0;
-    hbObj["telIntervalMs"] = -1;
-    hbObj["telJitterMs"] = -1;
-    hbObj["ackCmdId"] = -1;
-    hbObj["ackRttMs"] = -1;
-    hbObj["chg"] = -1;
     hbObj["chargerConnected"] = false;
     hbObj["chargerKnown"] = false;
     hbObj["chargerPending"] = false;
@@ -2125,28 +2045,12 @@ void fillStatusLite(JsonObject& out) {
     updateChargerConnectedFromTelemetry(tel, millis());
     out["rpm"] = tel.rpm;
     out["iA"] = tel.iA_x100 >= 0 ? ((float)tel.iA_x100) / 100.0f : -1.0f;
-    out["seq"] = tel.seqValid ? tel.seq : 0;
-    out["seqValid"] = tel.seqValid;
-    out["seqLoss"] = tel.seqLoss;
-    out["telIntervalMs"] = tel.telIntervalMs;
-    out["telJitterMs"] = tel.telJitterMs;
-    out["ackCmdId"] = tel.ackCmdId;
-    out["ackRttMs"] = tel.ackRttMs;
-    out["chg"] = tel.charger;
     out["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
     out["chargerKnown"] = chargerStateKnown;
     out["chargerPending"] = chargerPending;
   } else {
     out["rpm"] = 0;
     out["iA"] = -1.0f;
-    out["seq"] = 0;
-    out["seqValid"] = false;
-    out["seqLoss"] = 0;
-    out["telIntervalMs"] = -1;
-    out["telJitterMs"] = -1;
-    out["ackCmdId"] = -1;
-    out["ackRttMs"] = -1;
-    out["chg"] = -1;
     out["chargerConnected"] = false;
     out["chargerKnown"] = false;
     out["chargerPending"] = false;
