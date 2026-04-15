@@ -93,6 +93,24 @@ Edit `config.h` to enable GateOS variant:
 // #define CONTROL_SERIAL_USART2 // Use USART2 for command input (bidirectional)
 ```
 
+### GateOS STM32 Notes
+
+- This repository now includes the full STM32 header set under `stm32/Inc` (imported from the provided `D:\hoversilnikesp\Stm32xxx` project layout), so `platformio` builds can resolve `config.h`, `defines.h`, and HAL config headers.
+- `VARIANT_USART` startup was adjusted to resume automatically after power restore (no manual power button release wait in gate mode).
+- Battery calibration override is centralized in `stm32/Src/gate_calibration.h`.
+  - Current default is `GATE_BAT_CALIB_REAL_VOLTAGE = 4100` (41.00V anchor).
+  - Update this value if field telemetry and multimeter readings indicate a different scale.
+
+### Build (PlatformIO)
+
+From `stm32`:
+
+```bash
+python -m platformio run
+```
+
+The `platformio.ini` in this repo uses the board default linker script for `genericSTM32F103RC`.
+
 ## Pinout (Typical)
 
 | Signal | STM32 Pin | ESP32 Pin |

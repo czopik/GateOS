@@ -29,7 +29,6 @@ extern "C" {
 #define UART_TIMEOUT_MS         50U
 #define KEEPALIVE_INTERVAL_MS   100U
 #define CONNECTION_TIMEOUT_MS   500U
-#define TELEMETRY_PERIOD_MS     50U
 
 // Frame markers
 #define FRAME_START_BYTE        0xAAU
