@@ -681,7 +681,7 @@ int main(void) {
     board_temp_deg_c    = (TEMP_CAL_HIGH_DEG_C - TEMP_CAL_LOW_DEG_C) * (board_temp_adcFilt - TEMP_CAL_LOW_ADC) / (TEMP_CAL_HIGH_ADC - TEMP_CAL_LOW_ADC) + TEMP_CAL_LOW_DEG_C;
 
     // ####### CALC CALIBRATED BATTERY VOLTAGE #######
-    batVoltageCalib = batVoltage * GATE_BAT_CALIB_REAL_VOLTAGE / BAT_CALIB_ADC;
+    batVoltageCalib = batVoltage * gate_battery_calibration_cv() / BAT_CALIB_ADC;
 
     // ####### CALC DC LINK CURRENT #######
     left_dc_curr  = -(rtU_Left.i_DCLink * 100) / A2BIT_CONV;   // Left DC Link Current * 100 
