@@ -509,6 +509,10 @@ static bool hoverTelemetryHealthyForHomingMotion(uint32_t nowMs) {
   return true;
 }
 
+static bool startupCanRunHoverHoming() {
+  return motor && motor->isHoverUart() && motor->hoverEnabled();
+}
+
 static void restoreNormalMotionProfile() {
   if (!motor || !homingProfileApplied) return;
   motor->setMotionProfile(normalMotionProfile);
@@ -580,13 +584,24 @@ static void applyStartupLimitReference() {
     startupLimitRefDone = true;
   } else {
     // Both limits inactive at restart -> unknown position.
-    // Use temporary 100 mm helper distance until OPEN reference is found.
-    startupUiUnknownPos10 = true;
-    Serial.printf("[HOMING_TMP_POS] set mode=temp_100mm reason=limits_inactive_unknown_position mm=%ld\n",
-                  (long)lroundf(kStartupTempDistanceMeters * 1000.0f));
-    setStartupSafetyState(false, false, "limits_inactive_unknown_position");
-    setHomingResult("pending", "limits_inactive_unknown_position");
-    homingSearchOpen = true;
+    // If hover homing is unavailable in the current runtime config, do not loop forever
+    // pretending that automatic reference is about to start. Hold a stable blocked state
+    // until the user restores a valid runtime config or references the gate manually.
+    if (!startupCanRunHoverHoming()) {
+      startupUiUnknownPos10 = false;
+      setStartupSafetyState(false, true, "manual_reference_required");
+      setHomingResult("blocked", "manual_reference_required");
+      homingChecked = true;
+      Serial.println("[HOMING] blocked: no startup homing path (limits inactive, hover unavailable)");
+    } else {
+      // Use temporary 100 mm helper distance until OPEN reference is found.
+      startupUiUnknownPos10 = true;
+      Serial.printf("[HOMING_TMP_POS] set mode=temp_100mm reason=limits_inactive_unknown_position mm=%ld\n",
+                    (long)lroundf(kStartupTempDistanceMeters * 1000.0f));
+      setStartupSafetyState(false, false, "limits_inactive_unknown_position");
+      setHomingResult("pending", "limits_inactive_unknown_position");
+      homingSearchOpen = true;
+    }
     startupLimitRefDone = true;
   }
 }
@@ -2346,9 +2361,14 @@ void setup() {
                 config.otaConfig.port,
                 config.otaConfig.password.length() > 0 ? "set" : "empty");
 
-  hcs = new HCS301Receiver(config.gpioConfig.hcsPin);
-  hcs->begin();
-  hcs->setCallback(onHcsReceived);
+  if (config.gpioConfig.hcsPin >= 0) {
+    hcs = new HCS301Receiver(config.gpioConfig.hcsPin);
+    hcs->begin();
+    hcs->setCallback(onHcsReceived);
+  } else {
+    hcs = nullptr;
+    Serial.println("[HCS] disabled (pin < 0)");
+  }
 
   mqtt.setCallback(mqttCallback);
   mqtt.begin(config.mqttConfig);

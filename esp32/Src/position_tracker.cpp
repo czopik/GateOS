@@ -530,6 +530,7 @@ void PositionTracker::updateHallStats(uint32_t nowMs) {
 
 void PositionTracker::maybePersistPosition(uint32_t nowMs) {
   if (!cfg_ || !gate_) return;
+  if (nowMs < 5000) return;
   const bool moving = gate_->isMoving();
   if (moving) {
     wasMovingLast_ = true;
