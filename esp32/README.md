@@ -4,11 +4,12 @@ This directory contains the high-level GateOS firmware for the ESP32.
 
 ## Contents
 
-- [`esp32/Src/`](esp32/Src) — gate logic, web/API, homing, remotes, LED, config, MQTT, OTA
-- [`esp32/data/`](esp32/data) — web UI assets and sample config
-- [`esp32/lib/`](esp32/lib) — local libraries used by the ESP32 build
-- [`esp32/scripts/`](esp32/scripts) — ESP32-oriented diagnostics and regression tooling
-- [`esp32/platformio.ini`](esp32/platformio.ini) — PlatformIO configuration for ESP32 builds
+- [`esp32/Src/`](esp32/Src) - gate logic, web/API, homing, remotes, LED, config, MQTT, OTA
+- [`esp32/data/`](esp32/data) - web UI assets uploaded to LittleFS
+- [`esp32/config.example.json`](esp32/config.example.json) - sample config template (not uploaded)
+- [`esp32/lib/`](esp32/lib) - local libraries used by the ESP32 build
+- [`esp32/scripts/`](esp32/scripts) - ESP32-oriented diagnostics and regression tooling
+- [`esp32/platformio.ini`](esp32/platformio.ini) - PlatformIO configuration for ESP32 builds
 
 ## Build
 
@@ -24,3 +25,5 @@ python -m platformio run -e esp32
 python -m platformio run -e esp32 -t upload --upload-port COM3
 python -m platformio run -e esp32 -t uploadfs --upload-port COM3
 ```
+
+`uploadfs` updates only UI files and does not overwrite runtime `/config.json`.

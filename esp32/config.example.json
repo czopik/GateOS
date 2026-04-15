@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "device": {
+    "name": "GateOS",
+    "hostname": "gateos"
+  },
+  "wifi": {
+    "ssid": "YOUR_WIFI_SSID",
+    "password": "YOUR_WIFI_PASSWORD",
+    "apFallback": {
+      "ssid": "GateOS-Setup",
+      "password": "",
+      "timeoutMs": 30000
+    }
+  },
+  "mqtt": {
+    "enabled": false,
+    "server": "",
+    "port": 1883,
+    "user": "",
+    "password": "",
+    "topicBase": "brama",
+    "retain": true
+  }
+}
