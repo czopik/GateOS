@@ -10,6 +10,9 @@ void MqttManager::applyConfig(const MQTTConfig& cfgIn) {
   cfg = cfgIn;
   enabledFlag = cfg.enabled && cfg.server.length() > 0;
   buildTopics();
+  // PubSubClient default payload buffer is often too small for rich telemetry JSON.
+  // Keep a larger buffer to avoid false publish failures when link state is OK.
+  client.setBufferSize(1024);
 
   if (!enabledFlag) {
     if (client.connected()) {
@@ -64,7 +67,11 @@ bool MqttManager::publish(const char* topic, const char* payload, bool retain) {
   bool ok = client.publish(topic, payload, retain);
   if (!ok) {
     lastErrorMsg = String("publish_failed:") + String(client.state());
-    Serial.printf("MQTT publish fail %s state=%d\n", topic, client.state());
+    unsigned long now = millis();
+    if (now - lastPublishFailLogMs >= 2000) {
+      lastPublishFailLogMs = now;
+      Serial.printf("MQTT publish fail %s state=%d\n", topic, client.state());
+    }
   }
   return ok;
 }

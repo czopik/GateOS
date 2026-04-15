@@ -47,6 +47,7 @@ private:
   bool connectAllowed = true;
   bool wasConnected = false;
   int lastState = 0;
+  unsigned long lastPublishFailLogMs = 0;
   char topicStateBuf[64] = {0};
   char topicCommandBuf[64] = {0};
   char topicEventsBuf[64] = {0};

@@ -962,7 +962,7 @@ void mqttPublishTelemetry() {
   }
 
   doc["ts"] = millis();
-  char payload[512];
+  char payload[1024];
   serializeJson(doc, payload, sizeof(payload));
   mqtt.publish(topic, payload, config.mqttConfig.retain);
 }
