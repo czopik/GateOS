@@ -1696,6 +1696,7 @@ void onGateStatusChanged(const GateStatus& status, void* ctx) {
                status.error,
                status.lastStopReason,
                status.obstacle,
+               homingActive,
                status.wifiConnected,
                status.mqttConnected,
                status.positionPercent,
@@ -2553,6 +2554,7 @@ void loop() {
   bool apMode = strcmp(WiFiManager.getModeCString(), "AP") == 0;
   if (gate) gate->setConnectivity(wifiConnected, nowConnected, apMode);
   led.setMqttEnabled(mqtt.enabled());
+  led.setHomingActive(homingActive);
   led.tick(now);
   if (nowConnected && !mqttWasConnected) {
     const char* cmdTopic = mqtt.topicCommand();

@@ -79,6 +79,7 @@ void LedController::setState(GateState state,
                              GateErrorCode err,
                              GateStopReason stopReason,
                              bool obstacle,
+                             bool homing,
                              bool wifiConn,
                              bool mqttConn,
                              int positionPct,
@@ -94,6 +95,7 @@ void LedController::setState(GateState state,
   positionPercent = positionPct;
   wifiApMode = apMode;
   otaActive = otaActiveIn;
+  homingActive = homing;
 
   if (obstacle && !obstacleActive) {
     obstacleUntilMs = millis() + 2000;
@@ -139,6 +141,10 @@ void LedController::setState(GateState state,
         break;
     }
   }
+}
+
+void LedController::setHomingActive(bool active) {
+  homingActive = active;
 }
 
 void LedController::setWifiModeAp(bool apMode) {
@@ -347,6 +353,7 @@ void LedController::renderPattern(LedPattern pattern, uint32_t nowMs) {
     case PATTERN_STOPPED: renderStopped(nowMs); break;
     case PATTERN_OPENING: renderProgress(nowMs, true); break;
     case PATTERN_CLOSING: renderProgress(nowMs, false); break;
+    case PATTERN_HOMING: renderHoming(nowMs); break;
     case PATTERN_OBSTACLE: renderObstacle(nowMs); break;
     case PATTERN_ERROR: renderError(nowMs); break;
     case PATTERN_WIFI_AP: renderWifiAp(nowMs); break;
@@ -356,10 +363,10 @@ void LedController::renderPattern(LedPattern pattern, uint32_t nowMs) {
     case PATTERN_MQTT_DOWN: renderMqttDown(nowMs); break;
     case PATTERN_OVERRIDE_FLASH: renderOverrideFlash(nowMs); break;
     case PATTERN_REMOTE_OK:
-      setAll(((nowMs / 110) % 2) == 0 ? color(0, 220, 220) : color(0, 30, 30));
+      setAll(((nowMs / 110) % 2) == 0 ? color(0, 255, 110) : color(0, 25, 10));
       break;
     case PATTERN_REMOTE_REJECT:
-      setAll(((nowMs / 110) % 2) == 0 ? color(220, 0, 170) : color(30, 0, 20));
+      setAll(((nowMs / 110) % 2) == 0 ? color(255, 0, 70) : color(35, 0, 8));
       break;
     case PATTERN_BOOT:
       setAll(((nowMs / 130) % 2) == 0 ? color(180, 220, 255) : color(40, 70, 120));
@@ -368,10 +375,18 @@ void LedController::renderPattern(LedPattern pattern, uint32_t nowMs) {
       setAll(((nowMs / 90) % 2) == 0 ? color(255, 0, 255) : color(70, 0, 30));
       break;
     case PATTERN_LIMIT_OPEN_HIT:
-      setAll(((nowMs / 70) % 2) == 0 ? color(255, 140, 0) : color(80, 35, 0));
+      clear();
+      for (int i = 0; i < segmentTotal(); ++i) {
+        int phys = mapIndex(i);
+        if (phys >= 0) leds[phys] = ((nowMs / 90 + i) % 2) == 0 ? color(0, 255, 80) : color(0, 35, 10);
+      }
       break;
     case PATTERN_LIMIT_CLOSE_HIT:
-      setAll(((nowMs / 70) % 2) == 0 ? color(255, 220, 0) : color(80, 50, 0));
+      clear();
+      for (int i = 0; i < segmentTotal(); ++i) {
+        int phys = mapIndex(i);
+        if (phys >= 0) leds[phys] = ((nowMs / 90 + i) % 2) == 0 ? color(255, 80, 0) : color(45, 10, 0);
+      }
       break;
     case PATTERN_TEST: renderTest(nowMs); break;
     case PATTERN_OFF:
@@ -444,40 +459,64 @@ void LedController::renderProgress(uint32_t nowMs, bool opening) {
   if (pct < 0) pct = 50;
   if (pct > 100) pct = 100;
 
-  // Directional ring animation (opening clockwise, closing counter-clockwise).
-  int speed = max(5, 130 - animSpeed);
-  int step = (nowMs / speed) % total;
-  int pos = opening ? step : (total - 1 - step);
-
-  // Position-dependent gradient:
-  // OPENING: bright green -> dark green as position grows.
-  // CLOSING: bright red (open side) -> dark red (closed side) as position drops.
-  uint8_t head = opening
-    ? (uint8_t)(255 - ((uint16_t)pct * 165U) / 100U)     // 255..90
-    : (uint8_t)(90 + ((uint16_t)pct * 165U) / 100U);     // 90..255
-  uint8_t mid = (uint8_t)((head * 58U) / 100U);
-  uint8_t tail = (uint8_t)((head * 27U) / 100U);
-
-  for (int globalIdx = 0; globalIdx < total; ++globalIdx) {
-    int dist = abs(globalIdx - pos);
-    int wrapDist = total - dist;
-    if (wrapDist < dist) dist = wrapDist;
-    if (dist <= 2) {
-      uint8_t level = dist == 0 ? head : (dist == 1 ? mid : tail);
-      int phys = mapIndex(globalIdx);
-      if (phys >= 0) {
-        leds[phys] = opening ? color(0, level, 0) : color(level, 0, 0);
-      }
+  const int closedPct = 100 - pct;
+  const int filled = (closedPct * total + 99) / 100;
+  for (int idx = 0; idx < total; ++idx) {
+    const int phys = mapIndex(idx);
+    if (phys < 0) continue;
+    if (idx < filled) {
+      leds[phys] = opening ? color(0, 18, 6) : color(48, 6, 0);
+    } else {
+      leds[phys] = opening ? color(0, 6, 2) : color(8, 0, 0);
     }
+  }
+
+  const int speed = max(5, 120 - animSpeed);
+  const int step = (nowMs / speed) % total;
+  const int headPos = opening ? (total - 1 - step) : step;
+  const CRGB headColor = opening ? color(40, 255, 140) : color(255, 55, 0);
+  const CRGB midColor = opening ? color(0, 120, 70) : color(150, 20, 0);
+  const CRGB tailColor = opening ? color(0, 40, 24) : color(60, 6, 0);
+
+  for (int dist = 0; dist < 3; ++dist) {
+    int pos = opening ? (headPos + dist) % total : (headPos - dist + total) % total;
+    int phys = mapIndex(pos);
+    if (phys < 0) continue;
+    leds[phys] = (dist == 0) ? headColor : (dist == 1 ? midColor : tailColor);
   }
 }
 
+void LedController::renderHoming(uint32_t nowMs) {
+  clear();
+  int total = segmentTotal();
+  if (total <= 0) return;
+
+  int speed = max(6, 140 - animSpeed);
+  int headA = (nowMs / speed) % total;
+  int headB = (headA + total / 2) % total;
+
+  for (int idx = 0; idx < total; ++idx) {
+    int phys = mapIndex(idx);
+    if (phys < 0) continue;
+    leds[phys] = ((idx + (nowMs / 180)) % 2 == 0) ? color(0, 14, 24) : color(10, 8, 0);
+  }
+
+  int physA = mapIndex(headA);
+  int physB = mapIndex(headB);
+  if (physA >= 0) leds[physA] = color(0, 255, 200);
+  if (physB >= 0) leds[physB] = color(255, 140, 0);
+}
+
 void LedController::renderObstacle(uint32_t nowMs) {
-  bool on = ((nowMs / 120) % 2) == 0;
-  if (on) {
-    setAll(color(255, 220, 0));
-  } else {
-    setAll(color(130, 95, 0));
+  clear();
+  int total = segmentTotal();
+  if (total <= 0) return;
+  bool phase = ((nowMs / 120) % 2) == 0;
+  for (int idx = 0; idx < total; ++idx) {
+    int phys = mapIndex(idx);
+    if (phys < 0) continue;
+    bool on = ((idx % 2) == 0) ? phase : !phase;
+    leds[phys] = on ? color(255, 220, 0) : color(90, 55, 0);
   }
 }
 
@@ -581,21 +620,23 @@ void LedController::renderLearn(uint32_t nowMs) {
   clear();
   int total = segmentTotal();
   if (total <= 0) return;
-  uint32_t seed = nowMs / 90;
-  int globalIdx = 0;
-  int segCount = segmentCount();
-  for (int s = 0; s < segCount; ++s) {
-    int start = 0;
-    int len = 0;
-    segmentAt(s, start, len);
-    for (int i = 0; i < len; ++i) {
-      if (((seed + globalIdx * 7U) % 19U) == 0) {
-        leds[start + i] = color(0, 120, 255);
-      } else {
-        leds[start + i] = color(0, 20, 55);
-      }
-      globalIdx++;
-    }
+  int speed = max(5, 110 - animSpeed);
+  int head = (nowMs / speed) % total;
+  for (int idx = 0; idx < total; ++idx) {
+    int phys = mapIndex(idx);
+    if (phys < 0) continue;
+    leds[phys] = color(10, 0, 26);
+  }
+  for (int dist = 0; dist < 3; ++dist) {
+    int pos = (head - dist + total) % total;
+    int phys = mapIndex(pos);
+    if (phys < 0) continue;
+    leds[phys] = dist == 0 ? color(150, 0, 255)
+                           : (dist == 1 ? color(50, 0, 90) : color(18, 0, 30));
+  }
+  int sparkle = mapIndex((head + total / 2) % total);
+  if (sparkle >= 0 && ((nowMs / 120) % 2) == 0) {
+    leds[sparkle] = color(180, 220, 255);
   }
 }
 
@@ -742,6 +783,7 @@ LedController::LedPattern LedController::patternFromName(const char* name) const
   if (v == "stopped") return PATTERN_STOPPED;
   if (v == "opening") return PATTERN_OPENING;
   if (v == "closing") return PATTERN_CLOSING;
+  if (v == "homing") return PATTERN_HOMING;
   if (v == "obstacle") return PATTERN_OBSTACLE;
   if (v == "error") return PATTERN_ERROR;
   if (v == "wifi_ap") return PATTERN_WIFI_AP;
@@ -765,6 +807,7 @@ const char* LedController::patternName(LedPattern pattern) const {
     case PATTERN_STOPPED: return "stopped";
     case PATTERN_OPENING: return "opening";
     case PATTERN_CLOSING: return "closing";
+    case PATTERN_HOMING: return "homing";
     case PATTERN_OBSTACLE: return "obstacle";
     case PATTERN_ERROR: return "error";
     case PATTERN_WIFI_AP: return "wifi_ap";
@@ -813,6 +856,7 @@ LedController::LedPattern LedController::pickPattern(uint32_t nowMs) {
 
   if (overrideUntilMs > nowMs) return overridePattern;
   if (stopPulseUntilMs > nowMs) return PATTERN_STOPPED;
+  if (homingActive) return PATTERN_HOMING;
 
   ModeKind effectiveMode = modeOverride ? mode : defaultMode;
   if (effectiveMode == MODE_OFF) return PATTERN_OFF;

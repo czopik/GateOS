@@ -19,11 +19,13 @@ public:
                 GateErrorCode err,
                 GateStopReason stopReason,
                 bool obstacle,
+                bool homing,
                 bool wifiConnected,
                 bool mqttConnected,
                 int positionPercent,
                 bool apMode,
                 bool otaActive);
+  void setHomingActive(bool active);
   void setWifiModeAp(bool apMode);
   void setLearnMode(bool enabled);
   void setOtaActive(bool active);
@@ -58,6 +60,7 @@ private:
     PATTERN_STOPPED,
     PATTERN_OPENING,
     PATTERN_CLOSING,
+    PATTERN_HOMING,
     PATTERN_OBSTACLE,
     PATTERN_ERROR,
     PATTERN_WIFI_AP,
@@ -108,6 +111,7 @@ private:
   GateStopReason lastStopReason = GATE_STOP_NONE;
   GateStopReason stopPulseReason = GATE_STOP_NONE;
   bool obstacleActive = false;
+  bool homingActive = false;
   int positionPercent = -1;
 
   unsigned long lastFrameMs = 0;
@@ -149,6 +153,7 @@ private:
   void renderIdle(uint32_t nowMs);
   void renderStopped(uint32_t nowMs);
   void renderProgress(uint32_t nowMs, bool opening);
+  void renderHoming(uint32_t nowMs);
   void renderObstacle(uint32_t nowMs);
   void renderError(uint32_t nowMs);
   void renderWifiAp(uint32_t nowMs);
