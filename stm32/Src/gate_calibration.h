@@ -3,13 +3,11 @@
 /*
  * GateOS STM32 calibration overrides.
  *
- * Gate profile currently targets:
- * - ~35.0V pack at rest
- * - ~41.0V while charger is connected
- *
- * Use 41.00V as calibration anchor (centivolts).
+ * Field-calibrated for this installation:
+ * - STM32 telemetry was reading ~38.25V while multimeter showed 35.0V.
+ * - Use a reduced calibration anchor so bat_cV tracks real pack voltage.
  */
 
 #ifndef GATE_BAT_CALIB_REAL_VOLTAGE
-#define GATE_BAT_CALIB_REAL_VOLTAGE 4100
+#define GATE_BAT_CALIB_REAL_VOLTAGE 3570
 #endif
