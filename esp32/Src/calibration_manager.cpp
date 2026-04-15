@@ -223,7 +223,7 @@ void CalibrationManager::updateStep() {
       if (updateProbe(obstacle, kDetectTimeoutMs)) {
         if (obstacle.detected) {
           proposed.gpioConfig.obstacleInvert = obstacle.invert;
-          proposed.safetyConfig.obstacleAction = "stop";
+          proposed.safetyConfig.obstacleAction = "open";
           Serial.printf("CAL: obstacle invert=%d\n", obstacle.invert ? 1 : 0);
         } else {
           proposed.gpioConfig.obstaclePin = -1;

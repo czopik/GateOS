@@ -196,7 +196,7 @@ struct SensorsConfig {
 };
 
 struct SafetyConfig {
-  String obstacleAction = "stop"; // stop | reverse | open
+  String obstacleAction = "open"; // legacy/UI compatibility; photocell forces stop+open while closing
   int obstacleReverseCm = 50;
   bool watchdogEnabled = true;
 };

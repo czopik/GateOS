@@ -24,6 +24,11 @@ void GateController::begin() {
 }
 
 void GateController::loop() {
+  // Re-evaluate photocell continuously.
+  // This covers the case where the beam is already blocked when CLOSE starts:
+  // as soon as we enter CLOSING, the controller will perform stop + reopen.
+  (void)onObstacle(lastObstacle);
+
   if (motor) {
     motor->tick(millis(), controlPosition);
   }
@@ -838,19 +843,15 @@ GateCommandResponse GateController::onObstacle(bool active) {
   static constexpr uint32_t kObstacleRefractoryMs = 800;
   const uint32_t nowMs = millis();
 
-  // Track obstacle state in status.
-  setObstacle(active);
-
-  // Only trigger an action on rising edge.
-  const bool rising = active && !lastObstacle;
+  // Photocell is safety-active only while closing.
+  // Outside CLOSING we keep the raw state in lastObstacle, but clear the gate
+  // safety flag so the UI/LED does not treat it as an active obstacle trip.
+  const bool closingTrip = active && isMoving() && state == GATE_CLOSING;
+  const bool obstacleLatchedBefore = status.obstacle;
+  setObstacle(closingTrip);
+  const bool shouldTrigger = closingTrip && (!lastObstacle || !obstacleLatchedBefore);
   lastObstacle = active;
-  if (!rising) return resp;
-
-  // Photocell is only active while the gate is closing.
-  // Ignore obstacle edges while idle or opening.
-  if (!isMoving() || state != GATE_CLOSING) {
-    return resp;
-  }
+  if (!shouldTrigger) return resp;
 
   // Ignore repeated obstacle edges for a short window to avoid flap/retrigger spam.
   if (obstacleRefractoryUntilMs != 0 && nowMs < obstacleRefractoryUntilMs) {
@@ -858,17 +859,7 @@ GateCommandResponse GateController::onObstacle(bool active) {
   }
   obstacleRefractoryUntilMs = nowMs + kObstacleRefractoryMs;
 
-  const String action = cfg ? cfg->safetyConfig.obstacleAction : String("open");
-
   stop(GATE_STOP_OBSTACLE);
-  if (action == "stop") {
-    resp.cmd = GATE_CMD_STOP;
-    resp.applied = true;
-    resp.result = GATE_CMD_OK;
-    return resp;
-  }
-
-  // "open" and "reverse" are equivalent while closing.
   resp.cmd = GATE_CMD_OPEN;
   const bool ok = open();
   resp.applied = ok;

@@ -149,7 +149,9 @@ public:
   // Unified safety/event entry points
   void onLimitOpen();
   void onLimitClose();
-  // Obstacle state update; on rising edge will apply obstacleAction from config.
+  // Photocell logic:
+  // - active only while closing
+  // - when triggered during closing: hard stop + immediate open
   GateCommandResponse onObstacle(bool active);
   void onStopInput();
   void onLimitsInvalid();
