@@ -41,8 +41,6 @@ def read_serial():
             line = raw.decode("utf-8", "ignore").strip()
             if not line:
                 continue
-            if "LD2410" in line or "ld2410" in line:
-                continue
             serial_lines.append({"ts": now_ms(), "line": line})
     finally:
         ser.close()
@@ -343,7 +341,7 @@ reader.join(timeout=1.0)
 
 serial_focus = [
     x for x in serial_lines
-    if re.search(r"\[(GATE|HB|UI|MOTOR)\]", x["line"]) and ("LD2410" not in x["line"]) and ("ld2410" not in x["line"])
+    if re.search(r"\[(GATE|HB|UI|MOTOR)\]", x["line"])
 ]
 
 out = {

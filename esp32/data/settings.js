@@ -21,15 +21,6 @@ const statusEls = {
   limitOpenStatus: document.getElementById('limitOpenStatus'),
   limitCloseStatus: document.getElementById('limitCloseStatus'),
   photocellStatus: document.getElementById('photocellStatus'),
-  ld2410Available: document.getElementById('ld2410Available'),
-  ld2410Present: document.getElementById('ld2410Present'),
-  ld2410Moving: document.getElementById('ld2410Moving'),
-  ld2410Stationary: document.getElementById('ld2410Stationary'),
-  ld2410Distance: document.getElementById('ld2410Distance'),
-  ld2410MoveDistance: document.getElementById('ld2410MoveDistance'),
-  ld2410StillDistance: document.getElementById('ld2410StillDistance'),
-  ld2410MoveSignal: document.getElementById('ld2410MoveSignal'),
-  ld2410StillSignal: document.getElementById('ld2410StillSignal'),
   otaBanner: document.getElementById('otaEnabledBanner'),
   otaStatus: document.getElementById('otaStatus'),
   otaProgress: document.getElementById('otaProgress'),
@@ -177,27 +168,8 @@ function setInputValue(path, value) {
   }
 }
 
-function applyLd2410Preset(preset) {
-  if (!preset) return;
-  setInputValue('sensors.ld2410.maxMovingGate', preset.maxMovingGate);
-  setInputValue('sensors.ld2410.maxStationaryGate', preset.maxStationaryGate);
-  setInputValue('sensors.ld2410.noOneWindow', preset.noOneWindow);
-  if (preset.thresholdCm !== undefined) setInputValue('sensors.ld2410.thresholdCm', preset.thresholdCm);
-  if (preset.movingThresholdCm !== undefined) setInputValue('sensors.ld2410.movingThresholdCm', preset.movingThresholdCm);
-  if (preset.stationaryThresholdCm !== undefined) setInputValue('sensors.ld2410.stationaryThresholdCm', preset.stationaryThresholdCm);
-  if (preset.gates) {
-    for (let i = 0; i < 9; i++) {
-      const g = preset.gates[i] || {};
-      setInputValue(`sensors.ld2410.g${i}.moveThreshold`, g.moveThreshold ?? null);
-      setInputValue(`sensors.ld2410.g${i}.stillThreshold`, g.stillThreshold ?? null);
-    }
-  }
-  setDirty(true);
-}
-
 function updateSensorStatus(data) {
   const inputs = data?.inputs || {};
-  const ld = data?.ld2410 || {};
   const limitOpenRaw = Boolean(inputs.limitOpenRaw);
   const limitCloseRaw = Boolean(inputs.limitCloseRaw);
   const limitOpen = Boolean(inputs.limitOpen);
@@ -224,22 +196,6 @@ function updateSensorStatus(data) {
   } else {
     setStatusText(statusEls.photocellStatus, photocellBlocked ? 'BLOCKED' : (photocellRaw ? 'RAW' : 'CLEAR'));
   }
-
-  const available = Boolean(ld.available);
-  setStatusText(statusEls.ld2410Available, available ? 'YES' : 'NO DATA');
-  setStatusText(statusEls.ld2410Present, available ? (ld.present ? 'YES' : 'NO') : 'NO DATA');
-  setStatusText(statusEls.ld2410Moving, available ? (ld.moving ? 'YES' : 'NO') : 'NO DATA');
-  setStatusText(statusEls.ld2410Stationary, available ? (ld.stationary ? 'YES' : 'NO') : 'NO DATA');
-  const dist = typeof ld.distanceCm === 'number' ? ld.distanceCm : -1;
-  setStatusText(statusEls.ld2410Distance, available && dist >= 0 ? `${dist}` : 'NO DATA');
-  const mDist = typeof ld.movingDistanceCm === 'number' ? ld.movingDistanceCm : -1;
-  setStatusText(statusEls.ld2410MoveDistance, available && mDist >= 0 ? `${mDist}` : 'NO DATA');
-  const sDist = typeof ld.stationaryDistanceCm === 'number' ? ld.stationaryDistanceCm : -1;
-  setStatusText(statusEls.ld2410StillDistance, available && sDist >= 0 ? `${sDist}` : 'NO DATA');
-  const mSig = typeof ld.movingSignal === 'number' ? ld.movingSignal : -1;
-  setStatusText(statusEls.ld2410MoveSignal, available && mSig >= 0 ? `${mSig}` : 'NO DATA');
-  const sSig = typeof ld.stationarySignal === 'number' ? ld.stationarySignal : -1;
-  setStatusText(statusEls.ld2410StillSignal, available && sSig >= 0 ? `${sSig}` : 'NO DATA');
 
   const ota = data?.ota || {};
   const otaEnabled = Boolean(ota.enabled);
@@ -708,64 +664,6 @@ function setupListeners() {
   }
   if (motionCloseBtn) {
     motionCloseBtn.addEventListener('click', () => runMotionTest('close'));
-  }
-
-  const ld2410ExtraToggle = document.getElementById('ld2410ShowExtra');
-  const ld2410ExtraPanel = document.getElementById('ld2410Extra');
-  if (ld2410ExtraToggle && ld2410ExtraPanel) {
-    ld2410ExtraToggle.addEventListener('change', () => {
-      ld2410ExtraPanel.classList.toggle('hidden', !ld2410ExtraToggle.checked);
-    });
-  }
-
-  const ldPresetClose = document.getElementById('ld2410PresetClose');
-  const ldPresetMedium = document.getElementById('ld2410PresetMedium');
-  const ldPresetFar = document.getElementById('ld2410PresetFar');
-  if (ldPresetClose) {
-    ldPresetClose.addEventListener('click', () => {
-      applyLd2410Preset({
-        maxMovingGate: 1,
-        maxStationaryGate: 1,
-        noOneWindow: 5,
-        gates: {
-          0: { moveThreshold: 20, stillThreshold: 15 },
-          1: { moveThreshold: 25, stillThreshold: 20 }
-        }
-      });
-    });
-  }
-  if (ldPresetMedium) {
-    ldPresetMedium.addEventListener('click', () => {
-      applyLd2410Preset({
-        maxMovingGate: 3,
-        maxStationaryGate: 3,
-        noOneWindow: 5,
-        gates: {
-          0: { moveThreshold: 15, stillThreshold: 10 },
-          1: { moveThreshold: 20, stillThreshold: 15 },
-          2: { moveThreshold: 25, stillThreshold: 20 },
-          3: { moveThreshold: 30, stillThreshold: 25 }
-        }
-      });
-    });
-  }
-  if (ldPresetFar) {
-    ldPresetFar.addEventListener('click', () => {
-      applyLd2410Preset({
-        maxMovingGate: 6,
-        maxStationaryGate: 6,
-        noOneWindow: 5,
-        gates: {
-          0: { moveThreshold: 12, stillThreshold: 8 },
-          1: { moveThreshold: 16, stillThreshold: 10 },
-          2: { moveThreshold: 20, stillThreshold: 14 },
-          3: { moveThreshold: 24, stillThreshold: 18 },
-          4: { moveThreshold: 28, stillThreshold: 22 },
-          5: { moveThreshold: 32, stillThreshold: 26 },
-          6: { moveThreshold: 36, stillThreshold: 30 }
-        }
-      });
-    });
   }
 
   const apiTokenInput = document.getElementById('apiToken');

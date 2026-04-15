@@ -168,31 +168,9 @@ struct PhotocellConfig {
   int debounceMs = 10;
 };
 
-struct Ld2410Config {
-  bool enabled = false;
-  int rxPin = -1;
-  int txPin = -1;
-  int baudrate = 256000;
-  int distanceCm = 0; // legacy field
-  int thresholdCm = 0;
-  int movingThresholdCm = 0;
-  int stationaryThresholdCm = 0;
-  int maxMovingGate = -1;
-  int maxStationaryGate = -1;
-  int noOneWindow = 5;
-  int moveThresholds[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
-  int stillThresholds[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
-  String mode = "presence"; // presence | moving | stationary
-  bool triggerEnabled = false;
-  String triggerAction = "open"; // stop | open
-  int triggerReverseDelayMs = 800;
-  int triggerCooldownMs = 2000;
-};
-
 struct SensorsConfig {
   HallConfig hall;
   PhotocellConfig photocell;
-  Ld2410Config ld2410;
 };
 
 struct SafetyConfig {

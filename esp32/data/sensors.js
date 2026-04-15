@@ -1,13 +1,4 @@
 const els = {
-  ldAvailable: document.getElementById('ldAvailable'),
-  ldPresent: document.getElementById('ldPresent'),
-  ldMoving: document.getElementById('ldMoving'),
-  ldStationary: document.getElementById('ldStationary'),
-  ldDistance: document.getElementById('ldDistance'),
-  ldMovingDistance: document.getElementById('ldMovingDistance'),
-  ldStationaryDistance: document.getElementById('ldStationaryDistance'),
-  ldMovingSignal: document.getElementById('ldMovingSignal'),
-  ldStationarySignal: document.getElementById('ldStationarySignal'),
   limitsEnabled: document.getElementById('limitsEnabled'),
   limitOpenEnabled: document.getElementById('limitOpenEnabled'),
   limitCloseEnabled: document.getElementById('limitCloseEnabled'),
@@ -68,18 +59,6 @@ async function loadStatus() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    const ld = data?.ld2410 || {};
-    const available = Boolean(ld.available);
-    setText(els.ldAvailable, boolLabel(available));
-    setText(els.ldPresent, boolLabel(Boolean(ld.present)));
-    setText(els.ldMoving, boolLabel(Boolean(ld.moving)));
-    setText(els.ldStationary, boolLabel(Boolean(ld.stationary)));
-    setText(els.ldDistance, available ? fmtNum(ld.distanceCm) : 'NO DATA');
-    setText(els.ldMovingDistance, available ? fmtNum(ld.movingDistanceCm) : 'NO DATA');
-    setText(els.ldStationaryDistance, available ? fmtNum(ld.stationaryDistanceCm) : 'NO DATA');
-    setText(els.ldMovingSignal, available ? fmtNum(ld.movingSignal) : 'NO DATA');
-    setText(els.ldStationarySignal, available ? fmtNum(ld.stationarySignal) : 'NO DATA');
-
     const limits = data?.limits || {};
     const inputs = data?.inputs || {};
     const io = data?.io || {};
@@ -107,15 +86,6 @@ async function loadStatus() {
     setText(els.fsFree, fmtMb(free));
     setText(els.fsUsedPct, usedPct === 'NO DATA' ? usedPct : `${usedPct}%`);
   } catch {
-    setText(els.ldAvailable, 'NO DATA');
-    setText(els.ldPresent, 'NO DATA');
-    setText(els.ldMoving, 'NO DATA');
-    setText(els.ldStationary, 'NO DATA');
-    setText(els.ldDistance, 'NO DATA');
-    setText(els.ldMovingDistance, 'NO DATA');
-    setText(els.ldStationaryDistance, 'NO DATA');
-    setText(els.ldMovingSignal, 'NO DATA');
-    setText(els.ldStationarySignal, 'NO DATA');
     setText(els.limitsEnabled, 'NO DATA');
     setText(els.limitOpenEnabled, 'NO DATA');
     setText(els.limitCloseEnabled, 'NO DATA');

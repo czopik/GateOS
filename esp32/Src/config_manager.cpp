@@ -302,37 +302,6 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
   photo["pullMode"] = sensorsConfig.photocell.pullMode;
   photo["debounceMs"] = sensorsConfig.photocell.debounceMs;
 
-  JsonObject ld2410 = sensors.createNestedObject("ld2410");
-  ld2410["enabled"] = sensorsConfig.ld2410.enabled;
-  ld2410["rx"] = sensorsConfig.ld2410.rxPin;
-  ld2410["tx"] = sensorsConfig.ld2410.txPin;
-  ld2410["baudrate"] = sensorsConfig.ld2410.baudrate;
-  ld2410["distanceCm"] = sensorsConfig.ld2410.distanceCm;
-  ld2410["thresholdCm"] = sensorsConfig.ld2410.thresholdCm;
-  ld2410["movingThresholdCm"] = sensorsConfig.ld2410.movingThresholdCm;
-  ld2410["stationaryThresholdCm"] = sensorsConfig.ld2410.stationaryThresholdCm;
-  ld2410["maxMovingGate"] = sensorsConfig.ld2410.maxMovingGate;
-  ld2410["maxStationaryGate"] = sensorsConfig.ld2410.maxStationaryGate;
-  ld2410["noOneWindow"] = sensorsConfig.ld2410.noOneWindow;
-  ld2410["triggerEnabled"] = sensorsConfig.ld2410.triggerEnabled;
-  ld2410["triggerAction"] = sensorsConfig.ld2410.triggerAction;
-  ld2410["triggerReverseDelayMs"] = sensorsConfig.ld2410.triggerReverseDelayMs;
-  ld2410["triggerCooldownMs"] = sensorsConfig.ld2410.triggerCooldownMs;
-  for (int i = 0; i < 9; ++i) {
-    if (sensorsConfig.ld2410.moveThresholds[i] >= 0 ||
-        sensorsConfig.ld2410.stillThresholds[i] >= 0) {
-      String key = String("g") + i;
-      JsonObject gate = ld2410.createNestedObject(key);
-      if (sensorsConfig.ld2410.moveThresholds[i] >= 0) {
-        gate["moveThreshold"] = sensorsConfig.ld2410.moveThresholds[i];
-      }
-      if (sensorsConfig.ld2410.stillThresholds[i] >= 0) {
-        gate["stillThreshold"] = sensorsConfig.ld2410.stillThresholds[i];
-      }
-    }
-  }
-  ld2410["mode"] = sensorsConfig.ld2410.mode;
-
   JsonObject safety = doc.createNestedObject("safety");
   safety["obstacleAction"] = safetyConfig.obstacleAction;
   safety["obstacleReverseCm"] = safetyConfig.obstacleReverseCm;
@@ -861,37 +830,6 @@ if (obj.containsKey("motor")) {
         sensorsConfig.photocell.debounceMs = photo["debounceMs"] | sensorsConfig.photocell.debounceMs;
       }
 
-      JsonObjectConst ld2410 = sensors["ld2410"];
-      if (!ld2410.isNull()) {
-        sensorsConfig.ld2410.enabled = ld2410["enabled"] | sensorsConfig.ld2410.enabled;
-        sensorsConfig.ld2410.rxPin = ld2410["rx"] | sensorsConfig.ld2410.rxPin;
-        sensorsConfig.ld2410.txPin = ld2410["tx"] | sensorsConfig.ld2410.txPin;
-        sensorsConfig.ld2410.baudrate = ld2410["baudrate"] | sensorsConfig.ld2410.baudrate;
-        int threshold = ld2410["thresholdCm"] | ld2410["distanceCm"] | sensorsConfig.ld2410.thresholdCm;
-        sensorsConfig.ld2410.thresholdCm = threshold;
-        sensorsConfig.ld2410.distanceCm = threshold;
-        sensorsConfig.ld2410.movingThresholdCm = ld2410["movingThresholdCm"] | sensorsConfig.ld2410.movingThresholdCm;
-        sensorsConfig.ld2410.stationaryThresholdCm = ld2410["stationaryThresholdCm"] | sensorsConfig.ld2410.stationaryThresholdCm;
-        sensorsConfig.ld2410.maxMovingGate = ld2410["maxMovingGate"] | sensorsConfig.ld2410.maxMovingGate;
-        sensorsConfig.ld2410.maxStationaryGate = ld2410["maxStationaryGate"] | sensorsConfig.ld2410.maxStationaryGate;
-        sensorsConfig.ld2410.noOneWindow = ld2410["noOneWindow"] | sensorsConfig.ld2410.noOneWindow;
-        sensorsConfig.ld2410.triggerEnabled = ld2410["triggerEnabled"] | sensorsConfig.ld2410.triggerEnabled;
-        sensorsConfig.ld2410.triggerAction = String((const char*)(ld2410["triggerAction"] | sensorsConfig.ld2410.triggerAction.c_str()));
-        sensorsConfig.ld2410.triggerReverseDelayMs = ld2410["triggerReverseDelayMs"] | sensorsConfig.ld2410.triggerReverseDelayMs;
-        sensorsConfig.ld2410.triggerCooldownMs = ld2410["triggerCooldownMs"] | sensorsConfig.ld2410.triggerCooldownMs;
-        for (int i = 0; i < 9; ++i) {
-          String key = String("g") + i;
-          JsonObjectConst gate = ld2410[key];
-          if (gate.isNull()) continue;
-          if (gate.containsKey("moveThreshold")) {
-            sensorsConfig.ld2410.moveThresholds[i] = gate["moveThreshold"] | sensorsConfig.ld2410.moveThresholds[i];
-          }
-          if (gate.containsKey("stillThreshold")) {
-            sensorsConfig.ld2410.stillThresholds[i] = gate["stillThreshold"] | sensorsConfig.ld2410.stillThresholds[i];
-          }
-        }
-        sensorsConfig.ld2410.mode = String((const char*)(ld2410["mode"] | sensorsConfig.ld2410.mode.c_str()));
-      }
     }
   }
 
@@ -1338,86 +1276,6 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
         }
       }
 
-      JsonObjectConst ld2410 = sensors["ld2410"];
-      if (!ld2410.isNull()) {
-        int rx = ld2410["rx"] | sensorsConfig.ld2410.rxPin;
-        int tx = ld2410["tx"] | sensorsConfig.ld2410.txPin;
-        int baud = ld2410["baudrate"] | sensorsConfig.ld2410.baudrate;
-        int threshold = ld2410["thresholdCm"] | ld2410["distanceCm"] | sensorsConfig.ld2410.thresholdCm;
-        int movingThreshold = ld2410["movingThresholdCm"] | sensorsConfig.ld2410.movingThresholdCm;
-        int stationaryThreshold = ld2410["stationaryThresholdCm"] | sensorsConfig.ld2410.stationaryThresholdCm;
-        int maxMovingGate = ld2410["maxMovingGate"] | sensorsConfig.ld2410.maxMovingGate;
-        int maxStationaryGate = ld2410["maxStationaryGate"] | sensorsConfig.ld2410.maxStationaryGate;
-        int noOneWindow = ld2410["noOneWindow"] | sensorsConfig.ld2410.noOneWindow;
-        const char* triggerAction = ld2410["triggerAction"] | sensorsConfig.ld2410.triggerAction.c_str();
-        int triggerDelayMs = ld2410["triggerReverseDelayMs"] | sensorsConfig.ld2410.triggerReverseDelayMs;
-        int triggerCooldownMs = ld2410["triggerCooldownMs"] | sensorsConfig.ld2410.triggerCooldownMs;
-        const char* mode = ld2410["mode"] | "";
-        if (rx >= 0 && isForbiddenPin(rx)) {
-          error = "sensors.ld2410.rx_forbidden_pin";
-          return false;
-        }
-        if (tx >= 0 && isForbiddenPin(tx)) {
-          error = "sensors.ld2410.tx_forbidden_pin";
-          return false;
-        }
-        if (baud < 1200 || baud > 1000000) {
-          error = "sensors.ld2410.baud_out_of_range";
-          return false;
-        }
-        if (threshold < 0 || movingThreshold < 0 || stationaryThreshold < 0) {
-          error = "sensors.ld2410.threshold_out_of_range";
-          return false;
-        }
-        if (maxMovingGate < -1 || maxMovingGate > 8) {
-          error = "sensors.ld2410.maxMovingGate_out_of_range";
-          return false;
-        }
-        if (maxStationaryGate < -1 || maxStationaryGate > 8) {
-          error = "sensors.ld2410.maxStationaryGate_out_of_range";
-          return false;
-        }
-        if (noOneWindow < 0 || noOneWindow > 60) {
-          error = "sensors.ld2410.noOneWindow_out_of_range";
-          return false;
-        }
-        if (triggerDelayMs < 0 || triggerDelayMs > 10000) {
-          error = "sensors.ld2410.triggerDelay_out_of_range";
-          return false;
-        }
-        if (triggerCooldownMs < 0 || triggerCooldownMs > 20000) {
-          error = "sensors.ld2410.triggerCooldown_out_of_range";
-          return false;
-        }
-        for (int i = 0; i < 9; ++i) {
-          String key = String("g") + i;
-          JsonObjectConst gate = ld2410[key];
-          if (gate.isNull()) continue;
-          int mv = gate["moveThreshold"] | -1;
-          int st = gate["stillThreshold"] | -1;
-          if (mv != -1 && (mv < 0 || mv > 100)) {
-            error = "sensors.ld2410.moveThreshold_out_of_range";
-            return false;
-          }
-          if (st != -1 && (st < 0 || st > 100)) {
-            error = "sensors.ld2410.stillThreshold_out_of_range";
-            return false;
-          }
-        }
-        if (mode[0] != '\0' &&
-            strcmp(mode, "presence") != 0 &&
-            strcmp(mode, "moving") != 0 &&
-            strcmp(mode, "stationary") != 0) {
-          error = "sensors.ld2410.mode_invalid";
-          return false;
-        }
-        if (triggerAction && triggerAction[0] != '\0' &&
-            strcmp(triggerAction, "stop") != 0 &&
-            strcmp(triggerAction, "open") != 0) {
-          error = "sensors.ld2410.triggerAction_invalid";
-          return false;
-        }
-      }
     }
   }
 

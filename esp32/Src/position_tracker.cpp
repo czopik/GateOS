@@ -30,6 +30,26 @@ uint32_t crc32Calc(const uint8_t* data, size_t len) {
   }
   return ~crc;
 }
+
+bool hasSnapshotFile() {
+  File root = LittleFS.open("/");
+  if (!root || !root.isDirectory()) {
+    if (root) root.close();
+    return false;
+  }
+  File entry = root.openNextFile();
+  while (entry) {
+    const String name = entry.name();
+    entry.close();
+    if (name == kPositionSnapshotPath || name == "position.bin") {
+      root.close();
+      return true;
+    }
+    entry = root.openNextFile();
+  }
+  root.close();
+  return false;
+}
 } // namespace
 
 void PositionTracker::begin(ConfigManager* cfg, MotorController* motor, GateController* gate) {
@@ -95,7 +115,7 @@ void PositionTracker::initializeFromConfig() {
 }
 
 bool PositionTracker::loadPositionSnapshot() {
-  if (!LittleFS.exists(kPositionSnapshotPath)) return false;
+  if (!hasSnapshotFile()) return false;
   File f = LittleFS.open(kPositionSnapshotPath, "r");
   if (!f) return false;
   PositionSnapshot snap{};

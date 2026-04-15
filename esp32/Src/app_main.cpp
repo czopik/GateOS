@@ -116,19 +116,6 @@ static int parsePullMode(const String& mode) {
   return 1;
 }
 
-struct Ld2410Status {
-  bool available = false;
-  bool present = false;
-  bool moving = false;
-  bool stationary = false;
-  int distanceCm = -1;
-  int movingDistanceCm = -1;
-  int stationaryDistanceCm = -1;
-  int movingSignal = -1;
-  int stationarySignal = -1;
-  unsigned long lastUpdateMs = 0;
-};
-
 static std::map<unsigned long, RemoteSeen> lastRemoteMap;
 static LastRemote lastRemote;
 static bool learnMode = false;
@@ -192,10 +179,6 @@ static int hallPinActive = -1;
 static bool hallAttached = false;
 static unsigned long lastPositionPersistMs = 0;
 static float lastPersistedPosition = -1.0f;
-static Ld2410Status ld2410Status;
-static uint32_t ld2410TriggerCooldownUntilMs = 0;
-static uint32_t ld2410ReverseAtMs = 0;
-
 // Startup homing diagnostics/state
 static bool startupLimitRefDone = false;
 static bool homingChecked = false;
@@ -227,28 +210,6 @@ static uint32_t chargerPendingSinceMs = 0;
 static constexpr float kChargerConnectV = 40.2f;
 static constexpr float kChargerDisconnectV = 39.2f;
 static constexpr uint32_t kChargerDebounceMs = 1200;
-static bool ld2410FirmwareDisabledLogged = false;
-
-static void forceDisableLd2410Runtime() {
-  config.sensorsConfig.ld2410.enabled = false;
-  config.sensorsConfig.ld2410.triggerEnabled = false;
-  ld2410Status.available = false;
-  ld2410Status.present = false;
-  ld2410Status.moving = false;
-  ld2410Status.stationary = false;
-  ld2410Status.distanceCm = -1;
-  ld2410Status.movingDistanceCm = -1;
-  ld2410Status.stationaryDistanceCm = -1;
-  ld2410Status.movingSignal = -1;
-  ld2410Status.stationarySignal = -1;
-  ld2410Status.lastUpdateMs = 0;
-  ld2410TriggerCooldownUntilMs = 0;
-  ld2410ReverseAtMs = 0;
-  if (!ld2410FirmwareDisabledLogged) {
-    Serial.println("[LD2410] removed from active firmware runtime");
-    ld2410FirmwareDisabledLogged = true;
-  }
-}
 
 static void updateChargerConnectedFromTelemetry(const HoverTelemetry& tel, uint32_t nowMs) {
   bool desiredKnown = false;
@@ -353,7 +314,6 @@ void updateFsStats(uint32_t nowMs);
 void scheduleRestart(uint32_t delayMs);
 void scheduleFactoryReset(uint32_t delayMs);
 void scheduleRuntimeConfigApply();
-void handleLd2410Trigger(uint32_t nowMs);
 void onGateStatusChanged(const GateStatus& status, void* ctx);
 void fillDiagnostics(JsonObject& out);
 void syncLegacyPositionState();
@@ -1316,214 +1276,6 @@ void updateHallStats(uint32_t nowMs) {
   hallPps = positionTracker.hallPps();
 }
 
-static bool applyLd2410Config(const Ld2410Config& cfg) {
-  (void)cfg;
-  forceDisableLd2410Runtime();
-  return false;
-#if 0
-  bool enabled = cfg.enabled && cfg.rxPin >= 0 && cfg.txPin >= 0;
-  if (!enabled) {
-    if (ld2410Active) {
-      ld2410.end();
-      ld2410Active = false;
-      Serial.println("[LD2410] disabled");
-    }
-    ld2410RxPin = -1;
-    ld2410TxPin = -1;
-    ld2410Baud = -1;
-    ld2410MovingGate = -1;
-    ld2410StationaryGate = -1;
-    ld2410Mode = "";
-    return false;
-  }
-
-  int movingCm = cfg.movingThresholdCm > 0 ? cfg.movingThresholdCm : cfg.thresholdCm;
-  int stationaryCm = cfg.stationaryThresholdCm > 0 ? cfg.stationaryThresholdCm : cfg.thresholdCm;
-  int movingGate = cfg.maxMovingGate >= 0 ? cfg.maxMovingGate : ld2410GateFromCm(movingCm);
-  int stationaryGate = cfg.maxStationaryGate >= 0 ? cfg.maxStationaryGate : ld2410GateFromCm(stationaryCm);
-  int baud = cfg.baudrate > 0 ? cfg.baudrate : 256000;
-  int noOneWindow = cfg.noOneWindow;
-  String mode = cfg.mode;
-  mode.toLowerCase();
-
-  bool thresholdsChanged = false;
-  for (int i = 0; i < 9; ++i) {
-    if (cfg.moveThresholds[i] != ld2410MoveThresholds[i] ||
-        cfg.stillThresholds[i] != ld2410StillThresholds[i]) {
-      thresholdsChanged = true;
-      break;
-    }
-  }
-
-  bool changed = (cfg.rxPin != ld2410RxPin ||
-                  cfg.txPin != ld2410TxPin ||
-                  baud != ld2410Baud ||
-                  movingGate != ld2410MovingGate ||
-                  stationaryGate != ld2410StationaryGate ||
-                  noOneWindow != ld2410NoOneWindow ||
-                  mode != ld2410Mode ||
-                  thresholdsChanged);
-  if (!changed && ld2410Active) return true;
-
-  ld2410RxPin = cfg.rxPin;
-  ld2410TxPin = cfg.txPin;
-  ld2410Baud = baud;
-  ld2410MovingGate = movingGate;
-  ld2410StationaryGate = stationaryGate;
-  ld2410NoOneWindow = noOneWindow;
-  ld2410Mode = mode;
-  for (int i = 0; i < 9; ++i) {
-    ld2410MoveThresholds[i] = cfg.moveThresholds[i];
-    ld2410StillThresholds[i] = cfg.stillThresholds[i];
-  }
-
-  ld2410Serial.begin(baud, SERIAL_8N1, cfg.rxPin, cfg.txPin);
-  delay(50);
-  if (!ld2410.begin()) {
-    ld2410Active = false;
-    Serial.printf("[LD2410] begin failed rx=%d tx=%d baud=%d\n", cfg.rxPin, cfg.txPin, baud);
-    return false;
-  }
-  ld2410Active = true;
-  ld2410.enhancedMode(true);
-  ld2410.configMode(true);
-  ld2410.setMaxGate((byte)movingGate, (byte)stationaryGate, (byte)noOneWindow);
-  for (int i = 0; i < 9; ++i) {
-    int mv = cfg.moveThresholds[i];
-    int st = cfg.stillThresholds[i];
-    if (mv >= 0 && mv <= 100) {
-      ld2410.setMovingThreshold((byte)i, (byte)mv);
-    }
-    if (st >= 0 && st <= 100) {
-      ld2410.setStationaryThreshold((byte)i, (byte)st);
-    }
-  }
-  ld2410.configMode(false);
-
-  Serial.printf("[LD2410] active rx=%d tx=%d baud=%d moveGate=%d stillGate=%d mode=%s\n",
-                cfg.rxPin,
-                cfg.txPin,
-                baud,
-                movingGate,
-                stationaryGate,
-                ld2410Mode.c_str());
-  return true;
-#endif
-}
-
-void updateLd2410Status(uint32_t nowMs) {
-  (void)nowMs;
-  forceDisableLd2410Runtime();
-  return;
-#if 0
-  const auto& cfg = config.sensorsConfig.ld2410;
-  const uint32_t rev = config.getRevision();
-  bool needApply = (rev != ld2410CfgRevision);
-  if (!ld2410Active && (nowMs - ld2410LastRetryMs > 2000)) {
-    needApply = true;
-  }
-  if (needApply) {
-    applyLd2410Config(cfg);
-    ld2410CfgRevision = rev;
-    ld2410LastRetryMs = nowMs;
-  }
-  bool enabled = cfg.enabled && cfg.rxPin >= 0 && cfg.txPin >= 0;
-  if (!enabled) {
-    ld2410Status.available = false;
-    ld2410Status.present = false;
-    ld2410Status.moving = false;
-    ld2410Status.stationary = false;
-    ld2410Status.distanceCm = -1;
-    ld2410Status.movingDistanceCm = -1;
-    ld2410Status.stationaryDistanceCm = -1;
-    ld2410Status.movingSignal = -1;
-    ld2410Status.stationarySignal = -1;
-    ld2410Status.lastUpdateMs = 0;
-    return;
-  }
-  if (ld2410Status.lastUpdateMs == 0 || nowMs - ld2410Status.lastUpdateMs > 2000) {
-    ld2410Status.available = false;
-    ld2410Status.present = false;
-    ld2410Status.moving = false;
-    ld2410Status.stationary = false;
-    ld2410Status.distanceCm = -1;
-    ld2410Status.movingDistanceCm = -1;
-    ld2410Status.stationaryDistanceCm = -1;
-    ld2410Status.movingSignal = -1;
-    ld2410Status.stationarySignal = -1;
-  }
-
-  if (!ld2410Active) return;
-  const uint32_t kLd2410PollIntervalMs = 50;
-  if (ld2410LastPollMs != 0 && nowMs - ld2410LastPollMs < kLd2410PollIntervalMs) return;
-  ld2410LastPollMs = nowMs;
-  MyLD2410::Response resp = ld2410.check();
-  if (resp == MyLD2410::Response::DATA) {
-    bool present = ld2410.presenceDetected();
-    bool moving = ld2410.movingTargetDetected();
-    bool stationary = ld2410.stationaryTargetDetected();
-    int distanceCm = present ? (int)ld2410.detectedDistance() : -1;
-    int movingDistance = moving ? (int)ld2410.movingTargetDistance() : -1;
-    int stationaryDistance = stationary ? (int)ld2410.stationaryTargetDistance() : -1;
-    int movingSignal = moving ? (int)ld2410.movingTargetSignal() : -1;
-    int stationarySignal = stationary ? (int)ld2410.stationaryTargetSignal() : -1;
-
-    ld2410Status.available = true;
-    ld2410Status.present = present;
-    ld2410Status.moving = moving;
-    ld2410Status.stationary = stationary;
-    ld2410Status.distanceCm = distanceCm;
-    ld2410Status.movingDistanceCm = movingDistance;
-    ld2410Status.stationaryDistanceCm = stationaryDistance;
-    ld2410Status.movingSignal = movingSignal;
-    ld2410Status.stationarySignal = stationarySignal;
-    ld2410Status.lastUpdateMs = nowMs;
-  }
-#endif
-}
-
-void handleLd2410Trigger(uint32_t nowMs) {
-  (void)nowMs;
-  forceDisableLd2410Runtime();
-  return;
-#if 0
-  const auto& cfg = config.sensorsConfig.ld2410;
-  if (!cfg.enabled || !cfg.triggerEnabled) {
-    ld2410TriggerArmed = true;
-    ld2410ReversePending = false;
-    return;
-  }
-  String mode = cfg.mode;
-  mode.toLowerCase();
-  bool detected = ld2410Status.available &&
-                  ((mode == "moving") ? ld2410Status.moving :
-                   (mode == "stationary") ? ld2410Status.stationary :
-                   ld2410Status.present);
-  if (detected && ld2410TriggerArmed && gate && gate->isMoving() && gate->getState() == GATE_CLOSING && nowMs >= ld2410TriggerCooldownUntilMs) {
-    const String triggerAction = cfg.triggerAction;
-    GateCommandResponse r = gate->handleObstacleTrip(triggerAction.c_str(), false);
-    pushEvent("warn", "ld2410 obstacle");
-    if (triggerAction == "open" && r.applied) {
-      uint32_t delayMs = cfg.triggerReverseDelayMs > 0 ? (uint32_t)cfg.triggerReverseDelayMs : 0;
-      ld2410ReversePending = true;
-      ld2410ReverseAtMs = nowMs + delayMs;
-    }
-    uint32_t cooldownMs = cfg.triggerCooldownMs > 0 ? (uint32_t)cfg.triggerCooldownMs : 0;
-    ld2410TriggerCooldownUntilMs = nowMs + cooldownMs;
-    ld2410TriggerArmed = false;
-  }
-
-  if (ld2410ReversePending && (int32_t)(nowMs - ld2410ReverseAtMs) >= 0) {
-    if (gate && !gate->isMoving()) {
-      if (gate->open()) {
-        pushEvent("warn", "ld2410 -> open");
-      }
-      ld2410ReversePending = false;
-    }
-  }
-#endif
-}
-
 void onGateStatusChanged(const GateStatus& status, void* ctx) {
   (void)ctx;
   led.setState(status.state,
@@ -1804,17 +1556,6 @@ void fillStatus(JsonObject& out) {
   inputsObj["limitOpenEnabled"] = config.limitsConfig.open.enabled;
   inputsObj["limitCloseEnabled"] = config.limitsConfig.close.enabled;
 
-  JsonObject ldObj = out.createNestedObject("ld2410");
-  ldObj["available"] = ld2410Status.available;
-  ldObj["present"] = ld2410Status.present;
-  ldObj["moving"] = ld2410Status.moving;
-  ldObj["stationary"] = ld2410Status.stationary;
-  ldObj["distanceCm"] = ld2410Status.available ? ld2410Status.distanceCm : -1;
-  ldObj["movingDistanceCm"] = ld2410Status.available ? ld2410Status.movingDistanceCm : -1;
-  ldObj["stationaryDistanceCm"] = ld2410Status.available ? ld2410Status.stationaryDistanceCm : -1;
-  ldObj["movingSignal"] = ld2410Status.available ? ld2410Status.movingSignal : -1;
-  ldObj["stationarySignal"] = ld2410Status.available ? ld2410Status.stationarySignal : -1;
-
   JsonObject fsObj = out.createNestedObject("fs");
   fsObj["totalBytes"] = fsTotalBytesCached;
   fsObj["usedBytes"] = fsUsedBytesCached;
@@ -2015,7 +1756,6 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
   }
 
   config.load();
-  forceDisableLd2410Runtime();
   setupInputs();
   updateHallAttachment();
 
@@ -2286,7 +2026,6 @@ void setup() {
 
   config.begin();
   config.load();
-  forceDisableLd2410Runtime();
   config.setSaveAllowedCallback(isSafeToSaveConfig);
   led.init(config.ledConfig);
   led.setOverride("boot", 1200);
@@ -2373,9 +2112,7 @@ void loop() {
   updatePositionPercent();
   unsigned long now = millis();
   updateHallStats(now);
-  updateLd2410Status(now);
   runStartupHoming(now);
-  handleLd2410Trigger(now);
   maybePersistPosition(now);
   updateFsStats(now);
   processPendingRuntimeConfigApply(now);

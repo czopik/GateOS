@@ -33,8 +33,6 @@ def read_serial():
                 line = raw.decode("utf-8", "ignore").strip()
                 if not line:
                     continue
-                if "LD2410" in line or "ld2410" in line:
-                    continue
                 serial_lines.append({"ts": now_ms(), "line": line})
             except Exception:
                 pass
@@ -322,7 +320,7 @@ lines.append("Results:")
 for t, s in status_map:
     lines.append(f"{t}: {s}")
 lines.append("")
-lines.append("Key COM3 log excerpts (LD2410 filtered):")
+lines.append("Key COM3 log excerpts:")
 for e in serial_kw[:40]:
     lines.append(f"[{e['ts']}] {e['line']}")
 lines.append("")

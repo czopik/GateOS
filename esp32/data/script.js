@@ -11,7 +11,6 @@ const ui = {
   limitOpenChip: qs('limitOpenChip'),
   limitCloseChip: qs('limitCloseChip'),
   photocellChip: qs('photocellChip'),
-  ld2410Chip: qs('ld2410Chip'),
   uptimeChip: qs('uptimeChip'),
   ipValue: qs('ipValue'),
   rssiValue: qs('rssiValue'),
@@ -167,7 +166,6 @@ function updateStatus(data) {
   const hb = data.hb || {};
   const limits = data.limits || {};
   const inputs = data.inputs || {};
-  const ld = data.ld2410 || {};
   const hbEnabled = hb.enabled !== false;
   const last = (data.remotes && data.remotes.last) || {};
 
@@ -184,11 +182,6 @@ function updateStatus(data) {
   setChip(ui.limitCloseChip, `CLOSE: ${limitClose ? 'ON' : 'OFF'}`, limitClose ? 'success' : '');
   const photocellBlocked = Boolean(inputs.photocellBlocked);
   setChip(ui.photocellChip, `Fotokomorka: ${photocellBlocked ? 'BLOCKED' : 'CLEAR'}`, photocellBlocked ? 'danger' : 'success');
-  const ldAvailable = Boolean(ld.available);
-  const ldDistance = typeof ld.distanceCm === 'number' ? ld.distanceCm : -1;
-  const ldState = ldAvailable ? (ld.present ? 'PRESENT' : 'CLEAR') : 'NO DATA';
-  const ldExtra = ldAvailable && ldDistance >= 0 ? ` ${ldDistance}cm` : '';
-  setChip(ui.ld2410Chip, `LD2410: ${ldState}${ldExtra}`, ldAvailable ? 'success' : 'warn');
   setChip(ui.uptimeChip, `Uptime: ${formatUptime(data.uptimeMs)}`);
 
   const ip = wifi.ip || '-';

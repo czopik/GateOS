@@ -32,8 +32,6 @@ PIN_PATHS = {
     "limits.close.pin",
     "sensors.hall.pin",
     "sensors.photocell.pin",
-    "sensors.ld2410.rx",
-    "sensors.ld2410.tx",
     "led.pin",
 }
 
