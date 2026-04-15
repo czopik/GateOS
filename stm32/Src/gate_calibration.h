@@ -15,7 +15,7 @@
 #endif
 
 #ifndef GATE_BAT_CALIB_REAL_VOLTAGE_CHARGING
-#define GATE_BAT_CALIB_REAL_VOLTAGE_CHARGING 3780
+#define GATE_BAT_CALIB_REAL_VOLTAGE_CHARGING 4100
 #endif
 
 #ifndef GATE_CHARGER_ACTIVE_LEVEL
@@ -36,4 +36,3 @@ static inline int16_t gate_battery_calibration_cv(void) {
   }
   return (int16_t)GATE_BAT_CALIB_REAL_VOLTAGE_BATTERY;
 }
-

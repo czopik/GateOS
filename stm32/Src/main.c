@@ -728,6 +728,7 @@ int main(void) {
           int16_t rpm_abs = ABS(rpm_meas);
           int dir = 0;
           uint16_t fault = (uint16_t)rtY_Left.z_errCode;
+          uint8_t charger_active = (HAL_GPIO_ReadPin(CHARGER_PORT, CHARGER_PIN) == GATE_CHARGER_ACTIVE_LEVEL) ? 1u : 0u;
           int iA = ABS(left_dc_curr);  // [A*100] Absolute DC link current of active (LEFT) channel
           char tel_buf[160];
           const char *mode_str = "UNK";
@@ -753,11 +754,12 @@ int main(void) {
           int len = snprintf(
             tel_buf,
             sizeof(tel_buf),
-            "TEL,dir=%d,rpm=%d,dist_mm=%ld,fault=%u,bat_cV=%ld,iA=%d,armed=%u,mode=%s,eb=%u,cmd_age_ms=%lu\n",
+            "TEL,dir=%d,rpm=%d,dist_mm=%ld,fault=%u,chg=%u,bat_cV=%ld,iA=%d,armed=%u,mode=%s,eb=%u,cmd_age_ms=%lu\n",
             dir,
             rpm_meas,
             (long)dist_mm,
             (unsigned)fault,
+            (unsigned)charger_active,
             (long)bat_cV,
             iA,
             (unsigned)hb_motor_armed,

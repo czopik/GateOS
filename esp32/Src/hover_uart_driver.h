@@ -21,6 +21,8 @@ struct HoverTelemetry {
 
   // armed flag reported by hoverboard telemetry
   bool armed = false;
+  // charger state from STM32 telemetry: 1=charger present, 0=not present, -1=unknown
+  int charger = -1;
   int fault = 0;
   unsigned long lastTelMs = 0;
 

@@ -248,21 +248,36 @@ static constexpr float kChargerDisconnectV = 39.2f;
 static constexpr uint32_t kChargerDebounceMs = 1200;
 
 static void updateChargerConnectedFromTelemetry(const HoverTelemetry& tel, uint32_t nowMs) {
-  if (!tel.batValid || tel.batV <= 0.0f || !isfinite(tel.batV)) {
+  bool desiredKnown = false;
+  bool desired = chargerConnected;
+
+  // Preferred source: explicit charger state from STM32 telemetry.
+  if (tel.charger == 0 || tel.charger == 1) {
+    desiredKnown = true;
+    desired = (tel.charger == 1);
+  } else if (tel.batValid && tel.batV > 0.0f && isfinite(tel.batV)) {
+    // Fallback source: battery voltage hysteresis.
+    desiredKnown = true;
+    if (!chargerStateKnown) {
+      desired = tel.batV >= ((kChargerConnectV + kChargerDisconnectV) * 0.5f);
+    } else {
+      desired = chargerConnected;
+      if (!chargerConnected && tel.batV >= kChargerConnectV) desired = true;
+      if (chargerConnected && tel.batV <= kChargerDisconnectV) desired = false;
+    }
+  }
+
+  if (!desiredKnown) {
     chargerPending = false;
     return;
   }
 
   if (!chargerStateKnown) {
-    chargerConnected = tel.batV >= ((kChargerConnectV + kChargerDisconnectV) * 0.5f);
+    chargerConnected = desired;
     chargerStateKnown = true;
     chargerPending = false;
     return;
   }
-
-  bool desired = chargerConnected;
-  if (!chargerConnected && tel.batV >= kChargerConnectV) desired = true;
-  if (chargerConnected && tel.batV <= kChargerDisconnectV) desired = false;
 
   if (desired == chargerConnected) {
     chargerPending = false;

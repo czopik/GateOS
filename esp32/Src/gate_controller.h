@@ -197,4 +197,5 @@ private:
   void* statusCtx = nullptr;
 
   bool lastObstacle = false;
+  uint32_t obstacleRefractoryUntilMs = 0;
 };

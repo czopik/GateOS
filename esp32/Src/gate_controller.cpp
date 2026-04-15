@@ -835,6 +835,8 @@ GateCommandResponse GateController::onObstacle(bool active) {
   resp.cmd = GATE_CMD_NONE;
   resp.result = GATE_CMD_OK;
   resp.applied = false;
+  static constexpr uint32_t kObstacleRefractoryMs = 800;
+  const uint32_t nowMs = millis();
 
   // Track obstacle state in status.
   setObstacle(active);
@@ -844,54 +846,33 @@ GateCommandResponse GateController::onObstacle(bool active) {
   lastObstacle = active;
   if (!rising) return resp;
 
-  // Safety first: obstacle while moving always means immediate stop.
-  // While CLOSING, obstacle must stop and immediately reverse to OPEN.
-  if (isMoving()) {
-    if (state == GATE_CLOSING) {
-      stop(GATE_STOP_OBSTACLE);
-      resp.cmd = GATE_CMD_OPEN;
-      bool ok = open();
-      resp.applied = ok;
-      resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
-      return resp;
-    }
+  // Photocell is only active while the gate is closing.
+  // Ignore obstacle edges while idle or opening.
+  if (!isMoving() || state != GATE_CLOSING) {
+    return resp;
+  }
 
-    // For OPENING keep fail-safe stop behavior.
+  // Ignore repeated obstacle edges for a short window to avoid flap/retrigger spam.
+  if (obstacleRefractoryUntilMs != 0 && nowMs < obstacleRefractoryUntilMs) {
+    return resp;
+  }
+  obstacleRefractoryUntilMs = nowMs + kObstacleRefractoryMs;
+
+  const String action = cfg ? cfg->safetyConfig.obstacleAction : String("open");
+
+  stop(GATE_STOP_OBSTACLE);
+  if (action == "stop") {
     resp.cmd = GATE_CMD_STOP;
-    stop(GATE_STOP_OBSTACLE);
     resp.applied = true;
     resp.result = GATE_CMD_OK;
     return resp;
   }
 
-  // Apply configured obstacle action.
-  const String action = cfg ? cfg->safetyConfig.obstacleAction : String("stop");
-
-  if (action == "reverse") {
-    // Reverse current direction if moving; otherwise open.
-    if (isMoving()) {
-      if (getLastDirection() >= 0) {
-        resp = handleCommand("close");
-      } else {
-        resp = handleCommand("open");
-      }
-    } else {
-      resp = handleCommand("open");
-    }
-    return resp;
-  }
-
-  if (action == "open") {
-    resp = handleCommand("open");
-    return resp;
-  }
-
-  // Default: stop
-  resp.cmd = GATE_CMD_STOP;
-  bool wasMoving = isMoving();
-  stop(GATE_STOP_OBSTACLE);
-  resp.applied = wasMoving;
-  resp.result = GATE_CMD_OK;
+  // "open" and "reverse" are equivalent while closing.
+  resp.cmd = GATE_CMD_OPEN;
+  const bool ok = open();
+  resp.applied = ok;
+  resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
   return resp;
 }
 

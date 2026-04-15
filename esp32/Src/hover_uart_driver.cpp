@@ -289,6 +289,7 @@ void HoverUartDriver::handleRx() {
         int rpm = tel.rpm;
         long dist = tel.distMm;
         int fault = tel.fault;
+        int charger = tel.charger;
         int bat_cV = -1;
         long batV_old = -1;
         bool haveBatCV = false;
@@ -318,6 +319,7 @@ void HoverUartDriver::handleRx() {
           else if (strncmp(tok, "rpm=", 4) == 0) rpm = atoi(tok + 4);
           else if (strncmp(tok, "dist_mm=", 8) == 0) dist = atol(tok + 8);
           else if (strncmp(tok, "fault=", 6) == 0) fault = atoi(tok + 6);
+          else if (strncmp(tok, "chg=", 4) == 0) charger = atoi(tok + 4);
           else if (strncmp(tok, "bat_cV=", 7) == 0) { bat_cV = atoi(tok + 7); haveBatCV = true; }
           else if (strncmp(tok, "batV=", 5) == 0) { batV_old = atol(tok + 5); haveBatVold = true; }
           else if (strncmp(tok, "iA=", 3) == 0) { iA_val = atoi(tok + 3); have_iA = true; }
@@ -338,6 +340,8 @@ void HoverUartDriver::handleRx() {
         tel.rpm = rpm;
         tel.distMm = dist;
         tel.fault = fault;
+        if (charger == 0 || charger == 1) tel.charger = charger;
+        else tel.charger = -1;
 
         if (haveBatCV) {
           tel.bat_cV = bat_cV;
