@@ -113,6 +113,7 @@ volatile uint8_t telemetry_get_req = 0;
 volatile uint8_t hb_motor_armed = 0;
 volatile uint8_t failsafe_active = 0;
 volatile uint32_t last_cmd_ms = 0;
+volatile uint16_t last_cmd_seq = 0;
 char last_ascii_cmd[8] = "";
 volatile uint8_t ascii_resp_pending = 0;
 char ascii_resp_buf[128] = "";
@@ -1565,6 +1566,7 @@ void usart_process_command(SerialCommand *command_in, SerialCommand *command_out
      * NOT disable the port — it is a valid active configuration.
      */
     last_cmd_ms = HAL_GetTick();
+    last_cmd_seq++;
     failsafe_active = 0;
       if (usart_idx == 2) {             // Sideboard USART2
         #ifdef CONTROL_SERIAL_USART2

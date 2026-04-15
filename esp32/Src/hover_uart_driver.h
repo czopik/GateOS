@@ -18,6 +18,31 @@ struct HoverTelemetry {
   int iA_x100 = -1;
   // command age reported by hoverboard telemetry (ms). -1 = unknown
   int cmdAgeMs = -1;
+  // last acknowledged command id from STM32; -1 = unknown
+  int ackCmdId = -1;
+  // estimated command round-trip time based on ack match; -1 = unknown
+  int ackRttMs = -1;
+  // charger input state as reported directly by STM32: 1=connected, 0=not, -1=unknown
+  int charger = -1;
+  // monotonic telemetry frame sequence from STM32
+  uint32_t seq = 0;
+  bool seqValid = false;
+  // accumulated estimated lost TEL frames (based on seq gaps)
+  uint32_t seqLoss = 0;
+  // TEL interval and jitter estimates [ms]
+  int telIntervalMs = -1;
+  int telJitterMs = -1;
+  // fault snapshot from STM32 FLT frame (optional)
+  int fltCode = 0;
+  int fltRpm = 0;
+  int fltIA_x100 = -1;
+  int fltBat_cV = -1;
+  int fltCmdAgeMs = -1;
+  int fltAckCmdId = -1;
+  int fltCharger = -1;
+  uint32_t fltSeq = 0;
+  uint32_t fltCount = 0;
+  unsigned long fltLastMs = 0;
 
   // armed flag reported by hoverboard telemetry
   bool armed = false;
@@ -83,7 +108,7 @@ private:
   uint32_t lastKeepaliveMs = 0;
 
   HoverTelemetry tel;
-  char lineBuf[160] = {0};
+  char lineBuf[256] = {0};
   uint16_t lineLen = 0;
   // requested armed state by ESP32 (true if we asked to arm)
   bool armedRequested = false;
@@ -110,4 +135,9 @@ private:
   // terminal-friendly motor diagnostic prints
   uint32_t lastDiagPrintMs = 0;
   int lastDiagOk = -2; // sentinel to force first print when diag appears
+  bool seqSeen = false;
+  uint32_t lastSeq = 0;
+  uint32_t lastSeqTelMs = 0;
+  float seqIntervalEmaMs = 0.0f;
+  uint32_t seqJitterEmaMs = 0;
 };
