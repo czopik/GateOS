@@ -25,7 +25,6 @@
 #include "led_controller.h"
 #include "input_manager.h"
 #include "position_tracker.h"
-#include "MyLD2410.h"
 
 ConfigManager config;
 MotorController* motor = nullptr;
@@ -194,26 +193,8 @@ static bool hallAttached = false;
 static unsigned long lastPositionPersistMs = 0;
 static float lastPersistedPosition = -1.0f;
 static Ld2410Status ld2410Status;
-static HardwareSerial ld2410Serial(1);
-static MyLD2410 ld2410(ld2410Serial);
-static bool ld2410Active = false;
-static uint32_t ld2410CfgRevision = 0;
-static uint32_t ld2410LastRetryMs = 0;
-static uint32_t ld2410LastPollMs = 0;
-static bool ld2410TriggerArmed = true;
 static uint32_t ld2410TriggerCooldownUntilMs = 0;
-static bool ld2410ReversePending = false;
 static uint32_t ld2410ReverseAtMs = 0;
-static bool ld2410WasMoving = false;
-static int ld2410RxPin = -1;
-static int ld2410TxPin = -1;
-static int ld2410Baud = -1;
-static int ld2410MovingGate = -1;
-static int ld2410StationaryGate = -1;
-static int ld2410NoOneWindow = -1;
-static int ld2410MoveThresholds[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
-static int ld2410StillThresholds[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
-static String ld2410Mode = "";
 
 // Startup homing diagnostics/state
 static bool startupLimitRefDone = false;
@@ -261,22 +242,10 @@ static void forceDisableLd2410Runtime() {
   ld2410Status.movingSignal = -1;
   ld2410Status.stationarySignal = -1;
   ld2410Status.lastUpdateMs = 0;
-  ld2410TriggerArmed = false;
-  ld2410ReversePending = false;
   ld2410TriggerCooldownUntilMs = 0;
-  if (ld2410Active) {
-    ld2410.end();
-    ld2410Active = false;
-  }
-  ld2410RxPin = -1;
-  ld2410TxPin = -1;
-  ld2410Baud = -1;
-  ld2410MovingGate = -1;
-  ld2410StationaryGate = -1;
-  ld2410NoOneWindow = -1;
-  ld2410Mode = "";
+  ld2410ReverseAtMs = 0;
   if (!ld2410FirmwareDisabledLogged) {
-    Serial.println("[LD2410] disabled in firmware for stability");
+    Serial.println("[LD2410] removed from active firmware runtime");
     ld2410FirmwareDisabledLogged = true;
   }
 }
@@ -1347,14 +1316,6 @@ void updateHallStats(uint32_t nowMs) {
   hallPps = positionTracker.hallPps();
 }
 
-static int ld2410GateFromCm(int distanceCm) {
-  if (distanceCm <= 0) return 0;
-  int gate = (distanceCm + 74) / 75 - 1;
-  if (gate < 0) gate = 0;
-  if (gate > 8) gate = 8;
-  return gate;
-}
-
 static bool applyLd2410Config(const Ld2410Config& cfg) {
   (void)cfg;
   forceDisableLd2410Runtime();
@@ -2414,14 +2375,6 @@ void loop() {
   updateHallStats(now);
   updateLd2410Status(now);
   runStartupHoming(now);
-  bool movingNow = gate && gate->isMoving();
-  if (movingNow && !ld2410WasMoving) {
-    ld2410TriggerArmed = true;
-  }
-  if (!movingNow) {
-    ld2410TriggerArmed = false;
-  }
-  ld2410WasMoving = movingNow;
   handleLd2410Trigger(now);
   maybePersistPosition(now);
   updateFsStats(now);
