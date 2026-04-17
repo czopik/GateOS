@@ -124,8 +124,8 @@ function updateUI(data) {
   ui.stateLabel.className = 'state-label ' + gateState;
 
   // Position
-  const pct = typeof gate.positionPercent === 'number' && gate.positionPercent >= 0
-    ? Math.round(gate.positionPercent) : 0;
+  const pct = typeof gate.positionPercent === 'number'
+    ? Math.min(100, Math.max(0, Math.round(gate.positionPercent))) : 0;
   state.posPercent = pct;
   if (ui.posPct.textContent !== `${pct}%`) ui.posPct.textContent = `${pct}%`;
   ui.progressFill.style.width = `${pct}%`;
@@ -177,8 +177,8 @@ function updateLite(data) {
   if (ui.stateLabel.textContent !== label) ui.stateLabel.textContent = label;
   ui.stateLabel.className = 'state-label ' + gateState;
 
-  const pct = typeof data.positionPercent === 'number' && data.positionPercent >= 0
-    ? Math.round(data.positionPercent) : 0;
+  const pct = typeof data.positionPercent === 'number'
+    ? Math.min(100, Math.max(0, Math.round(data.positionPercent))) : 0;
   state.posPercent = pct;
   if (ui.posPct.textContent !== `${pct}%`) ui.posPct.textContent = `${pct}%`;
   ui.progressFill.style.width = `${pct}%`;
@@ -203,7 +203,10 @@ async function fetchJson(path, timeoutMs) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(path, { signal: ctrl.signal, cache: 'no-store' });
+    const headers = {};
+    const token = getToken();
+    if (token) headers['X-Api-Key'] = token;
+    const res = await fetch(path, { signal: ctrl.signal, cache: 'no-store', headers });
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
@@ -239,18 +242,24 @@ async function sendControl(action) {
 function connectWs() {
   if (connectWs._active) return;
   connectWs._active = true;
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-  const ws = new WebSocket(url);
-  ws.onmessage = (evt) => {
-    try {
-      const msg = JSON.parse(evt.data);
-      if (msg.type === 'status') updateUI(msg.data);
-    } catch {}
-  };
-  ws.onclose = () => {
+  try {
+    const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+    const ws = new WebSocket(url);
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'status') updateUI(msg.data);
+      } catch {}
+    };
+    ws.onerror = () => {};
+    ws.onclose = () => {
+      connectWs._active = false;
+      setTimeout(connectWs, 2000);
+    };
+  } catch {
     connectWs._active = false;
     setTimeout(connectWs, 2000);
-  };
+  }
 }
 
 /* ---- Haptic feedback ---- */
@@ -261,12 +270,19 @@ function vibrate(ms) {
 
 /* ---- Init ---- */
 
-ui.toggleBtn.addEventListener('click', () => {
+let toggleBusy = false;
+ui.toggleBtn.addEventListener('click', async () => {
+  if (toggleBusy) return;
+  toggleBusy = true;
   vibrate(30);
-  if (isMoving(state.currentState)) {
-    sendControl('stop');
-  } else {
-    sendControl('toggle');
+  try {
+    if (isMoving(state.currentState)) {
+      await sendControl('stop');
+    } else {
+      await sendControl('toggle');
+    }
+  } finally {
+    setTimeout(() => { toggleBusy = false; }, 400);
   }
 });
 
