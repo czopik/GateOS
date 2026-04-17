@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>GateOS - Sterowanie</title>
+  <link rel="stylesheet" href="/styles.css?v=20260102">
+  <style>
+    body{
+      display:flex;
+      flex-direction:column;
+      min-height:100vh;
+      min-height:100dvh;
+      overflow-x:hidden;
+    }
+    .ctrl-page{
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      padding:16px 16px 32px;
+      gap:20px;
+      max-width:420px;
+      margin:0 auto;
+      width:100%;
+    }
+
+    /* Gate animation */
+    .gate-vis{
+      width:100%;
+      max-width:320px;
+      aspect-ratio:4/3;
+      position:relative;
+    }
+    .gate-vis svg{width:100%;height:100%}
+
+    /* Gate panel (animated) */
+    .gate-panel{
+      transition:transform 0.4s ease;
+      transform-origin:left center;
+    }
+
+    /* State label */
+    .state-label{
+      font-size:22px;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:0.08em;
+      text-align:center;
+    }
+    .state-label.opening{color:var(--accent)}
+    .state-label.closing{color:var(--warn)}
+    .state-label.stopped,.state-label.idle{color:var(--muted)}
+    .state-label.open{color:var(--success)}
+    .state-label.closed{color:var(--text)}
+    .state-label.error{color:var(--danger)}
+
+    /* Position percentage */
+    .pos-pct{
+      font-size:42px;
+      font-weight:800;
+      letter-spacing:-0.02em;
+      background:linear-gradient(135deg,var(--accent),var(--accent-2));
+      -webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;
+      background-clip:text;
+      line-height:1;
+    }
+    .pos-sub{
+      font-size:13px;
+      color:var(--muted);
+      margin-top:2px;
+      text-align:center;
+    }
+
+    /* Toggle button */
+    .toggle-gate{
+      width:130px;
+      height:130px;
+      border-radius:50%;
+      border:3px solid rgba(255,255,255,0.15);
+      background:radial-gradient(circle at 40% 35%,rgba(61,217,182,0.25),rgba(90,169,255,0.15) 70%,transparent);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      transition:transform 180ms ease,box-shadow 180ms ease,border-color 180ms ease;
+      box-shadow:0 0 40px rgba(61,217,182,0.12),0 12px 32px rgba(0,0,0,0.3);
+      -webkit-tap-highlight-color:transparent;
+      touch-action:manipulation;
+      position:relative;
+    }
+    .toggle-gate:active{
+      transform:scale(0.93);
+      box-shadow:0 0 20px rgba(61,217,182,0.25),0 6px 16px rgba(0,0,0,0.4);
+    }
+    .toggle-gate.moving{
+      border-color:var(--warn);
+      background:radial-gradient(circle at 40% 35%,rgba(244,195,92,0.25),rgba(253,160,133,0.15) 70%,transparent);
+      box-shadow:0 0 40px rgba(244,195,92,0.15),0 12px 32px rgba(0,0,0,0.3);
+      animation:pulse-ring 1.8s ease infinite;
+    }
+    .toggle-gate.error{
+      border-color:var(--danger);
+      background:radial-gradient(circle at 40% 35%,rgba(255,107,107,0.25),rgba(255,75,75,0.15) 70%,transparent);
+      box-shadow:0 0 40px rgba(255,107,107,0.15),0 12px 32px rgba(0,0,0,0.3);
+    }
+    .toggle-gate svg{
+      width:48px;
+      height:48px;
+      color:var(--text);
+      transition:transform 260ms ease;
+    }
+    .toggle-gate.moving svg{
+      color:var(--warn);
+    }
+    @keyframes pulse-ring{
+      0%{box-shadow:0 0 40px rgba(244,195,92,0.15),0 12px 32px rgba(0,0,0,0.3)}
+      50%{box-shadow:0 0 60px rgba(244,195,92,0.25),0 12px 32px rgba(0,0,0,0.3)}
+      100%{box-shadow:0 0 40px rgba(244,195,92,0.15),0 12px 32px rgba(0,0,0,0.3)}
+    }
+
+    /* Quick action buttons */
+    .quick-actions{
+      display:flex;
+      gap:12px;
+      width:100%;
+      max-width:320px;
+    }
+    .quick-actions .btn{
+      flex:1;
+      padding:12px 8px;
+      font-size:13px;
+    }
+
+    /* Status chips bar */
+    .status-bar{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:center;
+      gap:8px;
+      width:100%;
+    }
+
+    /* Compact metrics */
+    .metrics-row{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:8px;
+      width:100%;
+      max-width:320px;
+    }
+    .m-item{
+      text-align:center;
+      padding:10px 6px;
+      border-radius:12px;
+      background:rgba(255,255,255,0.06);
+      border:1px solid rgba(255,255,255,0.08);
+    }
+    .m-item .m-val{
+      font-size:15px;
+      font-weight:700;
+    }
+    .m-item .m-lbl{
+      font-size:10px;
+      color:var(--muted);
+      margin-top:2px;
+      text-transform:uppercase;
+      letter-spacing:0.05em;
+    }
+
+    /* Mini nav */
+    .mini-nav{
+      padding:10px 16px;
+      display:flex;
+      justify-content:center;
+      gap:8px;
+    }
+    .mini-nav a{
+      padding:6px 12px;
+      border-radius:999px;
+      font-size:12px;
+      color:var(--muted);
+      border:1px solid transparent;
+      transition:all 180ms ease;
+    }
+    .mini-nav a.active{
+      color:var(--text);
+      background:rgba(255,255,255,0.08);
+      border-color:rgba(255,255,255,0.12);
+    }
+
+    /* Progress arc (bottom of toggle button) */
+    .progress-arc{
+      width:100%;
+      max-width:320px;
+      height:8px;
+      border-radius:999px;
+      background:rgba(255,255,255,0.08);
+      overflow:hidden;
+    }
+    .progress-arc-fill{
+      height:100%;
+      width:0%;
+      background:linear-gradient(90deg,var(--accent),var(--accent-2));
+      transition:width 300ms ease;
+      border-radius:999px;
+    }
+
+    .toast{right:12px;bottom:12px;max-width:calc(100vw - 24px)}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" aria-label="GateOS">
+        <div class="logo">G</div>
+        <div>GateOS</div>
+      </div>
+      <nav class="mini-nav" aria-label="Nawigacja">
+        <a href="/">Dashboard</a>
+        <a class="active" href="/control.html">Sterowanie</a>
+        <a href="/settings.html">Ustawienia</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="ctrl-page">
+    <!-- Gate visualization -->
+    <div class="gate-vis">
+      <svg viewBox="0 0 400 300" fill="none">
+        <!-- Ground -->
+        <rect x="0" y="270" width="400" height="30" rx="4" fill="rgba(255,255,255,0.04)"/>
+        <!-- Left pillar -->
+        <rect x="10" y="80" width="30" height="190" rx="6" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+        <rect x="15" y="85" width="20" height="8" rx="2" fill="var(--accent)" opacity="0.6"/>
+        <!-- Right pillar -->
+        <rect x="360" y="80" width="30" height="190" rx="6" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+        <!-- Motor icon on left pillar -->
+        <circle cx="25" cy="160" r="8" fill="none" stroke="var(--accent-2)" stroke-width="1.5" opacity="0.5"/>
+        <circle cx="25" cy="160" r="3" fill="var(--accent-2)" opacity="0.5"/>
+        <!-- Track/rail -->
+        <rect x="40" y="165" width="320" height="4" rx="2" fill="rgba(255,255,255,0.06)"/>
+        <!-- Gate panel (slides) -->
+        <g class="gate-panel" id="gatePanel">
+          <rect x="40" y="95" width="320" height="170" rx="4" fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
+          <!-- Panel slats -->
+          <line x1="40" y1="130" x2="360" y2="130" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+          <line x1="40" y1="165" x2="360" y2="165" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+          <line x1="40" y1="200" x2="360" y2="200" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+          <line x1="40" y1="235" x2="360" y2="235" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+          <!-- Handle -->
+          <rect x="185" y="170" width="30" height="6" rx="3" fill="rgba(255,255,255,0.2)"/>
+        </g>
+        <!-- Direction arrow -->
+        <g id="dirArrow" opacity="0">
+          <path d="M200 60 L220 50 L220 70 Z" fill="var(--accent)" id="arrowShape"/>
+        </g>
+      </svg>
+    </div>
+
+    <!-- State label -->
+    <div class="state-label" id="stateLabel">--</div>
+
+    <!-- Progress bar -->
+    <div class="progress-arc">
+      <div class="progress-arc-fill" id="progressFill"></div>
+    </div>
+
+    <!-- Position percentage -->
+    <div style="text-align:center">
+      <div class="pos-pct" id="posPct">--</div>
+      <div class="pos-sub">pozycja bramy</div>
+    </div>
+
+    <!-- Toggle button -->
+    <button class="toggle-gate" id="toggleBtn" aria-label="Toggle brama">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polygon points="10,8 16,12 10,16"/>
+      </svg>
+    </button>
+
+    <!-- Quick actions -->
+    <div class="quick-actions">
+      <button class="btn primary" id="openBtn" aria-label="Otworz">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px">
+          <path d="M5 12h14M12 5l7 7-7 7"/>
+        </svg>
+        Otworz
+      </button>
+      <button class="btn warn" id="stopBtn" aria-label="Stop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px">
+          <rect x="6" y="6" width="12" height="12" rx="2"/>
+        </svg>
+        Stop
+      </button>
+      <button class="btn danger" id="closeBtn" aria-label="Zamknij">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px">
+          <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+        Zamknij
+      </button>
+    </div>
+
+    <!-- Compact metrics -->
+    <div class="metrics-row">
+      <div class="m-item">
+        <div class="m-val" id="mBat">--</div>
+        <div class="m-lbl">Bateria</div>
+      </div>
+      <div class="m-item">
+        <div class="m-val" id="mCurrent">--</div>
+        <div class="m-lbl">Prad</div>
+      </div>
+      <div class="m-item">
+        <div class="m-val" id="mRpm">--</div>
+        <div class="m-lbl">RPM</div>
+      </div>
+    </div>
+    <div class="metrics-row">
+      <div class="m-item">
+        <div class="m-val" id="mDist">--</div>
+        <div class="m-lbl">Dystans</div>
+      </div>
+      <div class="m-item">
+        <div class="m-val" id="mArmed">--</div>
+        <div class="m-lbl">ARM</div>
+      </div>
+      <div class="m-item">
+        <div class="m-val" id="mFault">--</div>
+        <div class="m-lbl">Fault</div>
+      </div>
+    </div>
+
+    <!-- Status chips -->
+    <div class="status-bar">
+      <span class="chip" id="cWifi">WiFi: --</span>
+      <span class="chip" id="cLimO">OPEN: --</span>
+      <span class="chip" id="cLimC">CLOSE: --</span>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/control.js?v=20260102"></script>
+</body>
+</html>
