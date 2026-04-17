@@ -216,20 +216,6 @@ void MotorController::tick(uint32_t nowMs, float currentDistance) {
   vLastTickMs = nowMs;
   vLastDist = currentDistance;
 
-  // --- Hold ramp start until motor physically at rest (hover UART) ---
-  // Prevents "speed jump" when restarting after quick stop: the motor
-  // still has physical momentum, so the new ramp must wait until RPM ≈ 0.
-  if (motionStage == MOTION_ACCEL && driverKind == DRIVER_HOVER_UART) {
-    const HoverTelemetry& tel = hover.telemetry();
-    const int kRpmIdleThreshold = 15;
-    if (tel.lastTelMs != 0 && abs(tel.rpm) > kRpmIdleThreshold) {
-      motionRampStartMs = nowMs;
-      motionRampStartDistance = -1.0f;
-      setDuty(0);
-      return;
-    }
-  }
-
   // Remaining distance to target (m)
   float remaining = motionDirectionForward ? motionTargetDistance - currentDistance : currentDistance - motionTargetDistance;
 
