@@ -166,12 +166,12 @@ public:
   GateCommandResponse handleCommand(const char* cmd);
 
 private:
-  bool startMoveTo(float target, bool forward, GateState nextState);
-  bool startMove(GateMoveDirection dir, float target, GateState nextState);
+  bool startMoveTo(float target, bool forward, GateState nextState, bool bypassCooldown = false);
+  bool startMove(GateMoveDirection dir, float target, GateState nextState, bool bypassCooldown = false);
   void setState(GateState next);
   void publishStatusIfChanged();
   float configuredMaxDistance() const;
-  bool canMove() const;
+  bool canMove(bool bypassCooldown = false) const;
   GateDecisionContext decisionContext() const;
   void setTerminalState(GateTerminalState next);
   void refreshTerminalStateFromPosition();

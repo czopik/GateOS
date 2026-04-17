@@ -213,9 +213,9 @@ bool WebServerManager::isAuthorized(AsyncWebServerRequest* request) const {
   if (!cfg) return true;
   if (!cfg->securityConfig.enabled) return true;
 
-  // Allow configuring security even when token is empty.
+  // Allow configuring security only when no token is set yet (initial setup).
   const String url = request ? request->url() : "";
-  if (url == "/api/security") return true;
+  if (url == "/api/security" && cfg->securityConfig.apiToken.length() == 0) return true;
 
   if (cfg->securityConfig.apiToken.length() == 0) return false;
 
@@ -1099,12 +1099,12 @@ void WebServerManager::setupRoutes() {
     if (action.length() == 0) {
       if (doc.containsKey("position")) {
         float pos = doc["position"] | NAN;
-        if (!isnan(pos)) {
+        if (isfinite(pos)) {
           action = String("goto:") + String(pos, 3);
         }
       } else if (doc.containsKey("target")) {
         float pos = doc["target"] | NAN;
-        if (!isnan(pos)) {
+        if (isfinite(pos)) {
           action = String("goto:") + String(pos, 3);
         }
       } else if (doc.containsKey("positionMm")) {
@@ -1147,10 +1147,10 @@ void WebServerManager::setupRoutes() {
     String action;
     if (doc.containsKey("position")) {
       float pos = doc["position"] | NAN;
-      if (!isnan(pos)) action = String("goto:") + String(pos, 3);
+      if (isfinite(pos)) action = String("goto:") + String(pos, 3);
     } else if (doc.containsKey("target")) {
       float pos = doc["target"] | NAN;
-      if (!isnan(pos)) action = String("goto:") + String(pos, 3);
+      if (isfinite(pos)) action = String("goto:") + String(pos, 3);
     } else if (doc.containsKey("positionMm")) {
       long posMm = doc["positionMm"] | LONG_MIN;
       if (posMm != LONG_MIN) action = String("goto_mm:") + String(posMm);

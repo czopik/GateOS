@@ -34,6 +34,7 @@ private:
   void IRAM_ATTR onHallIsr();
 
   long readHallCountAtomic() const;
+  long readAndConsumeHallDeltaAtomic();
   int parsePullMode(const String& mode) const;
   void syncConfigPosition();
   void syncGatePosition();
@@ -55,6 +56,11 @@ private:
   long hallPpsLastCount_ = 0;
   int hallPinActive_ = -1;
   bool hallAttached_ = false;
+
+  // Hover filter state (reset in initializeFromConfig)
+  bool posFilterInit_ = false;
+  float pos_f_ = 0.0f;
+  uint32_t lastTelMsFilter_ = 0;
 
   int positionPercent_ = -1;
   float positionMeters_ = 0.0f;

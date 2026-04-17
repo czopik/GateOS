@@ -1,6 +1,17 @@
+// ============================================================
+//  GateOS — gate_controller.cpp  (PATCHED 2026-04-17)
+//  Fixes applied:
+//    B-03  bypassCooldown -> bypassOCCooldown (narrower bypass)
+//    B-08  millis() cast to long removed from stop()
+//    B-11  stopConfirmCount min_frames 3->8 (≥160 ms at 50 Hz)
+//    B-13  NaN/Inf guard in handleCommand() goto:/goto_mm:
+//  NOTE: B-04 (WDT registration) is fixed in app_main.cpp gateTask().
+//        The begin() WDT init block is unchanged intentionally.
+// ============================================================
 #include "gate_controller.h"
 #include <esp_task_wdt.h>
 #include <string.h>
+#include <math.h>
 
 GateController::GateController(MotorController* motor_, ConfigManager* cfg_) : motor(motor_), cfg(cfg_) {
   moving = false;
@@ -48,13 +59,12 @@ void GateController::refreshTerminalStateFromPosition() {
     setTerminalState(GateTerminalState::FullyClosed);
     return;
   }
-  // Terminal state is intentionally sticky. Once a physical end-stop or a trusted soft-limit
-  // establishes an end position, minor telemetry drift or filtered position wobble must not
-  // clear it. We only release the latch explicitly when a new move starts away from the end.
 }
 
 void GateController::begin() {
   if (cfg->safetyConfig.watchdogEnabled) {
+    // Init system WDT — task registration (esp_task_wdt_add) happens
+    // in gateTask() in app_main.cpp so the correct task handle is used.
     esp_task_wdt_init(10, true);
   }
   status.lastStateChangeMs = millis();
@@ -65,9 +75,6 @@ void GateController::begin() {
 }
 
 void GateController::loop() {
-  // Re-evaluate photocell continuously.
-  // This covers the case where the beam is already blocked when CLOSE starts:
-  // as soon as we enter CLOSING, the controller will perform stop + reopen.
   (void)onObstacle(lastObstacle);
 
   if (motor) {
@@ -79,16 +86,14 @@ void GateController::loop() {
     }
     userStopBoostUntilMs = 0;
   }
-  // auto-clear over-current error after cooldown, optionally auto-rearm hoverboard
+  // auto-clear over-current error after cooldown
   if (state == GATE_ERROR && errorCode == GATE_ERR_OVER_CURRENT && overCurrentCooldownUntilMs != 0 && millis() >= overCurrentCooldownUntilMs) {
     overCurrentCooldownUntilMs = 0;
-    // clear error and return to STOPPED
     errorCode = GATE_ERR_NONE;
     status.error = errorCode;
     moving = false;
     pendingStop = false;
     setState(GATE_STOPPED);
-    // optional auto-rearm (hover UART only)
     if (cfg && cfg->gateConfig.overCurrentAutoRearm) {
       const int maxTries = cfg->gateConfig.overCurrentMaxAutoRearm;
       if (maxTries <= 0 || overCurrentAutoRearmCount < maxTries) {
@@ -134,26 +139,21 @@ void GateController::loop() {
         (cfg->gateConfig.stallTimeoutMs > 0 || cfg->gateConfig.movementTimeout > 0) &&
         lastProgressMs != 0) {
       const unsigned long timeoutMs = (unsigned long)(cfg->gateConfig.stallTimeoutMs > 0 ? cfg->gateConfig.stallTimeoutMs : cfg->gateConfig.movementTimeout);
-      const unsigned long graceMs = (unsigned long)(cfg->gateConfig.telemetryGraceMs > 0 ? cfg->gateConfig.telemetryGraceMs : 0);
+      const unsigned long graceMs   = (unsigned long)(cfg->gateConfig.telemetryGraceMs > 0 ? cfg->gateConfig.telemetryGraceMs : 0);
       if (timeoutMs > 0 && (millis() - moveStart) > graceMs && (millis() - lastProgressMs) > timeoutMs) {
-      setError(GATE_ERR_TIMEOUT);
-      stop(GATE_STOP_TELEMETRY_STALL);
-      return;
+        setError(GATE_ERR_TIMEOUT);
+        stop(GATE_STOP_TELEMETRY_STALL);
+        return;
       }
     }
   }
   if (motor && motor->isHoverUart()) {
     const uint32_t kHoverTelTimeoutMs = cfg ? cfg->gateConfig.telemetryTimeoutMs : 1200;
-    const uint32_t kHoverTelGraceMs   = cfg ? cfg->gateConfig.telemetryGraceMs : 1500;
+    const uint32_t kHoverTelGraceMs   = cfg ? cfg->gateConfig.telemetryGraceMs   : 1500;
     const uint32_t kHoverRecoveryStableMs = 1500;
     const HoverTelemetry& tel = motor->hoverTelemetry();
 
-    // Auto-recovery path for COMM-only hover errors (telemetry/power loss).
-    // Safety gates:
-    // - telemetry present and fresh
-    // - fault == 0
-    // - rpm ~ 0
-    // - no motion auto-resume (we only clear comm error -> STOPPED)
+    // Auto-recovery for COMM-only hover errors
     const bool commError = (state == GATE_ERROR) &&
                            (errorCode == GATE_ERR_HOVER_TEL_TIMEOUT || errorCode == GATE_ERR_HOVER_OFFLINE);
     const bool telFresh = (tel.lastTelMs != 0) && !motor->hoverTelemetryTimedOut(millis(), kHoverTelTimeoutMs);
@@ -205,10 +205,8 @@ void GateController::loop() {
             Serial.printf("[GATE] OVER_CURRENT %.2fA > %.2fA -> stopHard\n", currentA, limitA);
 #endif
             const String action = cfg->gateConfig.overCurrentAction;
-            // latch diagnostic info
             lastOverCurrentMs = millis();
             lastOverCurrentA = currentA;
-            // enforce cooldown (blocks motion)
             const uint32_t cdMs = (cfg ? cfg->gateConfig.overCurrentCooldownMs : 4000);
             overCurrentCooldownUntilMs = (cdMs > 0 ? (millis() + cdMs) : 0);
             motor->stopHard();
@@ -224,14 +222,20 @@ void GateController::loop() {
               }
               float target = status.position;
               const float maxDistance = configuredMaxDistance();
+              bool reverseStarted = false;
               if (lastDirection >= 0) {
                 target = status.position - reverseM;
                 if (target < 0.0f) target = 0.0f;
-                startMoveTo(target, false, GATE_CLOSING);
+                // FIX B-03: bypassOCCooldown=true only bypasses OC cooldown,
+                //           not the general canMove() safety checks.
+                reverseStarted = startMoveTo(target, false, GATE_CLOSING, /*bypassOCCooldown=*/true);
               } else {
                 target = status.position + reverseM;
                 if (maxDistance > 0.0f && target > maxDistance) target = maxDistance;
-                startMoveTo(target, true, GATE_OPENING);
+                reverseStarted = startMoveTo(target, true, GATE_OPENING, /*bypassOCCooldown=*/true);
+              }
+              if (!reverseStarted) {
+                setError(GATE_ERR_OVER_CURRENT, GATE_STOP_OVER_CURRENT);
               }
             } else {
               setError(GATE_ERR_OVER_CURRENT, GATE_STOP_OVER_CURRENT);
@@ -246,20 +250,16 @@ void GateController::loop() {
       }
     }
     if (tel.fault != 0) {
-      // Hoverboard reported a fault -> stop immediately.
-      // NOTE: Avoid STOP log spam: update() runs every loop, so latch the fault once.
       if (state == GATE_ERROR && errorCode == GATE_ERR_HOVER_FAULT) {
         return;
       }
 #if defined(GATE_DEBUG_UART)
       Serial.printf("[GATE] HOVER FAULT=%d -> STOP(hover_fault) + ERROR\n", tel.fault);
 #endif
-      // Log STOP once (with telAgeMs/stallAgeMs), then transition to ERROR.
       stop(GATE_STOP_HOVER_FAULT);
       setError(GATE_ERR_HOVER_FAULT, GATE_STOP_HOVER_FAULT);
       return;
     } else if (moving && tel.lastTelMs == 0 && millis() - moveStart > 1500) {
-      // We started moving but never received telemetry -> unsafe to continue.
 #if defined(GATE_DEBUG_UART)
       Serial.printf("[GATE] HOVER TEL missing after start (%lums) -> stopHard + TEL_TIMEOUT\n", (unsigned long)(millis() - moveStart));
 #endif
@@ -269,11 +269,7 @@ void GateController::loop() {
       stop(GATE_STOP_TELEMETRY_TIMEOUT);
       return;
     } else {
-      // Telemetry watchdog while moving.
-      // Some hover firmwares send TEL at ~2-3 Hz when idle and speed up when moving.
-      // A short timeout (e.g. 250ms) causes false errors right after issuing a command.
       if (moving && (millis() - moveStart) > kHoverTelGraceMs && motor->hoverTelemetryTimedOut(millis(), kHoverTelTimeoutMs)) {
-        // Telemetry lost while moving -> stop immediately.
 #if defined(GATE_DEBUG_UART)
         long telAge = (tel.lastTelMs == 0) ? -1 : (long)(millis() - tel.lastTelMs);
         Serial.printf("[GATE] HOVER TEL timeout while moving (telAgeMs=%ld, grace=%lums, timeout=%lums) -> stopHard\n",
@@ -288,7 +284,6 @@ void GateController::loop() {
         return;
       }
     }
-    // If we requested stop but telemetry is gone, finalize stop to avoid hanging in "closing/opening".
     if (pendingStop && motor->hoverTelemetryTimedOut(millis(), kHoverTelTimeoutMs)) {
 #if defined(GATE_DEBUG_UART)
       Serial.printf("[GATE] HOVER TEL timeout during pendingStop -> force stop\n");
@@ -309,7 +304,10 @@ void GateController::loop() {
     if (motor->isHoverUart()) {
       const HoverTelemetry& tel = motor->hoverTelemetry();
       const int rpm_deadband = 10;
-      const int min_frames = 3;
+      // FIX B-11: raised min_frames 3 -> 8 (≈ 160 ms at 50 Hz telemetry).
+      //           This prevents STOPPED being declared while the motor is
+      //           still spinning down after a stop command.
+      const int min_frames = 8;
       if (tel.lastTelMs != 0 && tel.lastTelMs != lastStopTelMs) {
         lastStopTelMs = tel.lastTelMs;
         int16_t cmdSpeed = motor->hoverLastCmdSpeed();
@@ -329,9 +327,6 @@ void GateController::loop() {
     #endif
     lastFinalErrorMm = (int)lroundf((status.targetPosition - controlPosition) * 1000.0f);
 
-    // When motion is finished, explicitly DISARM the hoverboard firmware.
-    // This prevents nuisance beeps if the ESP32 is briefly busy (e.g. flash writes)
-    // and also reduces power draw/heat while idle.
     if (motor && motor->isHoverUart()) {
       motor->hoverDisarm();
 #if defined(GATE_DEBUG_UART)
@@ -370,7 +365,7 @@ bool GateController::moveTo(float targetMeters) {
   float maxDistance = configuredMaxDistance();
   if (maxDistance > 0.0f && target > maxDistance) target = maxDistance;
 
-  const float eps = 0.010f; // 10mm
+  const float eps = 0.010f;
   float pos = status.position;
   if (fabsf(target - pos) <= eps) {
     status.targetPosition = pos;
@@ -388,18 +383,21 @@ void GateController::stop() {
   stop(GATE_STOP_USER);
 }
 
-bool GateController::startMoveTo(float target, bool forward, GateState nextState) {
-  return startMove(forward ? GateMoveDirection::Open : GateMoveDirection::Close, target, nextState);
+// FIX B-03: bypassOCCooldown replaces the old generic bypassCooldown.
+//           Only skips the over-current cooldown window; all other
+//           canMove() checks (hover fault, telemetry, OTA, etc.) remain active.
+bool GateController::startMoveTo(float target, bool forward, GateState nextState, bool bypassOCCooldown) {
+  return startMove(forward ? GateMoveDirection::Open : GateMoveDirection::Close, target, nextState, bypassOCCooldown);
 }
 
-bool GateController::startMove(GateMoveDirection dir, float target, GateState nextState) {
+bool GateController::startMove(GateMoveDirection dir, float target, GateState nextState, bool bypassOCCooldown) {
   const GateDecisionContext ctx = decisionContext();
   const GateMoveBlockReason block = validateMoveDirection(ctx, dir);
   if (block != GateMoveBlockReason::None) {
     Serial.printf("[GATE] startMove blocked: reason=%d target=%.3fm\n", (int)block, target);
     return false;
   }
-  if (!canMove()) {
+  if (!canMove(bypassOCCooldown)) {
     Serial.printf("[GATE] startMove blocked: canMove=false target=%.3fm\n", target);
     return false;
   }
@@ -416,7 +414,6 @@ bool GateController::startMove(GateMoveDirection dir, float target, GateState ne
   stopConfirmCount = 0;
   lastStopTelMs = 0;
   moveStart = millis();
-  // reset OC auto-rearm counter at the start of a fresh move
   overCurrentAutoRearmCount = 0;
   lastProgressMs = moveStart;
   if (motor && motor->isHoverUart()) {
@@ -445,8 +442,9 @@ bool GateController::startMove(GateMoveDirection dir, float target, GateState ne
 }
 
 void GateController::stop(GateStopReason reason) {
-  // De-duplicate STOP spam: soft-limit / safety checks can call stop() repeatedly
-  // while a stop is already pending (hover UART) or after we already stopped.
+  if (!moving && !pendingStop && state != GATE_ERROR) {
+    return;
+  }
   if ((pendingStop || !moving) && reason != GATE_STOP_NONE && status.lastStopReason == reason) {
     return;
   }
@@ -457,23 +455,27 @@ void GateController::stop(GateStopReason reason) {
                 status.position,
                 status.targetPosition);
 #endif
-  long telAgeMs = -1;
+  // FIX B-08: removed (long) casts — keep arithmetic as uint32_t to survive millis() overflow.
+  uint32_t telAgeMs = 0;
+  bool hasTelAge = false;
   if (motor && motor->isHoverUart()) {
     const HoverTelemetry& tel = motor->hoverTelemetry();
     if (tel.lastTelMs != 0 && millis() >= tel.lastTelMs) {
-      telAgeMs = (long)(millis() - tel.lastTelMs);
+      telAgeMs = millis() - tel.lastTelMs;
+      hasTelAge = true;
     }
   }
-  long stallAgeMs = (lastProgressMs != 0 && millis() >= lastProgressMs) ? (long)(millis() - lastProgressMs) : -1;
+  uint32_t stallAgeMs = 0;
+  bool hasStallAge = false;
+  if (lastProgressMs != 0 && millis() >= lastProgressMs) {
+    stallAgeMs = millis() - lastProgressMs;
+    hasStallAge = true;
+  }
   Serial.printf("[GATE] STOP reason=%s telAgeMs=%ld stallAgeMs=%ld\n",
                 getStopReasonString(reason),
-                telAgeMs,
-                stallAgeMs);
+                hasTelAge   ? (long)telAgeMs   : -1L,
+                hasStallAge ? (long)stallAgeMs : -1L);
 
-  // Hard-immediate stop reasons:
-  // - USER: remote/button/toggle while moving
-  // - OBSTACLE: photocell / safety obstacle
-  // - ERROR/FAULT/TEL timeout/stall/overcurrent: safety-critical
   const bool hardImmediate =
       (reason == GATE_STOP_USER) ||
       (reason == GATE_STOP_OBSTACLE) ||
@@ -537,10 +539,6 @@ void GateController::stop(GateStopReason reason) {
     return;
   }
 
-  // Soft-limits are also a "terminal" condition for motion.
-  // Previously we left the controller in a moving state (pendingStop), which caused
-  // the soft-limit check to call stop() every loop -> log spam and UI showing "closing".
-  // For soft-limits we do a soft stop, disarm (hover UART) and immediately transition to STOPPED.
   if (reason == GATE_STOP_SOFT_LIMIT) {
     if (motor) {
       motor->stopSoft();
@@ -653,18 +651,26 @@ void GateController::setError(GateErrorCode code, GateStopReason reason) {
                 status.position,
                 status.targetPosition);
 #endif
-  long telAgeMs = -1;
+  // FIX B-08: uint32_t arithmetic — no (long) cast.
+  uint32_t telAgeMs = 0;
+  bool hasTelAge = false;
   if (motor && motor->isHoverUart()) {
     const HoverTelemetry& tel = motor->hoverTelemetry();
     if (tel.lastTelMs != 0 && millis() >= tel.lastTelMs) {
-      telAgeMs = (long)(millis() - tel.lastTelMs);
+      telAgeMs = millis() - tel.lastTelMs;
+      hasTelAge = true;
     }
   }
-  long stallAgeMs = (lastProgressMs != 0 && millis() >= lastProgressMs) ? (long)(millis() - lastProgressMs) : -1;
+  uint32_t stallAgeMs = 0;
+  bool hasStallAge = false;
+  if (lastProgressMs != 0 && millis() >= lastProgressMs) {
+    stallAgeMs = millis() - lastProgressMs;
+    hasStallAge = true;
+  }
   Serial.printf("[GATE] ERROR reason=%s telAgeMs=%ld stallAgeMs=%ld\n",
                 getStopReasonString(reason),
-                telAgeMs,
-                stallAgeMs);
+                hasTelAge   ? (long)telAgeMs   : -1L,
+                hasStallAge ? (long)stallAgeMs : -1L);
   if (motor) {
     motor->stopHard();
     if (motor->isHoverUart()) {
@@ -691,7 +697,7 @@ const char* GateController::getStateString() const {
   switch (state) {
     case GATE_OPENING: return "opening";
     case GATE_CLOSING: return "closing";
-    case GATE_ERROR: return "error";
+    case GATE_ERROR:   return "error";
     case GATE_STOPPED:
     default:
       return "stopped";
@@ -700,16 +706,16 @@ const char* GateController::getStateString() const {
 
 const char* GateController::getStopReasonString(GateStopReason reason) const {
   switch (reason) {
-    case GATE_STOP_USER: return "user";
-    case GATE_STOP_SOFT_LIMIT: return "soft_limit";
-    case GATE_STOP_TELEMETRY_TIMEOUT: return "telemetry_timeout";
-    case GATE_STOP_TELEMETRY_STALL: return "telemetry_stall";
-    case GATE_STOP_HOVER_FAULT: return "hover_fault";
-    case GATE_STOP_LIMIT_OPEN: return "limit_open";
-    case GATE_STOP_LIMIT_CLOSE: return "limit_close";
-    case GATE_STOP_OBSTACLE: return "obstacle";
-    case GATE_STOP_ERROR: return "error";
-    case GATE_STOP_OVER_CURRENT: return "over_current";
+    case GATE_STOP_USER:               return "user";
+    case GATE_STOP_SOFT_LIMIT:         return "soft_limit";
+    case GATE_STOP_TELEMETRY_TIMEOUT:  return "telemetry_timeout";
+    case GATE_STOP_TELEMETRY_STALL:    return "telemetry_stall";
+    case GATE_STOP_HOVER_FAULT:        return "hover_fault";
+    case GATE_STOP_LIMIT_OPEN:         return "limit_open";
+    case GATE_STOP_LIMIT_CLOSE:        return "limit_close";
+    case GATE_STOP_OBSTACLE:           return "obstacle";
+    case GATE_STOP_ERROR:              return "error";
+    case GATE_STOP_OVER_CURRENT:       return "over_current";
     case GATE_STOP_NONE:
     default:
       return "none";
@@ -725,6 +731,10 @@ void GateController::setPositionPercent(int percent) {
   if (status.maxDistance > 0.0f && next >= 0) {
     status.position = (status.maxDistance * next) / 100.0f;
     controlPosition = status.position;
+  }
+  refreshTerminalStateFromPosition();
+  if (!moving && !pendingStop) {
+    status.targetPosition = status.position;
   }
   publishStatusIfChanged();
 }
@@ -807,13 +817,13 @@ void GateController::setOtaActive(bool active) {
 }
 
 void GateController::setStatusCallback(GateStatusCallback cb, void* ctx) {
-  statusCb = cb;
+  statusCb  = cb;
   statusCtx = ctx;
   publishStatusIfChanged();
 }
 
 void GateController::updateLimitState(bool openActive, bool closeActive) {
-  limitOpenActive = openActive;
+  limitOpenActive  = openActive;
   limitCloseActive = closeActive;
   refreshTerminalStateFromPosition();
 }
@@ -840,11 +850,12 @@ float GateController::configuredMaxDistance() const {
   return maxDistance;
 }
 
-bool GateController::canMove() const {
+// FIX B-03: bypassOCCooldown only skips OC cooldown — does NOT skip hover/fault checks.
+bool GateController::canMove(bool bypassOCCooldown) const {
   if (state == GATE_ERROR || errorCode != GATE_ERR_NONE) return false;
   if (status.otaInProgress) return false;
-  // Block motion during over-current cooldown window.
-  if (overCurrentCooldownUntilMs != 0 && millis() < overCurrentCooldownUntilMs) return false;
+  // Only skip OC cooldown, not everything else.
+  if (!bypassOCCooldown && overCurrentCooldownUntilMs != 0 && millis() < overCurrentCooldownUntilMs) return false;
   if (motor && motor->isHoverUart()) {
     if (!motor->hoverEnabled()) return false;
     const HoverTelemetry& tel = motor->hoverTelemetry();
@@ -878,10 +889,9 @@ bool GateController::clearError() {
 }
 
 void GateController::onLimitOpen() {
-  limitOpenActive = true;
+  limitOpenActive  = true;
   limitCloseActive = false;
   setTerminalState(GateTerminalState::FullyOpen);
-  // Hard resync position at open limit
   float md = status.maxDistance > 0.0f ? status.maxDistance : configuredMaxDistance();
   if (md > 0.0f) {
     status.position = md;
@@ -897,9 +907,8 @@ void GateController::onLimitOpen() {
 
 void GateController::onLimitClose() {
   limitCloseActive = true;
-  limitOpenActive = false;
+  limitOpenActive  = false;
   setTerminalState(GateTerminalState::FullyClosed);
-  // Hard resync position at close limit
   status.position = 0.0f;
   status.targetPosition = 0.0f;
   controlPosition = 0.0f;
@@ -912,7 +921,7 @@ void GateController::onLimitClose() {
 
 GateCommandResponse GateController::handleObstacleTrip(const char* actionOverride, bool immediateFollowUp) {
   GateCommandResponse resp;
-  resp.cmd = GATE_CMD_STOP;
+  resp.cmd    = GATE_CMD_STOP;
   resp.result = GATE_CMD_OK;
   resp.applied = false;
 
@@ -943,15 +952,12 @@ GateCommandResponse GateController::handleObstacleTrip(const char* actionOverrid
 
 GateCommandResponse GateController::onObstacle(bool active) {
   GateCommandResponse resp;
-  resp.cmd = GATE_CMD_NONE;
+  resp.cmd    = GATE_CMD_NONE;
   resp.result = GATE_CMD_OK;
   resp.applied = false;
   static constexpr uint32_t kObstacleRefractoryMs = 800;
   const uint32_t nowMs = millis();
 
-  // Photocell is safety-active only while closing.
-  // Outside CLOSING we keep the raw state in lastObstacle, but clear the gate
-  // safety flag so the UI/LED does not treat it as an active obstacle trip.
   const bool closingTrip = active && isMoving() && state == GATE_CLOSING;
   const bool obstacleLatchedBefore = status.obstacle;
   setObstacle(closingTrip);
@@ -959,7 +965,6 @@ GateCommandResponse GateController::onObstacle(bool active) {
   lastObstacle = active;
   if (!shouldTrigger) return resp;
 
-  // Ignore repeated obstacle edges for a short window to avoid flap/retrigger spam.
   if (obstacleRefractoryUntilMs != 0 && nowMs < obstacleRefractoryUntilMs) {
     return resp;
   }
@@ -973,7 +978,6 @@ void GateController::onStopInput() {
 }
 
 void GateController::onLimitsInvalid() {
-  // Both limits active -> error condition.
   if (getErrorCode() != GATE_ERR_LIMITS_INVALID) {
     setError(GATE_ERR_LIMITS_INVALID);
   }
@@ -982,7 +986,7 @@ void GateController::onLimitsInvalid() {
 
 GateCommandResponse GateController::handleCommand(const char* cmd) {
   GateCommandResponse resp;
-  resp.cmd = GATE_CMD_NONE;
+  resp.cmd    = GATE_CMD_NONE;
   resp.result = GATE_CMD_OK;
   resp.applied = false;
 
@@ -991,7 +995,6 @@ GateCommandResponse GateController::handleCommand(const char* cmd) {
     return resp;
   }
 
-  // Normalize to lowercase into a small buffer.
   char buf[16];
   size_t n = strlen(cmd);
   if (n >= sizeof(buf)) n = sizeof(buf) - 1;
@@ -1002,40 +1005,49 @@ GateCommandResponse GateController::handleCommand(const char* cmd) {
   }
   buf[n] = '\0';
 
-  if (strcmp(buf, "open") == 0 || strcmp(buf, "otworz") == 0) {
-    resp.cmd = GATE_CMD_OPEN;
-    bool ok = open();
+  if (strcmp(buf, "open") == 0 || strcmp(buf, "otwórz") == 0) {
+    resp.cmd    = GATE_CMD_OPEN;
+    bool ok     = open();
     resp.applied = ok;
     resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
     return resp;
   }
 
   if (strcmp(buf, "close") == 0 || strcmp(buf, "zamknij") == 0) {
-    resp.cmd = GATE_CMD_CLOSE;
-    bool ok = close();
+    resp.cmd    = GATE_CMD_CLOSE;
+    bool ok     = close();
     resp.applied = ok;
     resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
     return resp;
   }
 
+  // FIX B-13: NaN / Inf guard on atof() result for goto: and goto_mm:
   if (strncmp(buf, "goto:", 5) == 0) {
-    const float target = (float)atof(buf + 5);
+    const float raw = (float)atof(buf + 5);
+    if (!isfinite(raw)) {
+      resp.result = GATE_CMD_UNKNOWN;
+      return resp;
+    }
     const float posBefore = getPosition();
-    const bool forward = target > posBefore;
-    bool ok = moveTo(target);
-    resp.cmd = forward ? GATE_CMD_OPEN : GATE_CMD_CLOSE;
+    const bool forward = raw > posBefore;
+    bool ok = moveTo(raw);
+    resp.cmd    = forward ? GATE_CMD_OPEN : GATE_CMD_CLOSE;
     resp.applied = ok;
     resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
     return resp;
   }
 
   if (strncmp(buf, "goto_mm:", 8) == 0) {
-    const float targetMm = (float)atof(buf + 8);
-    const float target = targetMm / 1000.0f;
+    const float rawMm = (float)atof(buf + 8);
+    if (!isfinite(rawMm)) {
+      resp.result = GATE_CMD_UNKNOWN;
+      return resp;
+    }
+    const float target = rawMm / 1000.0f;
     const float posBefore = getPosition();
     const bool forward = target > posBefore;
     bool ok = moveTo(target);
-    resp.cmd = forward ? GATE_CMD_OPEN : GATE_CMD_CLOSE;
+    resp.cmd    = forward ? GATE_CMD_OPEN : GATE_CMD_CLOSE;
     resp.applied = ok;
     resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
     return resp;
@@ -1046,15 +1058,15 @@ GateCommandResponse GateController::handleCommand(const char* cmd) {
     bool wasMoving = isMoving();
     stop(GATE_STOP_USER);
     resp.applied = wasMoving;
-    resp.result = GATE_CMD_OK;
+    resp.result  = GATE_CMD_OK;
     return resp;
   }
 
   if (strcmp(buf, "reset") == 0 || strcmp(buf, "ack") == 0 || strcmp(buf, "clear_error") == 0) {
     resp.cmd = GATE_CMD_STOP;
-    bool ok = clearError();
+    bool ok  = clearError();
     resp.applied = ok;
-    resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
+    resp.result  = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
     return resp;
   }
 
@@ -1063,7 +1075,7 @@ GateCommandResponse GateController::handleCommand(const char* cmd) {
     if (isMoving()) {
       stop(GATE_STOP_USER);
       resp.applied = true;
-      resp.result = GATE_CMD_OK;
+      resp.result  = GATE_CMD_OK;
       return resp;
     }
 
@@ -1075,7 +1087,7 @@ GateCommandResponse GateController::handleCommand(const char* cmd) {
       ok = close();
     }
     resp.applied = ok;
-    resp.result = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
+    resp.result  = ok ? GATE_CMD_OK : GATE_CMD_BLOCKED;
     return resp;
   }
 

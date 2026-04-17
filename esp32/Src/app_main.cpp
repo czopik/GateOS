@@ -155,7 +155,7 @@ static uint32_t restartAtMs = 0;
 static bool factoryResetPending = false;
 static uint32_t factoryResetAtMs = 0;
 static volatile bool runtimeConfigApplyPending = false;
-static uint32_t runtimeConfigApplyRequestedMs = 0;
+static volatile uint32_t runtimeConfigApplyRequestedMs = 0;
 
 static volatile long hallCount = 0;
 static portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;

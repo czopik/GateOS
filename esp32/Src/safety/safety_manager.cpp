@@ -1,6 +1,16 @@
 /**
  * @file safety_manager.cpp
  * @brief Centralized safety management implementation
+ *
+ * FIX B-05: Corrected debounce algorithm in updateObstacle(), updateLimitOpen(),
+ *           updateLimitClose(), updateStopButton().
+ *
+ *           OLD (broken): timer was reset on EVERY call when state == stable state,
+ *           meaning it never accumulated stable time for a NEW state.
+ *
+ *           NEW (correct): timer is reset only when the RAW signal CHANGES.
+ *           Acceptance happens after the raw signal has been STABLE for debounceMs.
+ *           This is the standard "sticky timer" debounce pattern.
  */
 
 #include "safety_manager.h"
@@ -22,6 +32,12 @@ SafetyManager::SafetyManager()
     , lastLimitOpenChangeMs(0)
     , lastLimitCloseChangeMs(0)
     , lastStopChangeMs(0)
+    // --- debounce pending raw values (NEW for B-05 fix) ---
+    , obstacleRawPending(false)
+    , limitOpenRawPending(false)
+    , limitCloseRawPending(false)
+    , stopRawPending(false)
+    // ---
     , currentFault(SAFETY_FAULT_NONE)
     , faultStartTimeMs(0)
     , lastFaultMs(0)
@@ -47,8 +63,8 @@ void SafetyManager::begin(ConfigManager* cfg) {
     if (cfg) {
         obstacleDebounceMs = cfg->sensorsConfig.photocell.debounceMs > 0 
             ? cfg->sensorsConfig.photocell.debounceMs : 30;
-        limitDebounceMs = 30;  // Could be configurable
-        stopDebounceMs = 30;
+        limitDebounceMs = 30;
+        stopDebounceMs  = 30;
         
         overCurrentThresholdA = cfg->motorConfig.overCurrentThreshold > 0
             ? cfg->motorConfig.overCurrentThreshold : 10.0f;
@@ -58,6 +74,12 @@ void SafetyManager::begin(ConfigManager* cfg) {
     
     lastWatchdogFeedMs = millis();
     watchdogOk = true;
+
+    // Seed pending-raw values with current state to avoid spurious edge on first poll
+    obstacleRawPending  = obstacleActive;
+    limitOpenRawPending = limitOpenActive;
+    limitCloseRawPending= limitCloseActive;
+    stopRawPending      = stopPressed;
     
     Serial.println("[SAFETY] Manager initialized");
 }
@@ -65,22 +87,21 @@ void SafetyManager::begin(ConfigManager* cfg) {
 void SafetyManager::update() {
     uint32_t now = millis();
     
-    // Update previous states
-    obstacleActivePrev = obstacleActive;
-    limitOpenActivePrev = limitOpenActive;
+    obstacleActivePrev   = obstacleActive;
+    limitOpenActivePrev  = limitOpenActive;
     limitCloseActivePrev = limitCloseActive;
-    stopPressedPrev = stopPressed;
+    stopPressedPrev      = stopPressed;
     
-    // Check watchdog
+    // Watchdog check
     if (!watchdogOk && (now - lastWatchdogFeedMs < watchdogTimeoutMs)) {
         watchdogOk = true;
-        dispatchEvent(SAFETY_EVENT_WATCHDOG_TIMEOUT);  // Cleared
+        clearFault();  // recover from watchdog fault, dispatch FAULT_CLEARED
     } else if (watchdogOk && (now - lastWatchdogFeedMs >= watchdogTimeoutMs)) {
         watchdogOk = false;
         setFault(SAFETY_FAULT_WATCHDOG);
     }
     
-    // Validate limits (both active = invalid state)
+    // Validate limits
     if (!validateLimits() && currentFault == SAFETY_FAULT_NONE) {
         setFault(SAFETY_FAULT_LIMIT_INVALID);
     } else if (validateLimits() && currentFault == SAFETY_FAULT_LIMIT_INVALID) {
@@ -88,85 +109,99 @@ void SafetyManager::update() {
     }
 }
 
+// ---------------------------------------------------------------------------
+//  FIX B-05 — correct debounce (sticky-timer pattern)
+//
+//  Rule: when rawActive differs from the last accepted (stable) state,
+//        record the time of the first such change (lastXxxChangeMs) and
+//        wait debounceMs before accepting it.  If the raw signal bounces
+//        back before debounceMs expires, reset the timer.
+// ---------------------------------------------------------------------------
+
 void SafetyManager::updateObstacle(bool rawActive) {
     uint32_t now = millis();
-    
-    // Simple debouncing
-    if (rawActive != obstacleActive) {
-        if (now - lastObstacleChangeMs >= obstacleDebounceMs) {
-            bool rising = rawActive && !obstacleActive;
-            obstacleActive = rawActive;
-            lastObstacleChangeMs = now;
-            
-            if (rising) {
-                obstacleTriggerCount++;
-                handleObstacleEdge(true);
-            } else {
-                handleObstacleEdge(false);
-            }
-        }
-    } else {
+
+    if (rawActive != obstacleRawPending) {
+        // Raw signal changed — restart the stability timer
+        obstacleRawPending   = rawActive;
         lastObstacleChangeMs = now;
+        return;                     // not stable yet
+    }
+
+    // Raw is stable — check if it's been stable long enough AND differs from accepted
+    if (rawActive != obstacleActive &&
+        (now - lastObstacleChangeMs) >= obstacleDebounceMs) {
+        bool rising      = rawActive && !obstacleActive;
+        obstacleActive   = rawActive;
+        if (rising) {
+            obstacleTriggerCount++;
+            handleObstacleEdge(true);
+        } else {
+            handleObstacleEdge(false);
+        }
     }
 }
 
 void SafetyManager::updateLimitOpen(bool rawActive) {
     uint32_t now = millis();
-    
-    if (rawActive != limitOpenActive) {
-        if (now - lastLimitOpenChangeMs >= limitDebounceMs) {
-            bool rising = rawActive && !limitOpenActive;
-            limitOpenActive = rawActive;
-            lastLimitOpenChangeMs = now;
-            
-            if (rising) {
-                handleLimitOpenEdge(true);
-            } else {
-                handleLimitOpenEdge(false);
-            }
-        }
-    } else {
+
+    if (rawActive != limitOpenRawPending) {
+        limitOpenRawPending   = rawActive;
         lastLimitOpenChangeMs = now;
+        return;
+    }
+
+    if (rawActive != limitOpenActive &&
+        (now - lastLimitOpenChangeMs) >= limitDebounceMs) {
+        bool rising      = rawActive && !limitOpenActive;
+        limitOpenActive  = rawActive;
+        if (rising) {
+            handleLimitOpenEdge(true);
+        } else {
+            handleLimitOpenEdge(false);
+        }
     }
 }
 
 void SafetyManager::updateLimitClose(bool rawActive) {
     uint32_t now = millis();
-    
-    if (rawActive != limitCloseActive) {
-        if (now - lastLimitCloseChangeMs >= limitDebounceMs) {
-            bool rising = rawActive && !limitCloseActive;
-            limitCloseActive = rawActive;
-            lastLimitCloseChangeMs = now;
-            
-            if (rising) {
-                handleLimitCloseEdge(true);
-            } else {
-                handleLimitCloseEdge(false);
-            }
-        }
-    } else {
+
+    if (rawActive != limitCloseRawPending) {
+        limitCloseRawPending   = rawActive;
         lastLimitCloseChangeMs = now;
+        return;
+    }
+
+    if (rawActive != limitCloseActive &&
+        (now - lastLimitCloseChangeMs) >= limitDebounceMs) {
+        bool rising       = rawActive && !limitCloseActive;
+        limitCloseActive  = rawActive;
+        if (rising) {
+            handleLimitCloseEdge(true);
+        } else {
+            handleLimitCloseEdge(false);
+        }
     }
 }
 
 void SafetyManager::updateStopButton(bool rawActive) {
     uint32_t now = millis();
-    
-    if (rawActive != stopPressed) {
-        if (now - lastStopChangeMs >= stopDebounceMs) {
-            bool rising = rawActive && !stopPressed;
-            stopPressed = rawActive;
-            lastStopChangeMs = now;
-            
-            if (rising) {
-                handleStopEdge(true);
-            } else {
-                handleStopEdge(false);
-            }
-        }
-    } else {
+
+    if (rawActive != stopRawPending) {
+        stopRawPending   = rawActive;
         lastStopChangeMs = now;
+        return;
+    }
+
+    if (rawActive != stopPressed &&
+        (now - lastStopChangeMs) >= stopDebounceMs) {
+        bool rising  = rawActive && !stopPressed;
+        stopPressed  = rawActive;
+        if (rising) {
+            handleStopEdge(true);
+        } else {
+            handleStopEdge(false);
+        }
     }
 }
 
@@ -193,8 +228,7 @@ void SafetyManager::updateCurrent(float currentA) {
         if (overCurrentStartMs == 0) {
             overCurrentStartMs = now;
         } else if (now - overCurrentStartMs >= overCurrentDurationMs) {
-            // Over-current confirmed
-            lastOverCurrentA = currentA;
+            lastOverCurrentA  = currentA;
             lastOverCurrentMs = now;
             setFault(SAFETY_FAULT_OVER_CURRENT);
         }
@@ -204,27 +238,18 @@ void SafetyManager::updateCurrent(float currentA) {
 }
 
 bool SafetyManager::isSafeToMove() const {
-    // Not safe if:
-    // - Active fault
-    // - Obstacle detected
-    // - Stop pressed
-    // - Watchdog timeout
-    // - Invalid limits
-    
     if (currentFault != SAFETY_FAULT_NONE) return false;
-    if (obstacleActive) return false;
-    if (stopPressed) return false;
-    if (!watchdogOk) return false;
+    if (obstacleActive)  return false;
+    if (stopPressed)     return false;
+    if (!watchdogOk)     return false;
     if (!validateLimits()) return false;
-    
     return true;
 }
 
 void SafetyManager::clearFault() {
     if (currentFault != SAFETY_FAULT_NONE) {
-        SafetyFaultType prev = currentFault;
-        currentFault = SAFETY_FAULT_NONE;
-        faultLatched = false;
+        currentFault  = SAFETY_FAULT_NONE;
+        faultLatched  = false;
         dispatchEvent(SAFETY_EVENT_FAULT_CLEARED);
         Serial.printf("[SAFETY] Fault cleared: %s\n", getFaultString());
     }
@@ -232,11 +257,11 @@ void SafetyManager::clearFault() {
 
 void SafetyManager::setFault(SafetyFaultType fault) {
     if (currentFault != fault) {
-        currentFault = fault;
-        faultStartTimeMs = millis();
-        lastFaultMs = faultStartTimeMs;
+        currentFault      = fault;
+        faultStartTimeMs  = millis();
+        lastFaultMs       = faultStartTimeMs;
         faultCount++;
-        faultLatched = true;
+        faultLatched      = true;
         dispatchEvent(SAFETY_EVENT_FAULT_DETECTED);
         Serial.printf("[SAFETY] Fault set: %s\n", getFaultString());
     }
@@ -244,20 +269,20 @@ void SafetyManager::setFault(SafetyFaultType fault) {
 
 const char* SafetyManager::getFaultString() const {
     switch (currentFault) {
-        case SAFETY_FAULT_NONE: return "NONE";
-        case SAFETY_FAULT_OBSTACLE: return "OBSTACLE";
-        case SAFETY_FAULT_LIMIT_INVALID: return "LIMIT_INVALID";
-        case SAFETY_FAULT_TELEMETRY_LOST: return "TELEMETRY_LOST";
-        case SAFETY_FAULT_MOTOR_FAULT: return "MOTOR_FAULT";
-        case SAFETY_FAULT_OVER_CURRENT: return "OVER_CURRENT";
-        case SAFETY_FAULT_WATCHDOG: return "WATCHDOG";
-        case SAFETY_FAULT_COMMUNICATION: return "COMMUNICATION";
-        default: return "UNKNOWN";
+        case SAFETY_FAULT_NONE:              return "NONE";
+        case SAFETY_FAULT_OBSTACLE:          return "OBSTACLE";
+        case SAFETY_FAULT_LIMIT_INVALID:     return "LIMIT_INVALID";
+        case SAFETY_FAULT_TELEMETRY_LOST:    return "TELEMETRY_LOST";
+        case SAFETY_FAULT_MOTOR_FAULT:       return "MOTOR_FAULT";
+        case SAFETY_FAULT_OVER_CURRENT:      return "OVER_CURRENT";
+        case SAFETY_FAULT_WATCHDOG:          return "WATCHDOG";
+        case SAFETY_FAULT_COMMUNICATION:     return "COMMUNICATION";
+        default:                             return "UNKNOWN";
     }
 }
 
 void SafetyManager::setCallback(SafetyCallback cb, void* ctx) {
-    callback = cb;
+    callback    = cb;
     callbackCtx = ctx;
 }
 
@@ -312,21 +337,20 @@ void SafetyManager::dispatchEvent(SafetyEventType event) {
     const char* eventStr;
     switch (event) {
         case SAFETY_EVENT_OBSTACLE_DETECTED: eventStr = "OBSTACLE_DETECTED"; break;
-        case SAFETY_EVENT_OBSTACLE_CLEARED: eventStr = "OBSTACLE_CLEARED"; break;
-        case SAFETY_EVENT_LIMIT_OPEN_HIT: eventStr = "LIMIT_OPEN_HIT"; break;
-        case SAFETY_EVENT_LIMIT_CLOSE_HIT: eventStr = "LIMIT_CLOSE_HIT"; break;
-        case SAFETY_EVENT_STOP_PRESSED: eventStr = "STOP_PRESSED"; break;
-        case SAFETY_EVENT_FAULT_DETECTED: eventStr = "FAULT_DETECTED"; break;
-        case SAFETY_EVENT_FAULT_CLEARED: eventStr = "FAULT_CLEARED"; break;
-        case SAFETY_EVENT_WATCHDOG_TIMEOUT: eventStr = "WATCHDOG_TIMEOUT"; break;
-        case SAFETY_EVENT_OVER_CURRENT: eventStr = "OVER_CURRENT"; break;
-        default: eventStr = "UNKNOWN"; break;
+        case SAFETY_EVENT_OBSTACLE_CLEARED:  eventStr = "OBSTACLE_CLEARED";  break;
+        case SAFETY_EVENT_LIMIT_OPEN_HIT:    eventStr = "LIMIT_OPEN_HIT";    break;
+        case SAFETY_EVENT_LIMIT_CLOSE_HIT:   eventStr = "LIMIT_CLOSE_HIT";   break;
+        case SAFETY_EVENT_STOP_PRESSED:      eventStr = "STOP_PRESSED";       break;
+        case SAFETY_EVENT_FAULT_DETECTED:    eventStr = "FAULT_DETECTED";     break;
+        case SAFETY_EVENT_FAULT_CLEARED:     eventStr = "FAULT_CLEARED";      break;
+        case SAFETY_EVENT_WATCHDOG_TIMEOUT:  eventStr = "WATCHDOG_TIMEOUT";   break;
+        case SAFETY_EVENT_OVER_CURRENT:      eventStr = "OVER_CURRENT";       break;
+        default:                             eventStr = "UNKNOWN";             break;
     }
     Serial.printf("[SAFETY] Event: %s\n", eventStr);
 #endif
 }
 
 bool SafetyManager::validateLimits() const {
-    // Both limits active simultaneously is invalid
     return !(limitOpenActive && limitCloseActive);
 }

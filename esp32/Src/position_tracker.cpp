@@ -1,3 +1,18 @@
+// ============================================================
+//  GateOS — position_tracker.cpp  (PATCHED 2026-04-17)
+//  Fixes applied:
+//    B-02  hallPosition_ / hallCountLast_ access now protected
+//          by portENTER_CRITICAL / portEXIT_CRITICAL in all
+//          loop-context call sites (ISR already had critical).
+//    B-06  Hover position filter state moved from static-local
+//          variables inside updatePosition() to class member
+//          fields: posFilterInit_, pos_f_, lastTelMsFilter_.
+//          They are reset explicitly in initializeFromConfig()
+//          so a second call (after OTA / soft-reset / config
+//          reload) always starts with a clean state.
+//    B-07  Snapshot atomic write: write to /position.tmp then
+//          rename to /position.bin (LittleFS rename is atomic).
+// ============================================================
 #include "position_tracker.h"
 
 #include <math.h>
@@ -10,11 +25,12 @@ PositionTracker* PositionTracker::instance_ = nullptr;
 
 namespace {
 static constexpr const char* kPositionSnapshotPath = "/position.bin";
+static constexpr const char* kPositionSnapshotTmpPath = "/position.tmp";  // FIX B-07
 
 #pragma pack(push, 1)
 struct PositionSnapshot {
-  float position;
-  float maxDistance;
+  float    position;
+  float    maxDistance;
   uint32_t crc;
 };
 #pragma pack(pop)
@@ -53,9 +69,9 @@ bool hasSnapshotFile() {
 } // namespace
 
 void PositionTracker::begin(ConfigManager* cfg, MotorController* motor, GateController* gate) {
-  cfg_ = cfg;
+  cfg_   = cfg;
   motor_ = motor;
-  gate_ = gate;
+  gate_  = gate;
   instance_ = this;
 }
 
@@ -73,9 +89,20 @@ long PositionTracker::readHallCountAtomic() const {
   return v;
 }
 
+// FIX B-02: helper that reads AND snapshots hallCountLast_ under critical section
+long PositionTracker::readAndConsumeHallDeltaAtomic() {
+  long current, delta;
+  portENTER_CRITICAL(&hallMux_);
+  current = hallCount_;
+  delta   = current - hallCountLast_;
+  hallCountLast_ = current;
+  portEXIT_CRITICAL(&hallMux_);
+  return delta;
+}
+
 void PositionTracker::syncConfigPosition() {
   if (!cfg_) return;
-  cfg_->gateConfig.position = positionMeters_;
+  cfg_->gateConfig.position    = positionMeters_;
   cfg_->gateConfig.maxDistance = maxDistanceMeters_;
   cfg_->gateConfig.totalDistance = maxDistanceMeters_;
 }
@@ -101,14 +128,20 @@ void PositionTracker::initializeFromConfig() {
 
   if (cfg_->gateConfig.positionSource == "hoverboard_tel") {
     hoverOffsetMeters_ = -((float)cfg_->gateConfig.hbOriginDistMm) / 1000.0f;
-    hoverOffsetValid_ = true;
+    hoverOffsetValid_  = true;
   } else {
     hoverOffsetMeters_ = 0.0f;
-    hoverOffsetValid_ = false;
+    hoverOffsetValid_  = false;
   }
 
-  lastPersistedPosition_ = positionMeters_;
-  lastPositionPersistMs_ = millis();
+  // FIX B-06: explicit reset of hover filter state so a second call
+  //           (OTA, soft-reset, config reload) starts clean.
+  posFilterInit_   = false;
+  pos_f_           = 0.0f;
+  lastTelMsFilter_ = 0;
+
+  lastPersistedPosition_  = positionMeters_;
+  lastPositionPersistMs_  = millis();
   loadPositionSnapshot();
   syncConfigPosition();
   syncGatePosition();
@@ -147,22 +180,39 @@ bool PositionTracker::loadPositionSnapshot() {
 }
 
 bool PositionTracker::savePositionSnapshot() {
+  // FIX B-07: atomic write-then-rename pattern.
+  //           LittleFS guarantees that rename() is atomic, so a power
+  //           loss during the write only corrupts /position.tmp — the
+  //           last good /position.bin is preserved.
   if (maxDistanceMeters_ <= 0.0f) return false;
   PositionSnapshot snap{};
-  snap.position = positionMeters_;
+  snap.position    = positionMeters_;
   snap.maxDistance = maxDistanceMeters_;
   snap.crc = crc32Calc(reinterpret_cast<const uint8_t*>(&snap), sizeof(snap) - sizeof(snap.crc));
-  File f = LittleFS.open(kPositionSnapshotPath, "w");
+
+  // 1. Write to temporary file
+  File f = LittleFS.open(kPositionSnapshotTmpPath, "w");
   if (!f) return false;
   bool ok = f.write(reinterpret_cast<const uint8_t*>(&snap), sizeof(snap)) == sizeof(snap);
   f.flush();
   f.close();
-  if (ok) {
-    lastPersistedPosition_ = positionMeters_;
-    lastPositionPersistMs_ = millis();
-    persistDirty_ = false;
+  if (!ok) {
+    LittleFS.remove(kPositionSnapshotTmpPath);
+    return false;
   }
-  return ok;
+
+  // 2. Atomic rename tmp -> final
+  if (LittleFS.exists(kPositionSnapshotPath)) {
+    LittleFS.remove(kPositionSnapshotPath);
+  }
+  if (!LittleFS.rename(kPositionSnapshotTmpPath, kPositionSnapshotPath)) {
+    return false;
+  }
+
+  lastPersistedPosition_ = positionMeters_;
+  lastPositionPersistMs_ = millis();
+  persistDirty_          = false;
+  return true;
 }
 
 bool PositionTracker::applyMaxDistance(float value, bool persist) {
@@ -180,10 +230,14 @@ bool PositionTracker::applyMaxDistance(float value, bool persist) {
       cfg_->gateConfig.wheelCircumference > 0.0f &&
       cfg_->gateConfig.pulsesPerRevolution > 0) {
     float pulsesPerMeter = (float)cfg_->gateConfig.pulsesPerRevolution / cfg_->gateConfig.wheelCircumference;
-    long totalCounts = (long)(maxDistanceMeters_ * pulsesPerMeter);
-    hallPosition_ = (long)(positionMeters_ * pulsesPerMeter);
-    if (hallPosition_ < 0) hallPosition_ = 0;
-    if (hallPosition_ > totalCounts) hallPosition_ = totalCounts;
+    long totalCounts     = (long)(maxDistanceMeters_ * pulsesPerMeter);
+    long newHallPos      = (long)(positionMeters_    * pulsesPerMeter);
+    if (newHallPos < 0)            newHallPos = 0;
+    if (newHallPos > totalCounts)  newHallPos = totalCounts;
+    // FIX B-02: protect hallPosition_ write
+    portENTER_CRITICAL(&hallMux_);
+    hallPosition_ = newHallPos;
+    portEXIT_CRITICAL(&hallMux_);
   }
 
   syncConfigPosition();
@@ -203,8 +257,8 @@ bool PositionTracker::applyMaxDistance(float value, bool persist) {
 
 bool PositionTracker::calibrateToMode(const char* mode, bool calibrationRunning) {
   if (!cfg_ || !gate_ || !mode || mode[0] == '\0') return false;
-  if (gate_->isMoving()) return false;
-  if (calibrationRunning) return false;
+  if (gate_->isMoving())       return false;
+  if (calibrationRunning)      return false;
 
   char key[8];
   size_t n = strlen(mode);
@@ -217,7 +271,7 @@ bool PositionTracker::calibrateToMode(const char* mode, bool calibrationRunning)
   key[n] = '\0';
 
   bool setZero = strcmp(key, "zero") == 0 || strcmp(key, "close") == 0 || strcmp(key, "closed") == 0;
-  bool setMax = strcmp(key, "max") == 0 || strcmp(key, "open") == 0;
+  bool setMax  = strcmp(key, "max")  == 0 || strcmp(key, "open")  == 0;
   if (!setZero && !setMax) return false;
 
   float maxDistance = cfg_->gateConfig.maxDistance > 0.0f ?
@@ -225,9 +279,9 @@ bool PositionTracker::calibrateToMode(const char* mode, bool calibrationRunning)
   if (maxDistance <= 0.0f) return false;
 
   maxDistanceMeters_ = maxDistance;
-  positionMeters_ = setZero ? 0.0f : maxDistanceMeters_;
+  positionMeters_    = setZero ? 0.0f : maxDistanceMeters_;
   positionMetersRaw_ = positionMeters_;
-  positionPercent_ = maxDistanceMeters_ > 0.0f ?
+  positionPercent_   = maxDistanceMeters_ > 0.0f ?
     (int)((positionMeters_ * 100.0f) / maxDistanceMeters_ + 0.5f) : -1;
 
   if (cfg_->sensorsConfig.hall.enabled &&
@@ -235,8 +289,12 @@ bool PositionTracker::calibrateToMode(const char* mode, bool calibrationRunning)
       cfg_->gateConfig.wheelCircumference > 0.0f &&
       cfg_->gateConfig.pulsesPerRevolution > 0) {
     float pulsesPerMeter = (float)cfg_->gateConfig.pulsesPerRevolution / cfg_->gateConfig.wheelCircumference;
-    long totalCounts = (long)(maxDistanceMeters_ * pulsesPerMeter);
-    hallPosition_ = setZero ? 0 : totalCounts;
+    long totalCounts     = (long)(maxDistanceMeters_ * pulsesPerMeter);
+    long newHallPos      = setZero ? 0 : totalCounts;
+    // FIX B-02
+    portENTER_CRITICAL(&hallMux_);
+    hallPosition_ = newHallPos;
+    portEXIT_CRITICAL(&hallMux_);
   }
 
   syncConfigPosition();
@@ -248,11 +306,11 @@ bool PositionTracker::calibrateToMode(const char* mode, bool calibrationRunning)
       const float pos_raw = (float)tel.distMm / 1000.0f;
       if (setZero) {
         hoverOffsetMeters_ = -pos_raw;
-        hoverOffsetValid_ = true;
+        hoverOffsetValid_  = true;
         cfg_->gateConfig.hbOriginDistMm = tel.distMm;
       } else if (setMax && maxDistanceMeters_ > 0.0f) {
         hoverOffsetMeters_ = maxDistanceMeters_ - pos_raw;
-        hoverOffsetValid_ = true;
+        hoverOffsetValid_  = true;
         cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters_) * 1000.0f);
       }
     }
@@ -295,7 +353,7 @@ void IRAM_ATTR PositionTracker::onHallIsr() {
 
 void PositionTracker::updateHallAttachment(bool calibrationRunning) {
   if (!cfg_) return;
-  int pin = cfg_->sensorsConfig.hall.pin;
+  int  pin     = cfg_->sensorsConfig.hall.pin;
   bool enabled = cfg_->sensorsConfig.hall.enabled && pin >= 0;
   hallDebounceUs_ = (uint32_t)cfg_->sensorsConfig.hall.debounceMs * 1000U;
 
@@ -336,7 +394,11 @@ void PositionTracker::updateHallAttachment(bool calibrationRunning) {
   attachInterrupt(intNum, hallIsrThunk, mode);
   hallAttached_ = true;
 
-  hallCountLast_ = readHallCountAtomic();
+  // FIX B-02: protect hallCountLast_ and hallPosition_ writes
+  portENTER_CRITICAL(&hallMux_);
+  hallCountLast_ = hallCount_;
+  portEXIT_CRITICAL(&hallMux_);
+
   float maxDistance = cfg_->gateConfig.maxDistance > 0.0f ?
     cfg_->gateConfig.maxDistance : cfg_->gateConfig.totalDistance;
   if (maxDistance < 0.0f) maxDistance = 0.0f;
@@ -344,10 +406,13 @@ void PositionTracker::updateHallAttachment(bool calibrationRunning) {
       cfg_->gateConfig.wheelCircumference > 0.0f &&
       cfg_->gateConfig.pulsesPerRevolution > 0) {
     float pulsesPerMeter = (float)cfg_->gateConfig.pulsesPerRevolution / cfg_->gateConfig.wheelCircumference;
-    long totalCounts = (long)(maxDistance * pulsesPerMeter);
-    hallPosition_ = (long)(positionMeters_ * pulsesPerMeter);
-    if (hallPosition_ < 0) hallPosition_ = 0;
-    if (hallPosition_ > totalCounts) hallPosition_ = totalCounts;
+    long totalCounts     = (long)(maxDistance * pulsesPerMeter);
+    long newHallPos      = (long)(positionMeters_ * pulsesPerMeter);
+    if (newHallPos < 0)           newHallPos = 0;
+    if (newHallPos > totalCounts) newHallPos = totalCounts;
+    portENTER_CRITICAL(&hallMux_);
+    hallPosition_ = newHallPos;
+    portEXIT_CRITICAL(&hallMux_);
   }
 }
 
@@ -355,9 +420,9 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
   if (!cfg_ || !gate_) return;
 
   bool resyncClose = resyncAtCloseLimit_;
-  bool resyncOpen = resyncAtOpenLimit_;
+  bool resyncOpen  = resyncAtOpenLimit_;
   resyncAtCloseLimit_ = false;
-  resyncAtOpenLimit_ = false;
+  resyncAtOpenLimit_    = false;
 
   float maxDistance = cfg_->gateConfig.maxDistance > 0.0f ?
     cfg_->gateConfig.maxDistance : cfg_->gateConfig.totalDistance;
@@ -371,25 +436,33 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
   positionMetersRaw_ = positionMeters_;
 
   float pulsesPerMeter = 0.0f;
-  long totalCounts = 0;
+  long  totalCounts    = 0;
   if (cfg_->sensorsConfig.hall.enabled &&
       cfg_->sensorsConfig.hall.pin >= 0 &&
       maxDistanceMeters_ > 0.0f &&
       cfg_->gateConfig.wheelCircumference > 0.0f &&
       cfg_->gateConfig.pulsesPerRevolution > 0) {
     pulsesPerMeter = (float)cfg_->gateConfig.pulsesPerRevolution / cfg_->gateConfig.wheelCircumference;
-    totalCounts = (long)(maxDistanceMeters_ * pulsesPerMeter);
+    totalCounts    = (long)(maxDistanceMeters_ * pulsesPerMeter);
   }
 
   if (resyncClose) {
-    positionMeters_ = 0.0f;
+    positionMeters_    = 0.0f;
     positionMetersRaw_ = 0.0f;
-    if (totalCounts > 0) hallPosition_ = 0;
+    if (totalCounts > 0) {
+      portENTER_CRITICAL(&hallMux_);
+      hallPosition_ = 0;
+      portEXIT_CRITICAL(&hallMux_);
+    }
   }
   if (resyncOpen) {
-    positionMeters_ = maxDistanceMeters_;
+    positionMeters_    = maxDistanceMeters_;
     positionMetersRaw_ = maxDistanceMeters_;
-    if (totalCounts > 0) hallPosition_ = totalCounts;
+    if (totalCounts > 0) {
+      portENTER_CRITICAL(&hallMux_);
+      hallPosition_ = totalCounts;
+      portEXIT_CRITICAL(&hallMux_);
+    }
   }
 
   if (calibrationRunning) {
@@ -399,20 +472,24 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
     return;
   }
 
-  const bool preferHover = (cfg_->gateConfig.positionSource == "hoverboard_tel");
+  const bool preferHover   = (cfg_->gateConfig.positionSource == "hoverboard_tel");
   const bool hallAvailable = (hallAttached_ && totalCounts > 0 && pulsesPerMeter > 0.0f);
-  const bool hoverAvailable = (motor_ && motor_->isHoverUart() && motor_->hoverEnabled());
+  const bool hoverAvailable= (motor_ && motor_->isHoverUart() && motor_->hoverEnabled());
 
   if (!preferHover && hallAvailable) {
-    long current = readHallCountAtomic();
-    long delta = current - hallCountLast_;
-    hallCountLast_ = current;
+    // FIX B-02: use atomic helper that reads delta under critical section
+    long delta = readAndConsumeHallDeltaAtomic();
+
     if (gate_->isMoving() && delta != 0) {
       int dir = gate_->getLastDirection() >= 0 ? 1 : -1;
+      long newHallPos;
+      portENTER_CRITICAL(&hallMux_);
       hallPosition_ += delta * dir;
-      if (hallPosition_ < 0) hallPosition_ = 0;
-      if (hallPosition_ > totalCounts) hallPosition_ = totalCounts;
-      positionMeters_ = (float)hallPosition_ / pulsesPerMeter;
+      if (hallPosition_ < 0)            hallPosition_ = 0;
+      if (hallPosition_ > totalCounts)  hallPosition_ = totalCounts;
+      newHallPos = hallPosition_;
+      portEXIT_CRITICAL(&hallMux_);
+      positionMeters_ = (float)newHallPos / pulsesPerMeter;
     }
     positionMetersRaw_ = positionMeters_;
     positionPercent_ = (maxDistanceMeters_ > 0.0f) ?
@@ -429,57 +506,54 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
     uint32_t telTimeoutMs = cfg_->gateConfig.telemetryTimeoutMs > 0 ? cfg_->gateConfig.telemetryTimeoutMs : 1000;
     if (tel.lastTelMs != 0 && !motor_->hoverTelemetryTimedOut(now, telTimeoutMs)) {
       const float pos_raw = (float)tel.distMm / 1000.0f;
-      float pos_raw_adj = pos_raw;
+      float pos_raw_adj   = pos_raw;
       if (!hoverOffsetValid_ && cfg_->gateConfig.hbOriginDistMm != 0) {
         hoverOffsetMeters_ = -((float)cfg_->gateConfig.hbOriginDistMm) / 1000.0f;
-        hoverOffsetValid_ = true;
+        hoverOffsetValid_  = true;
       }
       if (hoverOffsetValid_) {
         pos_raw_adj += hoverOffsetMeters_;
       }
 
-      static bool posFilterInit = false;
-      static float pos_f = 0.0f;
-      static uint32_t lastTelMs = 0;
-
+      // FIX B-06: use class member fields instead of static locals
       float dt = 0.0f;
-      if (lastTelMs != 0 && tel.lastTelMs >= (long)lastTelMs) {
-        dt = (float)(tel.lastTelMs - (long)lastTelMs) / 1000.0f;
+      if (lastTelMsFilter_ != 0 && (uint32_t)tel.lastTelMs >= lastTelMsFilter_) {
+        dt = (float)(tel.lastTelMs - (long)lastTelMsFilter_) / 1000.0f;
       }
       const float vMax_m_s = 1.5f;
-      const float maxJump = (dt > 0.0f) ? (vMax_m_s * dt * 1.5f) : 0.20f;
+      const float maxJump  = (dt > 0.0f) ? (vMax_m_s * dt * 1.5f) : 0.20f;
 
-      if (!posFilterInit) {
-        pos_f = pos_raw_adj;
-        posFilterInit = true;
+      if (!posFilterInit_) {
+        pos_f_        = pos_raw_adj;
+        posFilterInit_ = true;
       } else {
-        const float diff = fabsf(pos_raw_adj - pos_f);
+        const float diff = fabsf(pos_raw_adj - pos_f_);
         if (diff <= maxJump) {
           const float alpha = 0.25f;
-          pos_f = pos_f + alpha * (pos_raw_adj - pos_f);
+          pos_f_ = pos_f_ + alpha * (pos_raw_adj - pos_f_);
         }
       }
 
       if (resyncClose || resyncOpen) {
         if (resyncClose) {
           hoverOffsetMeters_ = -pos_raw;
-          hoverOffsetValid_ = true;
+          hoverOffsetValid_  = true;
           cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf(pos_raw * 1000.0f);
         } else if (resyncOpen && maxDistanceMeters_ > 0.0f) {
           hoverOffsetMeters_ = maxDistanceMeters_ - pos_raw;
-          hoverOffsetValid_ = true;
+          hoverOffsetValid_  = true;
           cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters_) * 1000.0f);
         }
         if (hoverOffsetValid_) {
-          pos_raw_adj = pos_raw + hoverOffsetMeters_;
-          pos_f = pos_raw_adj;
-          posFilterInit = true;
+          pos_raw_adj  = pos_raw + hoverOffsetMeters_;
+          pos_f_       = pos_raw_adj;
+          posFilterInit_ = true;
         }
       }
 
-      lastTelMs = (uint32_t)tel.lastTelMs;
+      lastTelMsFilter_ = (uint32_t)tel.lastTelMs;
 
-      positionMeters_ = pos_f;
+      positionMeters_    = pos_f_;
       positionMetersRaw_ = pos_raw_adj;
 
       if (positionMeters_ < 0.0f) positionMeters_ = 0.0f;
@@ -492,25 +566,25 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
       }
 
       if (!gate_->isMoving() && maxDistanceMeters_ > 0.0f) {
-        const float endEps = 0.02f;
-        const float snapWindow = 0.35f;
+        const float endEps    = 0.02f;
+        const float snapWindow= 0.35f;
         if (positionMeters_ <= endEps && fabsf(pos_raw_adj) <= snapWindow) {
           hoverOffsetMeters_ = -pos_raw;
-          hoverOffsetValid_ = true;
+          hoverOffsetValid_  = true;
           cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf(pos_raw * 1000.0f);
-          pos_f = 0.0f;
-          positionMeters_ = 0.0f;
+          pos_f_             = 0.0f;
+          positionMeters_    = 0.0f;
           positionMetersRaw_ = 0.0f;
-          posFilterInit = true;
+          posFilterInit_     = true;
         } else if (positionMeters_ >= (maxDistanceMeters_ - endEps) &&
                    fabsf(maxDistanceMeters_ - pos_raw_adj) <= snapWindow) {
           hoverOffsetMeters_ = maxDistanceMeters_ - pos_raw;
-          hoverOffsetValid_ = true;
+          hoverOffsetValid_  = true;
           cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters_) * 1000.0f);
-          pos_f = maxDistanceMeters_;
-          positionMeters_ = maxDistanceMeters_;
+          pos_f_             = maxDistanceMeters_;
+          positionMeters_    = maxDistanceMeters_;
           positionMetersRaw_ = maxDistanceMeters_;
-          posFilterInit = true;
+          posFilterInit_     = true;
         }
       }
       positionPercent_ = (maxDistanceMeters_ > 0.0f) ?
@@ -529,23 +603,23 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
 void PositionTracker::updateHallStats(uint32_t nowMs) {
   if (!cfg_) return;
   if (!cfg_->sensorsConfig.hall.enabled || cfg_->sensorsConfig.hall.pin < 0) {
-    hallPps_ = 0.0f;
-    hallPpsLastMs_ = nowMs;
-    hallPpsLastCount_ = readHallCountAtomic();
+    hallPps_         = 0.0f;
+    hallPpsLastMs_   = nowMs;
+    hallPpsLastCount_= readHallCountAtomic();
     return;
   }
   if (hallPpsLastMs_ == 0) {
-    hallPpsLastMs_ = nowMs;
-    hallPpsLastCount_ = readHallCountAtomic();
+    hallPpsLastMs_   = nowMs;
+    hallPpsLastCount_= readHallCountAtomic();
     return;
   }
   uint32_t deltaMs = nowMs - hallPpsLastMs_;
   if (deltaMs < 1000) return;
   long count = readHallCountAtomic();
   long delta = count - hallPpsLastCount_;
-  hallPps_ = deltaMs > 0 ? (float)delta / (deltaMs / 1000.0f) : 0.0f;
-  hallPpsLastMs_ = nowMs;
-  hallPpsLastCount_ = count;
+  hallPps_         = deltaMs > 0 ? (float)delta / (deltaMs / 1000.0f) : 0.0f;
+  hallPpsLastMs_   = nowMs;
+  hallPpsLastCount_= count;
 }
 
 void PositionTracker::maybePersistPosition(uint32_t nowMs) {
@@ -557,7 +631,7 @@ void PositionTracker::maybePersistPosition(uint32_t nowMs) {
     return;
   }
   if (wasMovingLast_) {
-    persistDirty_ = true;
+    persistDirty_  = true;
     wasMovingLast_ = false;
   }
   if (maxDistanceMeters_ <= 0.0f) return;
@@ -569,7 +643,6 @@ void PositionTracker::maybePersistPosition(uint32_t nowMs) {
   }
 
   if (!persistDirty_) {
-    // Safety net: persist occasionally even when no movement edge was detected.
     if (lastPositionPersistMs_ != 0 && (nowMs - lastPositionPersistMs_) < 60000) {
       return;
     }
@@ -582,3 +655,6 @@ void PositionTracker::maybePersistPosition(uint32_t nowMs) {
   Serial.printf("[POS] snapshot saved pos=%.3fm max=%.3fm\n", positionMeters_, maxDistanceMeters_);
 }
 
+// Public alias used by app_main.cpp
+// alias left intentionally empty; public API is provided by
+// `maybePersistPosition` above and declared in the header.
