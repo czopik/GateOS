@@ -1,5 +1,6 @@
 #include "wifi_manager.h"
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 WiFiManagerClass WiFiManager;
 
@@ -39,6 +40,7 @@ void WiFiManagerClass::begin(ConfigManager* cfg_) {
   firstAttempt = millis();
 
   WiFi.mode(WIFI_STA);
+  esp_wifi_set_ps(WIFI_PS_NONE);   // Disable power save — eliminates 200-500ms ping latency
   if (cfg->wifiConfig.ssid.length() > 0) {
     applyStaticIp();
     WiFi.begin(cfg->wifiConfig.ssid.c_str(), cfg->wifiConfig.password.c_str());
