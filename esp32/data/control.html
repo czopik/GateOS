@@ -8,32 +8,39 @@
   <title>GateOS - Sterowanie</title>
   <link rel="stylesheet" href="/styles.css?v=20260102">
   <style>
+    :root{
+      --vh:1dvh;
+      --content-h:calc(100 * var(--vh) - 56px); /* viewport minus topbar */
+    }
     body{
       display:flex;
       flex-direction:column;
-      min-height:100vh;
-      min-height:100dvh;
-      overflow-x:hidden;
+      height:100vh;
+      height:100dvh;
+      overflow:hidden;
     }
     .ctrl-page{
       flex:1;
       display:flex;
       flex-direction:column;
       align-items:center;
-      justify-content:center;
-      padding:16px 16px 32px;
-      gap:20px;
-      max-width:420px;
+      justify-content:space-evenly;
+      padding:clamp(4px,1.2dvh,16px) 16px clamp(6px,1.5dvh,24px);
+      gap:clamp(4px,1dvh,16px);
+      max-width:480px;
       margin:0 auto;
       width:100%;
+      overflow:hidden;
+      min-height:0;
     }
 
-    /* Gate animation */
+    /* Gate animation — fluid height */
     .gate-vis{
       width:100%;
-      max-width:320px;
-      aspect-ratio:4/3;
-      position:relative;
+      max-width:min(80vw,360px);
+      height:clamp(80px,18dvh,240px);
+      flex-shrink:1;
+      min-height:0;
     }
     .gate-vis svg{width:100%;height:100%}
 
@@ -45,11 +52,12 @@
 
     /* State label */
     .state-label{
-      font-size:22px;
+      font-size:clamp(16px,2.8dvh,24px);
       font-weight:700;
       text-transform:uppercase;
       letter-spacing:0.08em;
       text-align:center;
+      flex-shrink:0;
     }
     .state-label.opening{color:var(--accent)}
     .state-label.closing{color:var(--warn)}
@@ -60,7 +68,7 @@
 
     /* Position percentage */
     .pos-pct{
-      font-size:42px;
+      font-size:clamp(28px,6dvh,52px);
       font-weight:800;
       letter-spacing:-0.02em;
       background:linear-gradient(135deg,var(--accent),var(--accent-2));
@@ -70,16 +78,17 @@
       line-height:1;
     }
     .pos-sub{
-      font-size:13px;
+      font-size:clamp(10px,1.5dvh,14px);
       color:var(--muted);
-      margin-top:2px;
+      margin-top:1px;
       text-align:center;
     }
 
-    /* Toggle button */
+    /* Toggle button — scales with viewport */
     .toggle-gate{
-      width:130px;
-      height:130px;
+      --sz:clamp(80px,14dvh,140px);
+      width:var(--sz);
+      height:var(--sz);
       border-radius:50%;
       border:3px solid rgba(255,255,255,0.15);
       background:radial-gradient(circle at 40% 35%,rgba(61,217,182,0.25),rgba(90,169,255,0.15) 70%,transparent);
@@ -91,7 +100,7 @@
       box-shadow:0 0 40px rgba(61,217,182,0.12),0 12px 32px rgba(0,0,0,0.3);
       -webkit-tap-highlight-color:transparent;
       touch-action:manipulation;
-      position:relative;
+      flex-shrink:0;
     }
     .toggle-gate:active{
       transform:scale(0.93);
@@ -109,8 +118,8 @@
       box-shadow:0 0 40px rgba(255,107,107,0.15),0 12px 32px rgba(0,0,0,0.3);
     }
     .toggle-gate svg{
-      width:48px;
-      height:48px;
+      width:clamp(32px,5dvh,52px);
+      height:clamp(32px,5dvh,52px);
       color:var(--text);
       transition:transform 260ms ease;
     }
@@ -126,14 +135,16 @@
     /* Quick action buttons */
     .quick-actions{
       display:flex;
-      gap:12px;
+      gap:clamp(6px,1.5vw,12px);
       width:100%;
-      max-width:320px;
+      max-width:min(90vw,360px);
+      flex-shrink:0;
     }
     .quick-actions .btn{
       flex:1;
-      padding:12px 8px;
-      font-size:13px;
+      padding:clamp(8px,1.4dvh,14px) 6px;
+      font-size:clamp(11px,1.6dvh,14px);
+      border-radius:12px;
     }
 
     /* Status chips bar */
@@ -141,33 +152,39 @@
       display:flex;
       flex-wrap:wrap;
       justify-content:center;
-      gap:8px;
+      gap:6px;
       width:100%;
+      flex-shrink:0;
+    }
+    .status-bar .chip{
+      font-size:clamp(10px,1.3dvh,12px);
+      padding:4px 8px;
     }
 
     /* Compact metrics */
     .metrics-row{
       display:grid;
       grid-template-columns:repeat(3,1fr);
-      gap:8px;
+      gap:clamp(4px,1vw,8px);
       width:100%;
-      max-width:320px;
+      max-width:min(90vw,360px);
+      flex-shrink:0;
     }
     .m-item{
       text-align:center;
-      padding:10px 6px;
-      border-radius:12px;
+      padding:clamp(6px,1dvh,12px) 4px;
+      border-radius:10px;
       background:rgba(255,255,255,0.06);
       border:1px solid rgba(255,255,255,0.08);
     }
     .m-item .m-val{
-      font-size:15px;
+      font-size:clamp(12px,1.8dvh,16px);
       font-weight:700;
     }
     .m-item .m-lbl{
-      font-size:10px;
+      font-size:clamp(8px,1.1dvh,11px);
       color:var(--muted);
-      margin-top:2px;
+      margin-top:1px;
       text-transform:uppercase;
       letter-spacing:0.05em;
     }
@@ -193,14 +210,15 @@
       border-color:rgba(255,255,255,0.12);
     }
 
-    /* Progress arc (bottom of toggle button) */
+    /* Progress arc */
     .progress-arc{
       width:100%;
-      max-width:320px;
-      height:8px;
+      max-width:min(90vw,360px);
+      height:clamp(5px,0.8dvh,10px);
       border-radius:999px;
       background:rgba(255,255,255,0.08);
       overflow:hidden;
+      flex-shrink:0;
     }
     .progress-arc-fill{
       height:100%;
@@ -211,6 +229,35 @@
     }
 
     .toast{right:12px;bottom:12px;max-width:calc(100vw - 24px)}
+
+    /* Landscape: gate vis + controls side by side */
+    @media (orientation:landscape) and (max-height:500px){
+      .ctrl-page{
+        flex-direction:row;
+        flex-wrap:wrap;
+        justify-content:center;
+        align-items:center;
+        gap:clamp(4px,1vw,12px);
+        padding:4px 12px;
+      }
+      .gate-vis{
+        width:40%;
+        max-width:280px;
+        height:clamp(60px,35dvh,180px);
+      }
+      .ctrl-center{
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        gap:clamp(2px,0.8dvh,8px);
+        flex:1;
+        min-width:200px;
+      }
+      .toggle-gate{--sz:clamp(60px,20dvh,100px)}
+      .quick-actions{max-width:260px}
+      .metrics-row{max-width:260px}
+      .status-bar{order:10;width:100%}
+    }
   </style>
 </head>
 <body>
