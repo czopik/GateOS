@@ -52,12 +52,32 @@ function showToast(msg, type = 'info') {
 
 /* ---- Gate animation ---- */
 
+// Smooth SVG animation state
+const anim = { current: 0, target: 0, raf: null };
+
+function lerpGate() {
+  const diff = anim.target - anim.current;
+  if (Math.abs(diff) < 0.5) {
+    anim.current = anim.target;
+    applyGateTransform(anim.current);
+    anim.raf = null;
+    return;
+  }
+  anim.current += diff * 0.15;
+  applyGateTransform(anim.current);
+  anim.raf = requestAnimationFrame(lerpGate);
+}
+
+function applyGateTransform(pct) {
+  // pct 0 = closed (panel in place), 100 = open (panel slid right)
+  const tx = (pct / 100) * 320;
+  ui.gatePanel.setAttribute('transform', `translate(${tx},0)`);
+}
+
 function updateGateVisual(pct) {
-  // pct: 0 = fully closed, 100 = fully open
-  // Gate panel slides right to open, left to close
-  const openAmount = Math.max(0, Math.min(100, pct));
-  const translateX = (openAmount / 100) * 320; // 320 = gate panel width in SVG units
-  ui.gatePanel.style.transform = `translateX(${translateX}px)`;
+  // pct: 0 = fully closed, 100 = fully open (from firmware)
+  anim.target = Math.max(0, Math.min(100, pct));
+  if (!anim.raf) anim.raf = requestAnimationFrame(lerpGate);
 }
 
 function updateDirectionArrow(gateState) {
