@@ -9,9 +9,6 @@ const ui = {
   dirArrow: qs('dirArrow'),
   arrowShape: qs('arrowShape'),
   toggleBtn: qs('toggleBtn'),
-  openBtn: qs('openBtn'),
-  stopBtn: qs('stopBtn'),
-  closeBtn: qs('closeBtn'),
   mBat: qs('mBat'),
   mCurrent: qs('mCurrent'),
   mRpm: qs('mRpm'),
@@ -56,11 +53,9 @@ function showToast(msg, type = 'info') {
 /* ---- Gate animation ---- */
 
 function updateGateVisual(pct) {
-  // pct: 0 = fully open, 100 = fully closed
-  // Gate panel slides from right (open) to left (closed)
-  // At 0% (open): panel is shifted completely to the right (hidden)
-  // At 100% (closed): panel is in place
-  const openAmount = 100 - Math.max(0, Math.min(100, pct));
+  // pct: 0 = fully closed, 100 = fully open
+  // Gate panel slides right to open, left to close
+  const openAmount = Math.max(0, Math.min(100, pct));
   const translateX = (openAmount / 100) * 320; // 320 = gate panel width in SVG units
   ui.gatePanel.style.transform = `translateX(${translateX}px)`;
 }
@@ -112,10 +107,8 @@ function updateUI(data) {
   const pct = typeof gate.positionPercent === 'number' && gate.positionPercent >= 0
     ? Math.round(gate.positionPercent) : 0;
   state.posPercent = pct;
-  // Show "open" percentage (inverted: 0% closed = 100% open)
-  const openPct = 100 - pct;
-  if (ui.posPct.textContent !== `${openPct}%`) ui.posPct.textContent = `${openPct}%`;
-  ui.progressFill.style.width = `${openPct}%`;
+  if (ui.posPct.textContent !== `${pct}%`) ui.posPct.textContent = `${pct}%`;
+  ui.progressFill.style.width = `${pct}%`;
   updateGateVisual(pct);
   updateDirectionArrow(gateState);
 
@@ -167,9 +160,8 @@ function updateLite(data) {
   const pct = typeof data.positionPercent === 'number' && data.positionPercent >= 0
     ? Math.round(data.positionPercent) : 0;
   state.posPercent = pct;
-  const openPct = 100 - pct;
-  if (ui.posPct.textContent !== `${openPct}%`) ui.posPct.textContent = `${openPct}%`;
-  ui.progressFill.style.width = `${openPct}%`;
+  if (ui.posPct.textContent !== `${pct}%`) ui.posPct.textContent = `${pct}%`;
+  ui.progressFill.style.width = `${pct}%`;
   updateGateVisual(pct);
   updateDirectionArrow(gateState);
 
@@ -257,9 +249,6 @@ ui.toggleBtn.addEventListener('click', () => {
     sendControl('toggle');
   }
 });
-ui.openBtn.addEventListener('click', () => { vibrate(20); sendControl('open'); });
-ui.stopBtn.addEventListener('click', () => { vibrate(20); sendControl('stop'); });
-ui.closeBtn.addEventListener('click', () => { vibrate(20); sendControl('close'); });
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { fetchLite(); fetchFull(); }

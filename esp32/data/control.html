@@ -132,21 +132,6 @@
       100%{box-shadow:0 0 40px rgba(244,195,92,0.15),0 12px 32px rgba(0,0,0,0.3)}
     }
 
-    /* Quick action buttons */
-    .quick-actions{
-      display:flex;
-      gap:clamp(6px,1.5vw,12px);
-      width:100%;
-      max-width:min(90vw,360px);
-      flex-shrink:0;
-    }
-    .quick-actions .btn{
-      flex:1;
-      padding:clamp(8px,1.4dvh,14px) 6px;
-      font-size:clamp(11px,1.6dvh,14px);
-      border-radius:12px;
-    }
-
     /* Status chips bar */
     .status-bar{
       display:flex;
@@ -254,7 +239,6 @@
         min-width:200px;
       }
       .toggle-gate{--sz:clamp(60px,20dvh,100px)}
-      .quick-actions{max-width:260px}
       .metrics-row{max-width:260px}
       .status-bar{order:10;width:100%}
     }
@@ -320,7 +304,7 @@
     <!-- Position percentage -->
     <div style="text-align:center">
       <div class="pos-pct" id="posPct">--</div>
-      <div class="pos-sub">pozycja bramy</div>
+      <div class="pos-sub">otwarcia</div>
     </div>
 
     <!-- Toggle button -->
@@ -330,28 +314,6 @@
         <polygon points="10,8 16,12 10,16"/>
       </svg>
     </button>
-
-    <!-- Quick actions -->
-    <div class="quick-actions">
-      <button class="btn primary" id="openBtn" aria-label="Otworz">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px">
-          <path d="M5 12h14M12 5l7 7-7 7"/>
-        </svg>
-        Otworz
-      </button>
-      <button class="btn warn" id="stopBtn" aria-label="Stop">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px">
-          <rect x="6" y="6" width="12" height="12" rx="2"/>
-        </svg>
-        Stop
-      </button>
-      <button class="btn danger" id="closeBtn" aria-label="Zamknij">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px">
-          <path d="M19 12H5M12 5l-7 7 7 7"/>
-        </svg>
-        Zamknij
-      </button>
-    </div>
 
     <!-- Compact metrics -->
     <div class="metrics-row">
