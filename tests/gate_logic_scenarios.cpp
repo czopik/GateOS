@@ -8,11 +8,27 @@ namespace {
 struct ScenarioGate {
   GateDecisionContext ctx;
 
+  std::string commandToggle() {
+    if (ctx.moving) {
+      // User manually stopped during movement — set the flag
+      // so the next toggle reverses direction.
+      ctx.userStoppedDuringMove = true;
+      ctx.moving = false;
+      ctx.pendingStop = false;
+      return "stop";
+    }
+    GateMoveDirection dir = resolveToggleDirection(ctx);
+    if (dir == GateMoveDirection::Open) return commandOpen();
+    if (dir == GateMoveDirection::Close) return commandClose();
+    return "blocked";
+  }
+
   std::string commandOpen() {
     GateMoveBlockReason block = validateMoveDirection(ctx, GateMoveDirection::Open);
     if (block != GateMoveBlockReason::None) return "blocked";
     ctx.moving = true;
     ctx.pendingStop = false;
+    ctx.userStoppedDuringMove = false;
     ctx.lastDirection = 1;
     ctx.terminalState = GateTerminalState::Unknown;
     return "open";
@@ -23,21 +39,10 @@ struct ScenarioGate {
     if (block != GateMoveBlockReason::None) return "blocked";
     ctx.moving = true;
     ctx.pendingStop = false;
+    ctx.userStoppedDuringMove = false;
     ctx.lastDirection = -1;
     ctx.terminalState = GateTerminalState::Unknown;
     return "close";
-  }
-
-  std::string commandToggle() {
-    if (ctx.moving) {
-      ctx.moving = false;
-      ctx.pendingStop = false;
-      return "stop";
-    }
-    GateMoveDirection dir = resolveToggleDirection(ctx);
-    if (dir == GateMoveDirection::Open) return commandOpen();
-    if (dir == GateMoveDirection::Close) return commandClose();
-    return "blocked";
   }
 
   std::string obstacleTrip() {
@@ -50,6 +55,7 @@ struct ScenarioGate {
   void limitOpenHit() {
     ctx.moving = false;
     ctx.pendingStop = false;
+    ctx.userStoppedDuringMove = false;
     ctx.limitOpenActive = true;
     ctx.limitCloseActive = false;
     ctx.terminalState = GateTerminalState::FullyOpen;
@@ -60,6 +66,7 @@ struct ScenarioGate {
   void limitCloseHit() {
     ctx.moving = false;
     ctx.pendingStop = false;
+    ctx.userStoppedDuringMove = false;
     ctx.limitOpenActive = false;
     ctx.limitCloseActive = true;
     ctx.terminalState = GateTerminalState::FullyClosed;
@@ -222,6 +229,43 @@ int main() {
     gate.ctx.lastDirection = -1;
     ok = ok && gate.commandToggle() == "open";
     results.push_back(expect(ok, "mid_position_toggle_flips_last_direction", "toggle from mid-travel prefers opposite of previous move"));
+  }
+
+  // --- Problem 2 regression test: user stops near endpoint then toggles ---
+  // The gate should REVERSE even if still within 1cm of the open endpoint.
+  {
+    ScenarioGate gate;
+    gate.ctx.maxDistance = 5.0f;
+    // Gate is fully open, user presses toggle -> starts closing
+    gate.limitOpenHit();
+    gate.releaseLimits();
+    bool ok = gate.commandToggle() == "close";
+    // Gate is closing, position barely moved (still near open end)
+    gate.ctx.position = 4.995f;  // within 0.01m of maxDistance
+    // User presses toggle -> stops
+    ok = ok && gate.commandToggle() == "stop";
+    // User presses toggle again -> should REVERSE to open (not continue closing!)
+    ok = ok && gate.commandToggle() == "open";
+    results.push_back(expect(ok, "user_stop_near_open_reverses",
+      "after user stop near open endpoint during closing, toggle must reverse to open"));
+  }
+
+  // Same test near the closed endpoint
+  {
+    ScenarioGate gate;
+    gate.ctx.maxDistance = 5.0f;
+    // Gate is fully closed, user presses toggle -> starts opening
+    gate.limitCloseHit();
+    gate.releaseLimits();
+    bool ok = gate.commandToggle() == "open";
+    // Gate is opening, position barely moved (still near closed end)
+    gate.ctx.position = 0.005f;  // within 0.01m of 0
+    // User presses toggle -> stops
+    ok = ok && gate.commandToggle() == "stop";
+    // User presses toggle again -> should REVERSE to close (not continue opening!)
+    ok = ok && gate.commandToggle() == "close";
+    results.push_back(expect(ok, "user_stop_near_closed_reverses",
+      "after user stop near closed endpoint during opening, toggle must reverse to close"));
   }
 
   bool allOk = true;

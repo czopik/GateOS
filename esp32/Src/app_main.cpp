@@ -1756,6 +1756,8 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
   }
 
   config.load();
+  Serial.printf("[CFG_APPLY] after load: gate.maxDistance=%.3f gate.position=%.3f\n",
+                config.gateConfig.maxDistance, config.gateConfig.position);
   setupInputs();
   updateHallAttachment();
 

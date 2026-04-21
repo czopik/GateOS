@@ -188,6 +188,9 @@ private:
   GateErrorCode errorCode = GATE_ERR_NONE;
   float lastProgressPos = 0.0f;
   float controlPosition = 0.0f;
+  // Set when the user manually stops the gate during movement.
+  // Cleared when a new movement starts or gate reaches an endpoint.
+  bool userStoppedDuringMove_ = false;
   uint8_t stopConfirmCount = 0;
   uint32_t lastStopTelMs = 0;
   int lastFinalErrorMm = 0;

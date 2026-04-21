@@ -33,6 +33,7 @@ GateDecisionContext GateController::decisionContext() const {
   ctx.position = status.position;
   ctx.maxDistance = configuredMaxDistance();
   ctx.lastDirection = lastDirection;
+  ctx.userStoppedDuringMove = userStoppedDuringMove_;
   return ctx;
 }
 
@@ -408,6 +409,8 @@ bool GateController::startMove(GateMoveDirection dir, float target, GateState ne
   const bool forward = dir == GateMoveDirection::Open;
   moving = true;
   pendingStop = false;
+  // Clear the user-stop flag — a new movement is starting.
+  userStoppedDuringMove_ = false;
   setState(nextState);
   lastDirection = forward ? 1 : -1;
   setTerminalState(GateTerminalState::Unknown);
@@ -448,6 +451,15 @@ void GateController::stop(GateStopReason reason) {
   if ((pendingStop || !moving) && reason != GATE_STOP_NONE && status.lastStopReason == reason) {
     return;
   }
+
+  // Track whether the user manually stopped the gate during movement.
+  // This flag is used by resolveToggleDirection() to force direction
+  // reversal on the next toggle — even if the gate is near an endpoint.
+  if (reason == GATE_STOP_USER && moving) {
+    userStoppedDuringMove_ = true;
+    Serial.printf("[GATE] userStoppedDuringMove set, lastDir=%d\n", lastDirection);
+  }
+
 #if defined(GATE_DEBUG_UART)
   Serial.printf("[GATE] STOP requested reason=%s state=%s pos=%.3fm target=%.3fm\n",
                 getStopReasonString(reason),
@@ -522,6 +534,8 @@ void GateController::stop(GateStopReason reason) {
     if (motor) {
       motor->stopHard();
     }
+    // Gate reached a physical limit — position is authoritative.
+    userStoppedDuringMove_ = false;
     moving = false;
     pendingStop = false;
     lastProgressMs = 0;
@@ -552,6 +566,8 @@ void GateController::stop(GateStopReason reason) {
     } else if (state == GATE_CLOSING && (limitCloseActive || gateNearClosed(ctx, 0.02f))) {
       setTerminalState(GateTerminalState::FullyClosed);
     }
+    // Gate reached an endpoint — position is authoritative, clear user-stop flag.
+    userStoppedDuringMove_ = false;
     moving = false;
     pendingStop = false;
     lastProgressMs = 0;
@@ -1079,7 +1095,12 @@ GateCommandResponse GateController::handleCommand(const char* cmd) {
       return resp;
     }
 
-    const GateMoveDirection dir = resolveToggleDirection(decisionContext());
+    const GateDecisionContext ctx = decisionContext();
+    const GateMoveDirection dir = resolveToggleDirection(ctx);
+    Serial.printf("[GATE] toggle: pos=%.3f max=%.3f lastDir=%d userStopped=%d terminal=%d -> dir=%d\n",
+                  ctx.position, ctx.maxDistance, ctx.lastDirection,
+                  ctx.userStoppedDuringMove ? 1 : 0,
+                  (int)ctx.terminalState, (int)dir);
     bool ok = false;
     if (dir == GateMoveDirection::Open) {
       ok = open();

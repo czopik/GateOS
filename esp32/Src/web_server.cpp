@@ -341,6 +341,13 @@ void WebServerManager::setupRoutes() {
 
     const int previousWebPort = cfg ? cfg->deviceConfig.webPort : 80;
     ConfigManager updated = *cfg;
+    // FIX: Clear saveAllowedCb on the copy so the web API save always
+    // writes immediately.  The deferred-save mechanism is meant for
+    // runtime position saves, not for user-initiated config changes.
+    // Without this, if the gate happens to be moving the save is
+    // silently deferred on this LOCAL copy (which is destroyed after
+    // the request), causing the new config to be lost.
+    updated.setSaveAllowedCallback(nullptr);
     String err;
     if (!updated.validate(root, err)) {
       sendSchemaError(request, err);
@@ -350,10 +357,12 @@ void WebServerManager::setupRoutes() {
       request->send(400, "application/json", "{\"status\":\"bad_payload\"}");
       return;
     }
+    Serial.printf("[CFG_SAVE] web POST: gate.maxDistance=%.3f\n", updated.gateConfig.maxDistance);
     if (!updated.save(nullptr)) {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"fs_write_failed\"}");
       return;
     }
+    Serial.printf("[CFG_SAVE] web POST: save OK, scheduling apply\n");
     cfg->adoptPersistenceMetaFrom(updated);
     if (updated.deviceConfig.webPort != previousWebPort) {
       char response[128];

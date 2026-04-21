@@ -142,7 +142,30 @@ void PositionTracker::initializeFromConfig() {
 
   lastPersistedPosition_  = positionMeters_;
   lastPositionPersistMs_  = millis();
+
+  // FIX: Save config's maxDistance BEFORE loading snapshot.
+  // config.json is the authoritative source for maxDistance;
+  // the position snapshot may contain a stale value from before
+  // the last settings change.  Only restore position from snapshot.
+  const float configMaxDistance = maxDistanceMeters_;
   loadPositionSnapshot();
+  // Re-apply config's maxDistance — it always takes precedence.
+  const float snapshotMaxDistance = maxDistanceMeters_;
+  if (configMaxDistance > 0.0f) {
+    maxDistanceMeters_ = configMaxDistance;
+  }
+  if (fabsf(snapshotMaxDistance - configMaxDistance) > 0.001f) {
+    Serial.printf("[POS] initFromConfig: config maxDistance=%.3fm snapshot had=%.3fm -> using config\n",
+                  configMaxDistance, snapshotMaxDistance);
+  }
+  // Clamp position to the authoritative maxDistance
+  if (maxDistanceMeters_ > 0.0f && positionMeters_ > maxDistanceMeters_) {
+    positionMeters_ = maxDistanceMeters_;
+  }
+  positionMetersRaw_ = positionMeters_;
+  // Immediately persist the snapshot so it reflects the current config maxDistance,
+  // preventing stale values from surviving future restarts.
+  savePositionSnapshot();
   syncConfigPosition();
   syncGatePosition();
 }

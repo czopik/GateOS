@@ -429,6 +429,9 @@ void ConfigManager::load() {
     return;
   }
 
+  Serial.printf("[CFG_LOAD] gate.maxDistance=%.3f gate.totalDistance=%.3f gate.position=%.3f\n",
+                gateConfig.maxDistance, gateConfig.totalDistance, gateConfig.position);
+
   // If API security is enabled but no token is set, generate a token and persist it.
   if (securityConfig.enabled && securityConfig.apiToken.length() == 0) {
     const char* hex = "0123456789abcdef";
