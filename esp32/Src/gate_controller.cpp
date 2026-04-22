@@ -123,16 +123,21 @@ void GateController::loop() {
       lastProgressMs = millis();
     }
     const bool softLimitsEnabled = cfg ? cfg->gateConfig.softLimitsEnabled : true;
-        const float softLimitEpsM = 0.02f;
-        if (!pendingStop && softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && status.position >= (status.maxDistance - softLimitEpsM)) {
+    // Hover motors need a larger margin: after emergencyStop the motor still decelerates
+    // over ~10-20 cm before stopping. 20 cm gives room to stop at the physical limit switch.
+    const bool isHoverMotor = motor && motor->isHoverUart() && motor->hoverEnabled();
+    const float softLimitEpsM = isHoverMotor ? 0.20f : 0.02f;
+    // Use raw controlPosition (less filter lag) so the check fires closer to true position.
+    const float posCheck = controlPosition;
+        if (!pendingStop && softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && posCheck >= (status.maxDistance - softLimitEpsM)) {
 #if defined(GATE_DEBUG_UART)
-      Serial.printf("[GATE] soft-limit OPEN reached pos=%.3fm max=%.3fm -> stop()\n", status.position, status.maxDistance);
+      Serial.printf("[GATE] soft-limit OPEN reached raw=%.3fm filt=%.3fm max=%.3fm eps=%.3fm -> stop()\n", controlPosition, status.position, status.maxDistance, softLimitEpsM);
 #endif
       stop(GATE_STOP_SOFT_LIMIT);
     }
-        if (!pendingStop && softLimitsEnabled && state == GATE_CLOSING && status.position <= softLimitEpsM) {
+        if (!pendingStop && softLimitsEnabled && state == GATE_CLOSING && posCheck <= softLimitEpsM) {
 #if defined(GATE_DEBUG_UART)
-      Serial.printf("[GATE] soft-limit CLOSE reached pos=%.3fm -> stop()\n", status.position);
+      Serial.printf("[GATE] soft-limit CLOSE reached raw=%.3fm filt=%.3fm eps=%.3fm -> stop()\n", controlPosition, status.position, softLimitEpsM);
 #endif
       stop(GATE_STOP_SOFT_LIMIT);
     }
@@ -572,10 +577,10 @@ void GateController::stop(GateStopReason reason) {
 
   if (reason == GATE_STOP_SOFT_LIMIT) {
     if (motor) {
-      motor->stopSoft();
-      if (motor->isHoverUart()) {
-        motor->hoverDisarm();
-      }
+      // Use stopHard (emergencyStop → speed=0, regenerative braking) instead of
+      // stopSoft+hoverDisarm. Disarming causes coasting; regenerative braking stops
+      // the gate much faster, preventing overshoot past the physical limit switch.
+      motor->stopHard();
     }
     const GateDecisionContext ctx = decisionContext();
     if (state == GATE_OPENING && (limitOpenActive || gateNearOpen(ctx, 0.02f))) {
@@ -815,7 +820,8 @@ void GateController::setPosition(float position, float maxDistance) {
 
   if (moving) {
     const bool softLimitsEnabled = cfg ? cfg->gateConfig.softLimitsEnabled : true;
-    const float softLimitEpsM = 0.02f;
+    const bool isHoverMotor = motor && motor->isHoverUart() && motor->hoverEnabled();
+    const float softLimitEpsM = isHoverMotor ? 0.20f : 0.02f;
     if (softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && status.position >= (status.maxDistance - softLimitEpsM)) {
       stop(GATE_STOP_SOFT_LIMIT);
       return;
