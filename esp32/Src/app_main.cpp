@@ -553,7 +553,7 @@ static void runStartupHoming(uint32_t nowMs) {
   }
 
   if (!startupHomingEnabled || !gate || calibration.isRunning()) return;
-  if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 5000) {
+  if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 15000) {
     logStartupHomingDiag("loop", nowMs, "tick");
     lastDiagMs = nowMs;
   }
@@ -617,7 +617,7 @@ static void runStartupHoming(uint32_t nowMs) {
         setStartupSafetyState(false, false, "startup_tel_missing_retry");
         setHomingResult("pending", "startup_tel_missing_retry");
         homingChecked = false;
-        if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 10000) {
+        if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 30000) {
           Serial.println("[HOMING] startup telemetry missing -> keep waiting/retrying");
           lastDiagMs = nowMs;
         }
@@ -981,7 +981,8 @@ void mqttPublishPosition() {
 void logSummary1Hz() {
   static unsigned long lastLogMs = 0;
   unsigned long now = millis();
-  if (now - lastLogMs < 5000) return;
+  const uint32_t logIntervalMs = (!startupPositionCertain && !homingActive) ? 15000 : 5000;
+  if (now - lastLogMs < logIntervalMs) return;
   lastLogMs = now;
   const WebRuntimeStats ws = webserver.runtimeStats();
   const bool wifiConnected = WiFiManager.isConnected();
@@ -1274,7 +1275,7 @@ void updatePositionPercent() {
       ? (int)((synthetic * 100.0f) / maxD + 0.5f)
       : -1;
     const uint32_t nowMs = millis();
-    if (startupSyntheticUiLogMs == 0 || (nowMs - startupSyntheticUiLogMs) > 10000) {
+    if (startupSyntheticUiLogMs == 0 || (nowMs - startupSyntheticUiLogMs) > 30000) {
       startupSyntheticUiLogMs = nowMs;
       Serial.printf("[HOMING_TMP_POS] apply mode=temp_100mm pos=%.3fm posRaw=%.3fm pct=%d active=%d certain=%d\n",
                     positionMeters,
