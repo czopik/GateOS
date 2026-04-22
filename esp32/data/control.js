@@ -293,5 +293,5 @@ document.addEventListener('visibilitychange', () => {
 fetchFull();
 fetchLite();
 setInterval(fetchLite, 500);
-setInterval(fetchFull, 2000);
+setInterval(fetchFull, 10000);
 connectWs();

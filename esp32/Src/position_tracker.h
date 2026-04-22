@@ -20,7 +20,6 @@ public:
   void updateHallAttachment(bool calibrationRunning);
   void updatePosition(bool calibrationRunning);
   void updateHallStats(uint32_t nowMs);
-  void maybePersistPosition(uint32_t nowMs);
 
   float positionMeters() const { return positionMeters_; }
   float positionMetersRaw() const { return positionMetersRaw_; }
@@ -38,8 +37,6 @@ private:
   int parsePullMode(const String& mode) const;
   void syncConfigPosition();
   void syncGatePosition();
-  bool loadPositionSnapshot();
-  bool savePositionSnapshot();
 
   ConfigManager* cfg_ = nullptr;
   MotorController* motor_ = nullptr;
@@ -68,10 +65,6 @@ private:
   float hoverOffsetMeters_ = 0.0f;
   bool hoverOffsetValid_ = false;
   float maxDistanceMeters_ = 0.0f;
-  unsigned long lastPositionPersistMs_ = 0;
-  float lastPersistedPosition_ = -1.0f;
-  bool wasMovingLast_ = false;
-  bool persistDirty_ = false;
 
   bool resyncAtOpenLimit_ = false;
   bool resyncAtCloseLimit_ = false;

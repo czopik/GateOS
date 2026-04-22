@@ -174,7 +174,20 @@ void CalibrationManager::updateStep() {
   switch (step) {
     case CAL_WAIT_SAFE:
       if (now - stepStartMs >= kWaitSafeMs) {
-        setStep(CAL_DETECT_LIMIT_OPEN, "Nacisnij krancowke OPEN");
+        // Requested flow: one-click auto calibration from OPEN limit to CLOSE limit.
+        if (!limitOpen.present || !limitClose.present) {
+          setError("limits_required");
+          break;
+        }
+        if (!isActive(limitOpen)) {
+          setError("start_on_open_required");
+          break;
+        }
+        if (isActive(limitClose)) {
+          setError("limits_invalid_state");
+          break;
+        }
+        setStep(CAL_MOVE_TO_CLOSE, "Kalibracja: przejazd OPEN -> CLOSE");
       }
       break;
 
@@ -278,22 +291,21 @@ void CalibrationManager::updateStep() {
       break;
 
     case CAL_MOVE_TO_CLOSE: {
-      if (!limitClose.present) {
-        setStep(CAL_MOVE_TO_OPEN, "Przejazd do OPEN");
-        break;
-      }
-      if (isActive(limitClose)) {
-        setStep(CAL_MOVE_TO_OPEN, "Przejazd do OPEN");
-        break;
-      }
       if (moveMode == MOVE_NONE) {
+        if (isActive(limitClose)) {
+          setError("already_at_close");
+          break;
+        }
         int duty = cfg->motorConfig.pwmMax;
-        unsigned long maxMs = max(10000UL, cfg->gateConfig.movementTimeout / 2);
+        unsigned long maxMs = max(10000UL, cfg->gateConfig.startupHomingTimeoutMs);
         startMove(false, MOVE_TO_LIMIT, maxMs, 0, duty);
       }
       if (!moveActive) {
         if (moveHitClose) {
-          setStep(CAL_MOVE_TO_OPEN, "Przejazd do OPEN");
+          travelMs = millis() - moveStartMs;
+          travelPulses = labs(hallCount - hallCountStart);
+          computeDistanceAndTimeout();
+          setStep(CAL_COMPLETE, "Kalibracja zakonczona");
         } else if (moveTimedOut) {
           setError("timeout_close");
         }
@@ -400,11 +412,25 @@ void CalibrationManager::startMove(bool openDir, MoveMode mode, unsigned long ma
   hallCountStart = hallCount;
 
   motor->setDirection(openDir);
+  if (motor->isHoverUart()) {
+    motor->hoverArm();
+    motor->setHoverTargetSpeed((int16_t)(openDir ? duty : -duty));
+    Serial.printf("CAL: hover move start dir=%s speed=%d maxMs=%lu\n",
+                  openDir ? "open" : "close",
+                  openDir ? duty : -duty,
+                  maxMs);
+    return;
+  }
   motor->rampTo(duty, 200);
 }
 
 void CalibrationManager::stopMotor() {
   if (!motor) return;
+  if (motor->isHoverUart()) {
+    motor->setHoverTargetSpeed(0);
+    motor->hoverDisarm();
+    return;
+  }
   motor->rampTo(0, 200);
 }
 
@@ -715,8 +741,8 @@ void CalibrationManager::fillStatus(JsonObject& out) const {
   out["limitClose"] = limitClose.present && isActive(limitClose);
   out["limitOpen"] = limitOpen.present && isActive(limitOpen);
   long positionMm = 0;
-  if (cfg) {
-    positionMm = lroundf(cfg->gateConfig.position * 1000.0f);
+  if (gate) {
+    positionMm = lroundf(gate->getPosition() * 1000.0f);
     if (positionMm < 0) positionMm = 0;
   }
   out["positionMm"] = positionMm;

@@ -245,7 +245,7 @@ async function loadStatus() {
 function startStatusPollingOnce() {
   if (statusIntervalStarted) return;
   statusIntervalStarted = true;
-  setInterval(loadStatus, 2000);
+  setInterval(loadStatus, 5000);
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -369,12 +369,6 @@ function collectConfig() {
       delete cfg.led.segments;
     }
   }
-  if (cfg.gate && typeof cfg.gate.maxDistance === 'number') {
-    if (typeof cfg.gate.position === 'number') {
-      if (cfg.gate.position < 0) cfg.gate.position = 0;
-      if (cfg.gate.position > cfg.gate.maxDistance) cfg.gate.position = cfg.gate.maxDistance;
-    }
-  }
   return cfg;
 }
 
@@ -420,6 +414,16 @@ function validateLocal(cfg) {
       showToast('Gate position poza zakresem maxDistance');
       ok = false;
     }
+  }
+  const startupHomingTimeoutMs = cfg.gate?.startupHomingTimeoutMs;
+  if (startupHomingTimeoutMs !== undefined && (startupHomingTimeoutMs < 5000 || startupHomingTimeoutMs > 300000)) {
+    setError('gate.startupHomingTimeoutMs', 'Timeout homingu 5000-300000 ms');
+    ok = false;
+  }
+  const homingScalePercent = cfg.gate?.homingScalePercent;
+  if (homingScalePercent !== undefined && (homingScalePercent < 5 || homingScalePercent > 100)) {
+    setError('gate.homingScalePercent', 'Skala homingu 5-100%');
+    ok = false;
   }
   const qos = cfg.mqtt?.qos ?? 0;
   if (qos < 0 || qos > 2) {

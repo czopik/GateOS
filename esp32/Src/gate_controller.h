@@ -193,6 +193,8 @@ private:
   bool userStoppedDuringMove_ = false;
   uint8_t stopConfirmCount = 0;
   uint32_t lastStopTelMs = 0;
+  uint32_t pendingStopStartMs = 0;
+  uint32_t pendingStopStableSinceMs = 0;
   int lastFinalErrorMm = 0;
   uint32_t overCurrentSinceMs = 0;
   uint32_t overCurrentCooldownUntilMs = 0;

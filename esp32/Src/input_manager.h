@@ -43,6 +43,7 @@ private:
   };
 
   int parsePullMode(const String& mode) const;
+  bool limitsReady(uint32_t nowMs) const;
 
   DebouncedInput limitOpenInput;
   DebouncedInput limitCloseInput;
@@ -50,6 +51,7 @@ private:
   DebouncedInput obstacleInput;
   DebouncedInput buttonInput;
 
+  unsigned long inputsReadyAtMs = 0;
   unsigned long limitsInvalidSinceMs = 0;
   bool limitsInvalidLatched = false;
 };

@@ -24,7 +24,7 @@ void MqttManager::applyConfig(const MQTTConfig& cfgIn) {
   }
 
   client.setServer(cfg.server.c_str(), cfg.port);
-  client.setSocketTimeout(2);
+  client.setSocketTimeout(1);
   client.disconnect();
   resetStatus();
   lastErrorMsg = "";
@@ -163,7 +163,7 @@ bool MqttManager::ensureConnected() {
     return false;
   }
   unsigned long now = millis();
-  if (now - lastConnectAttemptMs < 1500) return false;
+  if (now - lastConnectAttemptMs < 8000) return false;
   lastConnectAttemptMs = now;
   return connectNow();
 }

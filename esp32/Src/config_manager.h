@@ -8,6 +8,7 @@
 // ConfigManager - persistent JSON config stored in LittleFS (/config.json)
 static constexpr const char* CONFIG_PATH = "/config.json";
 static constexpr const char* CONFIG_TMP_PATH = "/config.tmp";
+static constexpr const char* CONFIG_BAK_PATH = "/config.bak";
 static constexpr int CONFIG_VERSION = 1;
 static constexpr size_t CONFIG_JSON_CAPACITY = 16384;
 
@@ -19,9 +20,11 @@ struct GateConfig {
   float wheelCircumference = 0.132f;
   int pulsesPerRevolution = 12;
   unsigned long movementTimeout = 30000;
+  unsigned long startupHomingTimeoutMs = 90000;
   unsigned long stallTimeoutMs = 1500;
   unsigned long telemetryTimeoutMs = 1200;
   unsigned long telemetryGraceMs = 1500;
+  int homingScalePercent = 30;
   bool softLimitsEnabled = true;
   float currentLimitA = 0.0f;
   // Over-current protection (hover telemetry current iA)

@@ -1,22 +1,9 @@
-// ============================================================
-//  GateOS — position_tracker.cpp  (PATCHED 2026-04-17)
-//  Fixes applied:
-//    B-02  hallPosition_ / hallCountLast_ access now protected
-//          by portENTER_CRITICAL / portEXIT_CRITICAL in all
-//          loop-context call sites (ISR already had critical).
-//    B-06  Hover position filter state moved from static-local
-//          variables inside updatePosition() to class member
-//          fields: posFilterInit_, pos_f_, lastTelMsFilter_.
-//          They are reset explicitly in initializeFromConfig()
-//          so a second call (after OTA / soft-reset / config
-//          reload) always starts with a clean state.
-//    B-07  Snapshot atomic write: write to /position.tmp then
-//          rename to /position.bin (LittleFS rename is atomic).
-// ============================================================
 #include "position_tracker.h"
 
 #include <math.h>
 #include <stdint.h>
+
+#include <LittleFS.h>
 
 #include "motor_controller.h"
 #include "gate_controller.h"
@@ -25,47 +12,7 @@ PositionTracker* PositionTracker::instance_ = nullptr;
 
 namespace {
 static constexpr const char* kPositionSnapshotPath = "/position.bin";
-static constexpr const char* kPositionSnapshotTmpPath = "/position.tmp";  // FIX B-07
-
-#pragma pack(push, 1)
-struct PositionSnapshot {
-  float    position;
-  float    maxDistance;
-  uint32_t crc;
-};
-#pragma pack(pop)
-
-uint32_t crc32Calc(const uint8_t* data, size_t len) {
-  uint32_t crc = 0xFFFFFFFFu;
-  for (size_t i = 0; i < len; ++i) {
-    crc ^= data[i];
-    for (int b = 0; b < 8; ++b) {
-      const uint32_t mask = -(crc & 1u);
-      crc = (crc >> 1) ^ (0xEDB88320u & mask);
-    }
-  }
-  return ~crc;
-}
-
-bool hasSnapshotFile() {
-  File root = LittleFS.open("/");
-  if (!root || !root.isDirectory()) {
-    if (root) root.close();
-    return false;
-  }
-  File entry = root.openNextFile();
-  while (entry) {
-    const String name = entry.name();
-    entry.close();
-    if (name == kPositionSnapshotPath || name == "position.bin") {
-      root.close();
-      return true;
-    }
-    entry = root.openNextFile();
-  }
-  root.close();
-  return false;
-}
+static constexpr const char* kPositionSnapshotTmpPath = "/position.tmp";
 } // namespace
 
 void PositionTracker::begin(ConfigManager* cfg, MotorController* motor, GateController* gate) {
@@ -102,7 +49,6 @@ long PositionTracker::readAndConsumeHallDeltaAtomic() {
 
 void PositionTracker::syncConfigPosition() {
   if (!cfg_) return;
-  cfg_->gateConfig.position    = positionMeters_;
   cfg_->gateConfig.maxDistance = maxDistanceMeters_;
   cfg_->gateConfig.totalDistance = maxDistanceMeters_;
 }
@@ -119,11 +65,7 @@ void PositionTracker::initializeFromConfig() {
     cfg_->gateConfig.maxDistance : cfg_->gateConfig.totalDistance;
   if (maxDistanceMeters_ < 0.0f) maxDistanceMeters_ = 0.0f;
 
-  positionMeters_ = cfg_->gateConfig.position;
-  if (positionMeters_ < 0.0f) positionMeters_ = 0.0f;
-  if (maxDistanceMeters_ > 0.0f && positionMeters_ > maxDistanceMeters_) {
-    positionMeters_ = maxDistanceMeters_;
-  }
+  positionMeters_ = 0.0f;
   positionMetersRaw_ = positionMeters_;
 
   if (cfg_->gateConfig.positionSource == "hoverboard_tel") {
@@ -140,102 +82,11 @@ void PositionTracker::initializeFromConfig() {
   pos_f_           = 0.0f;
   lastTelMsFilter_ = 0;
 
-  lastPersistedPosition_  = positionMeters_;
-  lastPositionPersistMs_  = millis();
+  LittleFS.remove(kPositionSnapshotPath);
+  LittleFS.remove(kPositionSnapshotTmpPath);
 
-  // FIX: Save config's maxDistance BEFORE loading snapshot.
-  // config.json is the authoritative source for maxDistance;
-  // the position snapshot may contain a stale value from before
-  // the last settings change.  Only restore position from snapshot.
-  const float configMaxDistance = maxDistanceMeters_;
-  loadPositionSnapshot();
-  // Re-apply config's maxDistance — it always takes precedence.
-  const float snapshotMaxDistance = maxDistanceMeters_;
-  if (configMaxDistance > 0.0f) {
-    maxDistanceMeters_ = configMaxDistance;
-  }
-  if (fabsf(snapshotMaxDistance - configMaxDistance) > 0.001f) {
-    Serial.printf("[POS] initFromConfig: config maxDistance=%.3fm snapshot had=%.3fm -> using config\n",
-                  configMaxDistance, snapshotMaxDistance);
-  }
-  // Clamp position to the authoritative maxDistance
-  if (maxDistanceMeters_ > 0.0f && positionMeters_ > maxDistanceMeters_) {
-    positionMeters_ = maxDistanceMeters_;
-  }
-  positionMetersRaw_ = positionMeters_;
-  // Immediately persist the snapshot so it reflects the current config maxDistance,
-  // preventing stale values from surviving future restarts.
-  savePositionSnapshot();
   syncConfigPosition();
   syncGatePosition();
-}
-
-bool PositionTracker::loadPositionSnapshot() {
-  if (!hasSnapshotFile()) return false;
-  File f = LittleFS.open(kPositionSnapshotPath, "r");
-  if (!f) return false;
-  PositionSnapshot snap{};
-  if (f.read(reinterpret_cast<uint8_t*>(&snap), sizeof(snap)) != sizeof(snap)) {
-    f.close();
-    return false;
-  }
-  f.close();
-  uint32_t crc = crc32Calc(reinterpret_cast<const uint8_t*>(&snap), sizeof(snap) - sizeof(snap.crc));
-  if (crc != snap.crc) {
-    Serial.println("[POS] snapshot CRC mismatch");
-    return false;
-  }
-  if (snap.maxDistance > 0.0f) {
-    maxDistanceMeters_ = snap.maxDistance;
-  }
-  if (snap.position >= 0.0f) {
-    positionMeters_ = snap.position;
-  }
-  if (maxDistanceMeters_ > 0.0f && positionMeters_ > maxDistanceMeters_) {
-    positionMeters_ = maxDistanceMeters_;
-  }
-  positionMetersRaw_ = positionMeters_;
-  positionPercent_ = maxDistanceMeters_ > 0.0f ?
-    (int)((positionMeters_ * 100.0f) / maxDistanceMeters_ + 0.5f) : -1;
-  lastPersistedPosition_ = positionMeters_;
-  Serial.printf("[POS] snapshot loaded pos=%.3fm max=%.3fm\n", positionMeters_, maxDistanceMeters_);
-  return true;
-}
-
-bool PositionTracker::savePositionSnapshot() {
-  // FIX B-07: atomic write-then-rename pattern.
-  //           LittleFS guarantees that rename() is atomic, so a power
-  //           loss during the write only corrupts /position.tmp — the
-  //           last good /position.bin is preserved.
-  if (maxDistanceMeters_ <= 0.0f) return false;
-  PositionSnapshot snap{};
-  snap.position    = positionMeters_;
-  snap.maxDistance = maxDistanceMeters_;
-  snap.crc = crc32Calc(reinterpret_cast<const uint8_t*>(&snap), sizeof(snap) - sizeof(snap.crc));
-
-  // 1. Write to temporary file
-  File f = LittleFS.open(kPositionSnapshotTmpPath, "w");
-  if (!f) return false;
-  bool ok = f.write(reinterpret_cast<const uint8_t*>(&snap), sizeof(snap)) == sizeof(snap);
-  f.flush();
-  f.close();
-  if (!ok) {
-    LittleFS.remove(kPositionSnapshotTmpPath);
-    return false;
-  }
-
-  // 2. Atomic rename tmp -> final
-  if (LittleFS.exists(kPositionSnapshotPath)) {
-    LittleFS.remove(kPositionSnapshotPath);
-  }
-  if (!LittleFS.rename(kPositionSnapshotTmpPath, kPositionSnapshotPath)) {
-    return false;
-  }
-
-  lastPersistedPosition_ = positionMeters_;
-  lastPositionPersistMs_ = millis();
-  persistDirty_          = false;
-  return true;
 }
 
 bool PositionTracker::applyMaxDistance(float value, bool persist) {
@@ -272,8 +123,6 @@ bool PositionTracker::applyMaxDistance(float value, bool persist) {
       Serial.printf("maxDistance save failed: %s\n", err.c_str());
       return false;
     }
-    lastPersistedPosition_ = positionMeters_;
-    lastPositionPersistMs_ = millis();
   }
   return true;
 }
@@ -344,8 +193,6 @@ bool PositionTracker::calibrateToMode(const char* mode, bool calibrationRunning)
     Serial.printf("calibrate save failed: %s\n", err.c_str());
     return false;
   }
-  lastPersistedPosition_ = positionMeters_;
-  lastPositionPersistMs_ = millis();
   return true;
 }
 
@@ -529,6 +376,12 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
     uint32_t telTimeoutMs = cfg_->gateConfig.telemetryTimeoutMs > 0 ? cfg_->gateConfig.telemetryTimeoutMs : 1000;
     if (tel.lastTelMs != 0 && !motor_->hoverTelemetryTimedOut(now, telTimeoutMs)) {
       const float pos_raw = (float)tel.distMm / 1000.0f;
+      if (!isfinite(pos_raw)) {
+        syncConfigPosition();
+        positionMetersRaw_ = positionMeters_;
+        syncGatePosition();
+        return;
+      }
       float pos_raw_adj   = pos_raw;
       if (!hoverOffsetValid_ && cfg_->gateConfig.hbOriginDistMm != 0) {
         hoverOffsetMeters_ = -((float)cfg_->gateConfig.hbOriginDistMm) / 1000.0f;
@@ -536,6 +389,12 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
       }
       if (hoverOffsetValid_) {
         pos_raw_adj += hoverOffsetMeters_;
+      }
+      if (!isfinite(pos_raw_adj)) {
+        syncConfigPosition();
+        positionMetersRaw_ = positionMeters_;
+        syncGatePosition();
+        return;
       }
 
       // FIX B-06: use class member fields instead of static locals
@@ -554,6 +413,9 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
         if (diff <= maxJump) {
           const float alpha = 0.25f;
           pos_f_ = pos_f_ + alpha * (pos_raw_adj - pos_f_);
+          if (!isfinite(pos_f_)) {
+            pos_f_ = pos_raw_adj;
+          }
         }
       }
 
@@ -645,39 +507,3 @@ void PositionTracker::updateHallStats(uint32_t nowMs) {
   hallPpsLastCount_= count;
 }
 
-void PositionTracker::maybePersistPosition(uint32_t nowMs) {
-  if (!cfg_ || !gate_) return;
-  if (nowMs < 5000) return;
-  const bool moving = gate_->isMoving();
-  if (moving) {
-    wasMovingLast_ = true;
-    return;
-  }
-  if (wasMovingLast_) {
-    persistDirty_  = true;
-    wasMovingLast_ = false;
-  }
-  if (maxDistanceMeters_ <= 0.0f) return;
-  if (lastPositionPersistMs_ != 0 && nowMs - lastPositionPersistMs_ < 1000) return;
-  if (lastPersistedPosition_ >= 0.0f) {
-    float diff = positionMeters_ - lastPersistedPosition_;
-    if (diff < 0.0f) diff = -diff;
-    if (diff >= 0.01f) persistDirty_ = true;
-  }
-
-  if (!persistDirty_) {
-    if (lastPositionPersistMs_ != 0 && (nowMs - lastPositionPersistMs_) < 60000) {
-      return;
-    }
-  }
-
-  if (!savePositionSnapshot()) {
-    Serial.println("position snapshot save failed");
-    return;
-  }
-  Serial.printf("[POS] snapshot saved pos=%.3fm max=%.3fm\n", positionMeters_, maxDistanceMeters_);
-}
-
-// Public alias used by app_main.cpp
-// alias left intentionally empty; public API is provided by
-// `maybePersistPosition` above and declared in the header.

@@ -29,12 +29,18 @@ typedef bool(*OtaActiveCb)();
 class MotorController;
 
 struct WebRuntimeStats {
+  uint32_t apiReqCount = 0;
   uint32_t statusReqCount = 0;
   uint32_t statusLiteReqCount = 0;
   uint32_t statusErrors = 0;
+  uint32_t statusSlowCount = 0;
+  uint32_t lastApiReqMs = 0;
   uint32_t lastStatusReqMs = 0;
   uint32_t lastStatusDurationUs = 0;
   uint32_t maxStatusDurationUs = 0;
+  uint32_t lastMaintenanceMs = 0;
+  uint32_t lastWsConnectMs = 0;
+  uint32_t lastWsDisconnectMs = 0;
   uint16_t wsClients = 0;
 };
 

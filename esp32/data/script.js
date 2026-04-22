@@ -405,7 +405,7 @@ function startPollingOnce() {
   if (state.intervalsStarted) return;
   state.intervalsStarted = true;
   setInterval(fetchStatusLite, 500);
-  setInterval(fetchStatusFull, 2000);
+  setInterval(fetchStatusFull, 10000);
 }
 
 document.addEventListener('visibilitychange', () => {

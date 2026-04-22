@@ -247,7 +247,9 @@ void WebServerManager::sendUnauthorized(AsyncWebServerRequest* request) const {
 void WebServerManager::setupRoutes() {
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request){
     const uint32_t t0Us = micros();
+    stats.apiReqCount++;
     stats.statusReqCount++;
+    stats.lastApiReqMs = millis();
     stats.lastStatusReqMs = millis();
     StaticJsonDocument<4096> doc;
     JsonObject root = doc.to<JsonObject>();
@@ -262,6 +264,7 @@ void WebServerManager::setupRoutes() {
     stats.lastStatusDurationUs = dtUs;
     if (dtUs > stats.maxStatusDurationUs) stats.maxStatusDurationUs = dtUs;
     if (dtUs > 15000) {
+      stats.statusSlowCount++;
       Serial.printf("[HTTP] /api/status slow dt=%luus heap=%u minHeap=%u ws=%u req=%lu\n",
                     (unsigned long)dtUs,
                     (unsigned)ESP.getFreeHeap(),
@@ -273,7 +276,9 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/status-lite", HTTP_GET, [this](AsyncWebServerRequest *request){
+    stats.apiReqCount++;
     stats.statusLiteReqCount++;
+    stats.lastApiReqMs = millis();
     StaticJsonDocument<768> doc;
     JsonObject root = doc.to<JsonObject>();
     if (statusLiteCb) {
@@ -983,6 +988,8 @@ void WebServerManager::setupRoutes() {
 
   server.on("/api/diagnostics", HTTP_GET, [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    stats.apiReqCount++;
+    stats.lastApiReqMs = millis();
     // Diagnostics can grow over time; keep generous headroom to avoid truncation.
     StaticJsonDocument<4096> doc;
     JsonObject root = doc.to<JsonObject>();
@@ -1226,7 +1233,12 @@ void WebServerManager::setupRoutes() {
   });
 
   ws.onEvent([this](AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
+    (void)server;
+    (void)arg;
+    (void)data;
+    (void)len;
     if (type == WS_EVT_CONNECT) {
+      stats.lastWsConnectMs = millis();
       if (!statusCb) return;
       StaticJsonDocument<2048> doc;
       doc["type"] = "status";
@@ -1235,6 +1247,10 @@ void WebServerManager::setupRoutes() {
       char payload[2048];
       serializeJson(doc, payload, sizeof(payload));
       client->text(payload);
+      return;
+    }
+    if (type == WS_EVT_DISCONNECT) {
+      stats.lastWsDisconnectMs = millis();
     }
   });
 
@@ -1338,6 +1354,7 @@ void WebServerManager::broadcastEvent(const char* level, const char* message) {
 }
 
 void WebServerManager::maintenance() {
+  stats.lastMaintenanceMs = millis();
   ws.cleanupClients();
 }
 

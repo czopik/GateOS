@@ -8,6 +8,46 @@ void setError(String* out, const char* value) {
   if (out) *out = value;
 }
 
+uint32_t fnv1a32(const uint8_t* data, size_t len) {
+  uint32_t hash = 2166136261u;
+  for (size_t i = 0; i < len; ++i) {
+    hash ^= data[i];
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+uint32_t computeDocumentChecksum(JsonDocument& doc) {
+  String serialized;
+  serializeJson(doc, serialized);
+  return fnv1a32(reinterpret_cast<const uint8_t*>(serialized.c_str()), serialized.length());
+}
+
+void attachDocumentChecksum(JsonDocument& doc) {
+  doc.remove("crc32");
+  doc["crc32"] = computeDocumentChecksum(doc);
+}
+
+bool validateAndStripChecksum(DynamicJsonDocument& doc, String& error) {
+  if (!doc.is<JsonObject>()) {
+    setError(&error, "root_not_object");
+    return false;
+  }
+  JsonVariant crcVar = doc["crc32"];
+  if (crcVar.isNull()) {
+    setError(&error, "crc32_missing");
+    return false;
+  }
+  uint32_t stored = crcVar.as<uint32_t>();
+  doc.remove("crc32");
+  uint32_t actual = computeDocumentChecksum(doc);
+  if (stored != actual) {
+    setError(&error, "crc32_mismatch");
+    return false;
+  }
+  return true;
+}
+
 bool writeJsonFile(const char* path, JsonDocument& doc, size_t* writtenOut = nullptr) {
   File f = LittleFS.open(path, "w");
   if (!f) return false;
@@ -30,6 +70,30 @@ bool readJsonFile(const char* path, DynamicJsonDocument& doc, String& error) {
     setError(&error, err.c_str());
     return false;
   }
+  return true;
+}
+
+bool copyFile(const char* src, const char* dst) {
+  File in = LittleFS.open(src, "r");
+  if (!in) return false;
+  File out = LittleFS.open(dst, "w");
+  if (!out) {
+    in.close();
+    return false;
+  }
+  uint8_t buf[256];
+  while (in.available()) {
+    size_t n = in.read(buf, sizeof(buf));
+    if (n == 0) break;
+    if (out.write(buf, n) != n) {
+      out.close();
+      in.close();
+      return false;
+    }
+  }
+  out.flush();
+  out.close();
+  in.close();
   return true;
 }
 
@@ -170,6 +234,7 @@ void ConfigManager::resetToDefaults() {
 
 bool ConfigManager::readConfigFileToDoc(DynamicJsonDocument& doc, String& error) {
   if (!readJsonFile(CONFIG_PATH, doc, error)) return false;
+  if (!validateAndStripChecksum(doc, error)) return false;
   revision++;
   return true;
 }
@@ -221,14 +286,15 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
   float maxDistance = gateConfig.maxDistance > 0.0f ? gateConfig.maxDistance : gateConfig.totalDistance;
   gate["totalDistance"] = maxDistance;
   gate["maxDistance"] = maxDistance;
-  gate["position"] = gateConfig.position;
   gate["hbOriginDistMm"] = gateConfig.hbOriginDistMm;
   gate["wheelCircumference"] = gateConfig.wheelCircumference;
   gate["pulsesPerRevolution"] = gateConfig.pulsesPerRevolution;
   gate["movementTimeout"] = gateConfig.movementTimeout;
+  gate["startupHomingTimeoutMs"] = gateConfig.startupHomingTimeoutMs;
   gate["stallTimeoutMs"] = gateConfig.stallTimeoutMs;
   gate["telemetryTimeoutMs"] = gateConfig.telemetryTimeoutMs;
   gate["telemetryGraceMs"] = gateConfig.telemetryGraceMs;
+  gate["homingScalePercent"] = gateConfig.homingScalePercent;
   gate["softLimitsEnabled"] = gateConfig.softLimitsEnabled;
   gate["currentLimitA"] = gateConfig.currentLimitA;
   gate["overCurrentTripMs"] = gateConfig.overCurrentTripMs;
@@ -381,6 +447,12 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
 }
 
 bool ConfigManager::ensureDefaultConfigExists(String* error) {
+  if (!LittleFS.exists(CONFIG_PATH) && LittleFS.exists(CONFIG_BAK_PATH)) {
+    if (copyFile(CONFIG_BAK_PATH, CONFIG_PATH)) {
+      Serial.println("CONFIG: restored primary config from backup");
+      return true;
+    }
+  }
   if (LittleFS.exists(CONFIG_PATH)) return true;
   resetToDefaults();
   if (!save(error)) {
@@ -402,6 +474,18 @@ void ConfigManager::load() {
   DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
   if (!readConfigFileToDoc(doc, err)) {
     Serial.printf("CONFIG LOAD FAIL: %s\n", err.c_str());
+    DynamicJsonDocument backupDoc(CONFIG_JSON_CAPACITY);
+    String backupErr;
+    if (readJsonFile(CONFIG_BAK_PATH, backupDoc, backupErr) && validateAndStripChecksum(backupDoc, backupErr)) {
+      Serial.printf("CONFIG LOAD: recovering from backup (%s)\n", CONFIG_BAK_PATH);
+      if (fromJsonVariant(backupDoc.as<JsonVariantConst>())) {
+        save(nullptr);
+        return;
+      }
+      Serial.println("CONFIG LOAD FAIL: backup_parse_apply");
+    } else if (LittleFS.exists(CONFIG_BAK_PATH)) {
+      Serial.printf("CONFIG BACKUP FAIL: %s\n", backupErr.c_str());
+    }
     save(nullptr);
     return;
   }
@@ -468,11 +552,7 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     return true;
   }
   static volatile bool saving = false;
-  unsigned long waitStart = millis();
-  while (saving && millis() - waitStart < 1000) {
-    delay(5);
-  }
-  if (saving) {
+    if (saving) {
     lastSaveError = "save_busy";
     setError(error, lastSaveError.c_str());
     pendingSave = true;
@@ -491,6 +571,7 @@ bool ConfigManager::saveInternal(String* error, bool force) {
 
   DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
   buildJson(doc);
+  attachDocumentChecksum(doc);
 
   if (!writeJsonFile(CONFIG_TMP_PATH, doc, &written)) {
     lastSaveError = "open_tmp_failed";
@@ -506,6 +587,15 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     LittleFS.remove(CONFIG_TMP_PATH);
     lastSaveError = "tmp_readback_failed";
     Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
+    setError(error, verifyTmpErr.c_str());
+    pendingSave = true;
+    pendingSaveAtMs = millis();
+    return false;
+  }
+  if (!validateAndStripChecksum(verifyTmp, verifyTmpErr)) {
+    LittleFS.remove(CONFIG_TMP_PATH);
+    lastSaveError = "tmp_crc_failed";
+    Serial.printf("[save] bytes=%u fail crc=%s\n", (unsigned)written, verifyTmpErr.c_str());
     setError(error, verifyTmpErr.c_str());
     pendingSave = true;
     pendingSaveAtMs = millis();
@@ -554,6 +644,10 @@ bool ConfigManager::saveInternal(String* error, bool force) {
   }
 
   pendingSave = false;
+  attachDocumentChecksum(doc);
+  if (!writeJsonFile(CONFIG_BAK_PATH, doc, nullptr)) {
+    Serial.println("[save] warning: backup_write_failed");
+  }
   Serial.printf("[save] bytes=%u ok\n", (unsigned)written);
   return true;
 }
@@ -561,6 +655,7 @@ bool ConfigManager::saveInternal(String* error, bool force) {
 String ConfigManager::toJson() {
   DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
   buildJson(doc);
+  attachDocumentChecksum(doc);
 
   String out;
   serializeJson(doc, out);
@@ -648,18 +743,16 @@ bool ConfigManager::fromJsonVariant(JsonVariantConst root) {
       }
       gateConfig.maxDistance = maxDistance;
       gateConfig.totalDistance = maxDistance;
-      gateConfig.position = gate["position"] | gateConfig.position;
-      if (gateConfig.position < 0.0f) gateConfig.position = 0.0f;
-      if (gateConfig.maxDistance > 0.0f && gateConfig.position > gateConfig.maxDistance) {
-        gateConfig.position = gateConfig.maxDistance;
-      }
+      gateConfig.position = 0.0f;
       gateConfig.hbOriginDistMm = gate["hbOriginDistMm"] | gateConfig.hbOriginDistMm;
       gateConfig.wheelCircumference = gate["wheelCircumference"] | gateConfig.wheelCircumference;
       gateConfig.pulsesPerRevolution = gate["pulsesPerRevolution"] | gateConfig.pulsesPerRevolution;
       gateConfig.movementTimeout = gate["movementTimeout"] | gateConfig.movementTimeout;
+      gateConfig.startupHomingTimeoutMs = gate["startupHomingTimeoutMs"] | gateConfig.startupHomingTimeoutMs;
       gateConfig.stallTimeoutMs = gate["stallTimeoutMs"] | gateConfig.stallTimeoutMs;
       gateConfig.telemetryTimeoutMs = gate["telemetryTimeoutMs"] | gateConfig.telemetryTimeoutMs;
       gateConfig.telemetryGraceMs = gate["telemetryGraceMs"] | gateConfig.telemetryGraceMs;
+      gateConfig.homingScalePercent = gate["homingScalePercent"] | gateConfig.homingScalePercent;
       gateConfig.softLimitsEnabled = gate["softLimitsEnabled"] | gateConfig.softLimitsEnabled;
       gateConfig.currentLimitA = gate["currentLimitA"] | gateConfig.currentLimitA;
       gateConfig.overCurrentTripMs = gate["overCurrentTripMs"] | gateConfig.overCurrentTripMs;
@@ -974,16 +1067,11 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
       error = "gate.maxDistance_out_of_range";
       return false;
     }
-    if (gate.containsKey("position")) {
-      float position = gate["position"] | gateConfig.position;
-      if (position < 0.0f || (maxDistance > 0.0f && position > maxDistance)) {
-        error = "gate.position_out_of_range";
-        return false;
-      }
-    }
     unsigned long stallTimeoutMs = gate["stallTimeoutMs"] | gateConfig.stallTimeoutMs;
+    unsigned long startupHomingTimeoutMs = gate["startupHomingTimeoutMs"] | gateConfig.startupHomingTimeoutMs;
     unsigned long telTimeoutMs = gate["telemetryTimeoutMs"] | gateConfig.telemetryTimeoutMs;
     unsigned long telGraceMs = gate["telemetryGraceMs"] | gateConfig.telemetryGraceMs;
+    int homingScalePercent = gate["homingScalePercent"] | gateConfig.homingScalePercent;
     float currentLimitA = gate["currentLimitA"] | gateConfig.currentLimitA;
     if (stallTimeoutMs > 0 && (stallTimeoutMs < 200 || stallTimeoutMs > 60000)) {
       error = "gate.stallTimeoutMs_out_of_range";
@@ -993,8 +1081,16 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
       error = "gate.telemetryTimeoutMs_out_of_range";
       return false;
     }
+    if (startupHomingTimeoutMs > 0 && (startupHomingTimeoutMs < 5000 || startupHomingTimeoutMs > 300000)) {
+      error = "gate.startupHomingTimeoutMs_out_of_range";
+      return false;
+    }
     if (telGraceMs > 20000) {
       error = "gate.telemetryGraceMs_out_of_range";
+      return false;
+    }
+    if (homingScalePercent < 5 || homingScalePercent > 100) {
+      error = "gate.homingScalePercent_out_of_range";
       return false;
     }
     if (currentLimitA < 0.0f || currentLimitA > 80.0f) {

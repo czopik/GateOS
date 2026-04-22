@@ -113,7 +113,7 @@ async function loadStatus() {
 function startPollingOnce() {
   if (state.intervalStarted) return;
   state.intervalStarted = true;
-  setInterval(loadStatus, 2000);
+  setInterval(loadStatus, 5000);
 }
 
 document.addEventListener('visibilitychange', () => {

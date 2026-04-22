@@ -10,6 +10,7 @@
 #include <math.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
+#include <esp_attr.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
@@ -156,6 +157,13 @@ static bool factoryResetPending = false;
 static uint32_t factoryResetAtMs = 0;
 static volatile bool runtimeConfigApplyPending = false;
 static volatile uint32_t runtimeConfigApplyRequestedMs = 0;
+static volatile uint32_t mainLoopHeartbeatMs = 0;
+static volatile uint32_t gateTaskHeartbeatMs = 0;
+RTC_DATA_ATTR static uint32_t rtcBootCount = 0;
+RTC_DATA_ATTR static uint32_t rtcLastResetReason = 0;
+static uint32_t prevRtcResetReason = 0;
+static uint32_t bootCount = 0;
+static esp_reset_reason_t bootResetReason = ESP_RST_UNKNOWN;
 
 static volatile long hallCount = 0;
 static portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
@@ -271,7 +279,7 @@ static long readHallCountAtomic() {
 }
 
 void updateFsStats(uint32_t nowMs) {
-  if (fsLastStatsMs != 0 && nowMs - fsLastStatsMs < 5000) return;
+  if (fsLastStatsMs != 0) return;
   fsTotalBytesCached = LittleFS.totalBytes();
   fsUsedBytesCached = LittleFS.usedBytes();
   fsLastStatsMs = nowMs;
@@ -306,7 +314,6 @@ void mqttPublishPosition();
 void handleLedCmd(const char* payload);
 bool applyMaxDistance(float value, bool persist);
 bool handleGateCalibrate(const char* mode);
-void maybePersistPosition(uint32_t nowMs);
 bool isSafeToSaveConfig();
 void updateHallAttachment();
 void updatePositionPercent();
@@ -469,17 +476,17 @@ static void applySlowHomingProfile() {
   if (!motor || homingProfileApplied) return;
   normalMotionProfile = config.motionProfile();
   MotionAdvancedConfig p = normalMotionProfile;
-  // Empirically, 20% was too weak after reboot on some setups (no real movement).
-  // Use 30% as startup homing profile baseline.
-  p.maxSpeedOpen = max(4, (normalMotionProfile.maxSpeedOpen * 30) / 100);
-  p.maxSpeedClose = max(4, (normalMotionProfile.maxSpeedClose * 30) / 100);
-  p.minSpeed = max(2, (normalMotionProfile.minSpeed * 30) / 100);
+  int homingScalePercent = config.gateConfig.homingScalePercent;
+  homingScalePercent = constrain(homingScalePercent, 5, 100);
+  p.maxSpeedOpen = max(4, (normalMotionProfile.maxSpeedOpen * homingScalePercent) / 100);
+  p.maxSpeedClose = max(4, (normalMotionProfile.maxSpeedClose * homingScalePercent) / 100);
+  p.minSpeed = max(2, (normalMotionProfile.minSpeed * homingScalePercent) / 100);
   if (p.minSpeed > p.maxSpeedClose - 1) p.minSpeed = max(1, p.maxSpeedClose - 1);
   if (p.minSpeed > p.maxSpeedOpen - 1) p.minSpeed = max(1, p.maxSpeedOpen - 1);
   motor->setMotionProfile(p);
   homingForceCmd = max(70, max(p.maxSpeedClose, p.maxSpeedOpen));
-  Serial.printf("[HOMING] slow profile applied open=%d close=%d min=%d forceCmd=%d (orig open=%d close=%d min=%d)\n",
-                p.maxSpeedOpen, p.maxSpeedClose, p.minSpeed, homingForceCmd,
+  Serial.printf("[HOMING] slow profile applied scale=%d%% open=%d close=%d min=%d forceCmd=%d (orig open=%d close=%d min=%d)\n",
+                homingScalePercent, p.maxSpeedOpen, p.maxSpeedClose, p.minSpeed, homingForceCmd,
                 normalMotionProfile.maxSpeedOpen, normalMotionProfile.maxSpeedClose, normalMotionProfile.minSpeed);
   homingProfileApplied = true;
 }
@@ -537,13 +544,16 @@ static void applyStartupLimitReference() {
 
 static void runStartupHoming(uint32_t nowMs) {
   static const uint32_t kHomingReadyStableMs = 1200;
-  static const uint32_t kHomingTimeoutMs = 45000;
   static const uint32_t kHomingTelFailDebounceMs = 1500;
   static uint32_t lastDiagMs = 0;
   static uint32_t homingTelBadSinceMs = 0;
+  uint32_t kHomingTimeoutMs = config.gateConfig.startupHomingTimeoutMs;
+  if (kHomingTimeoutMs < 5000 || kHomingTimeoutMs > 300000) {
+    kHomingTimeoutMs = 45000;
+  }
 
   if (!startupHomingEnabled || !gate || calibration.isRunning()) return;
-  if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 500) {
+  if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 5000) {
     logStartupHomingDiag("loop", nowMs, "tick");
     lastDiagMs = nowMs;
   }
@@ -607,7 +617,7 @@ static void runStartupHoming(uint32_t nowMs) {
         setStartupSafetyState(false, false, "startup_tel_missing_retry");
         setHomingResult("pending", "startup_tel_missing_retry");
         homingChecked = false;
-        if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 1000) {
+        if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 10000) {
           Serial.println("[HOMING] startup telemetry missing -> keep waiting/retrying");
           lastDiagMs = nowMs;
         }
@@ -971,22 +981,35 @@ void mqttPublishPosition() {
 void logSummary1Hz() {
   static unsigned long lastLogMs = 0;
   unsigned long now = millis();
-  if (now - lastLogMs < 1000) return;
+  if (now - lastLogMs < 5000) return;
   lastLogMs = now;
   const WebRuntimeStats ws = webserver.runtimeStats();
   const bool wifiConnected = WiFiManager.isConnected();
-  Serial.printf("[SYS] up=%lums heap=%u minHeap=%u maxAlloc=%u wifi=%d mode=%s ip=%s ws=%u statusReq=%lu liteReq=%lu statusErr=%lu statusLastUs=%lu statusMaxUs=%lu\n",
+  const UBaseType_t mainLoopStackWords = uxTaskGetStackHighWaterMark(NULL);
+  const UBaseType_t gateTaskStackWords = gateTaskHandle ? uxTaskGetStackHighWaterMark(gateTaskHandle) : 0;
+  const long loopAgeMs = (mainLoopHeartbeatMs == 0 || now < mainLoopHeartbeatMs) ? -1 : (long)(now - mainLoopHeartbeatMs);
+  const long gateAgeMs = (gateTaskHeartbeatMs == 0 || now < gateTaskHeartbeatMs) ? -1 : (long)(now - gateTaskHeartbeatMs);
+  Serial.printf("[SYS] up=%lums boot=%lu reset=%s(%d) loopAge=%ld gateAge=%ld heap=%u minHeap=%u maxAlloc=%u stackMain=%u stackGate=%u wifi=%d mode=%s ip=%s ws=%u apiReq=%lu statusReq=%lu liteReq=%lu statusErr=%lu slow=%lu statusLastUs=%lu statusMaxUs=%lu\n",
                 now,
+                (unsigned long)bootCount,
+                resetReasonToString(bootResetReason),
+                (int)bootResetReason,
+                loopAgeMs,
+                gateAgeMs,
                 (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMinFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap(),
+                (unsigned)mainLoopStackWords,
+                (unsigned)gateTaskStackWords,
                 wifiConnected ? 1 : 0,
                 WiFiManager.getModeCString(),
                 wifiConnected ? WiFi.localIP().toString().c_str() : "",
                 (unsigned)ws.wsClients,
+                (unsigned long)ws.apiReqCount,
                 (unsigned long)ws.statusReqCount,
                 (unsigned long)ws.statusLiteReqCount,
                 (unsigned long)ws.statusErrors,
+                (unsigned long)ws.statusSlowCount,
                 (unsigned long)ws.lastStatusDurationUs,
                 (unsigned long)ws.maxStatusDurationUs);
   if (gate) {
@@ -1155,11 +1178,6 @@ bool handleGateCalibrate(const char* mode) {
   return ok;
 }
 
-void maybePersistPosition(uint32_t nowMs) {
-  positionTracker.maybePersistPosition(nowMs);
-  syncLegacyPositionState();
-}
-
 void setupInputs() {
   inputManager.begin(config);
 }
@@ -1256,7 +1274,7 @@ void updatePositionPercent() {
       ? (int)((synthetic * 100.0f) / maxD + 0.5f)
       : -1;
     const uint32_t nowMs = millis();
-    if (startupSyntheticUiLogMs == 0 || (nowMs - startupSyntheticUiLogMs) > 1500) {
+    if (startupSyntheticUiLogMs == 0 || (nowMs - startupSyntheticUiLogMs) > 10000) {
       startupSyntheticUiLogMs = nowMs;
       Serial.printf("[HOMING_TMP_POS] apply mode=temp_100mm pos=%.3fm posRaw=%.3fm pct=%d active=%d certain=%d\n",
                     positionMeters,
@@ -1290,21 +1308,54 @@ void onGateStatusChanged(const GateStatus& status, void* ctx) {
                status.otaInProgress);
 }
 
-void fillDiagnostics(JsonObject& out) {
-  const WebRuntimeStats ws = webserver.runtimeStats();
-  JsonObject runtimeObj = out.createNestedObject("runtime");
-  runtimeObj["uptimeMs"] = millis();
+static void fillRuntimeSnapshot(JsonObject& runtimeObj, const WebRuntimeStats& ws, uint32_t nowMs) {
+  const long mainLoopAgeMs = (mainLoopHeartbeatMs == 0 || nowMs < mainLoopHeartbeatMs)
+                               ? -1
+                               : (long)(nowMs - mainLoopHeartbeatMs);
+  const long gateTaskAgeMs = (gateTaskHeartbeatMs == 0 || nowMs < gateTaskHeartbeatMs)
+                               ? -1
+                               : (long)(nowMs - gateTaskHeartbeatMs);
+  const long webMaintenanceAgeMs = (ws.lastMaintenanceMs == 0 || nowMs < ws.lastMaintenanceMs)
+                                     ? -1
+                                     : (long)(nowMs - ws.lastMaintenanceMs);
+
+  runtimeObj["hardDiagVer"] = 1;
+  runtimeObj["uptimeMs"] = nowMs;
+  runtimeObj["bootCount"] = bootCount;
+  runtimeObj["resetReasonCode"] = (int)bootResetReason;
+  runtimeObj["resetReason"] = resetReasonToString(bootResetReason);
+  runtimeObj["prevResetReasonCodeRtc"] = (int)prevRtcResetReason;
+  runtimeObj["prevResetReasonRtc"] = resetReasonToString((esp_reset_reason_t)prevRtcResetReason);
   runtimeObj["freeHeap"] = ESP.getFreeHeap();
   runtimeObj["minFreeHeap"] = ESP.getMinFreeHeap();
   runtimeObj["maxAllocHeap"] = ESP.getMaxAllocHeap();
-  runtimeObj["resetReason"] = resetReasonToString(esp_reset_reason());
+  runtimeObj["mainLoopStackWords"] = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+  runtimeObj["gateTaskStackWords"] = (uint32_t)(gateTaskHandle ? uxTaskGetStackHighWaterMark(gateTaskHandle) : 0);
+  runtimeObj["mainLoopHeartbeatMs"] = (uint32_t)mainLoopHeartbeatMs;
+  runtimeObj["mainLoopAgeMs"] = mainLoopAgeMs;
+  runtimeObj["gateTaskHeartbeatMs"] = (uint32_t)gateTaskHeartbeatMs;
+  runtimeObj["gateTaskAgeMs"] = gateTaskAgeMs;
+  runtimeObj["apiReqCount"] = ws.apiReqCount;
   runtimeObj["statusReqCount"] = ws.statusReqCount;
   runtimeObj["statusLiteReqCount"] = ws.statusLiteReqCount;
   runtimeObj["statusErrors"] = ws.statusErrors;
+  runtimeObj["statusSlowCount"] = ws.statusSlowCount;
+  runtimeObj["lastApiReqMs"] = ws.lastApiReqMs;
   runtimeObj["lastStatusReqMs"] = ws.lastStatusReqMs;
   runtimeObj["lastStatusDurationUs"] = ws.lastStatusDurationUs;
   runtimeObj["maxStatusDurationUs"] = ws.maxStatusDurationUs;
+  runtimeObj["lastWebMaintenanceMs"] = ws.lastMaintenanceMs;
+  runtimeObj["webMaintenanceAgeMs"] = webMaintenanceAgeMs;
+  runtimeObj["lastWsConnectMs"] = ws.lastWsConnectMs;
+  runtimeObj["lastWsDisconnectMs"] = ws.lastWsDisconnectMs;
   runtimeObj["wsClients"] = ws.wsClients;
+}
+
+void fillDiagnostics(JsonObject& out) {
+  const WebRuntimeStats ws = webserver.runtimeStats();
+  const uint32_t nowMs = millis();
+  JsonObject runtimeObj = out.createNestedObject("runtime");
+  fillRuntimeSnapshot(runtimeObj, ws, nowMs);
 
   JsonObject hoverObj = out.createNestedObject("hoverUart");
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
@@ -1412,7 +1463,11 @@ void fillDiagnostics(JsonObject& out) {
 
 void fillStatus(JsonObject& out) {
   syncLegacyPositionState();
-  out["uptimeMs"] = millis();
+  const WebRuntimeStats ws = webserver.runtimeStats();
+  const uint32_t nowMs = millis();
+  out["uptimeMs"] = nowMs;
+  JsonObject runtimeObj = out.createNestedObject("runtime");
+  fillRuntimeSnapshot(runtimeObj, ws, nowMs);
 
   JsonObject gateObj = out.createNestedObject("gate");
   if (gate) {
@@ -1741,7 +1796,7 @@ ControlResult handleControlCmd(const char* action) {
 static void processPendingRuntimeConfigApply(uint32_t nowMs) {
   if (!runtimeConfigApplyPending) return;
   if (otaActive || calibration.isRunning() || homingActive) return;
-  if (gate && gate->isMoving()) return;
+    if (gate && gate->getState() != GATE_STOPPED) return;
 
   runtimeConfigApplyPending = false;
   const uint32_t reqAgeMs =
@@ -1979,6 +2034,7 @@ void gateTask(void* pvParameters) {
     esp_task_wdt_add(NULL);
   }
   while (1) {
+    gateTaskHeartbeatMs = millis();
     if (gate) gate->loop();
     if (wdtEnabled) {
       esp_task_wdt_reset();
@@ -1990,9 +2046,18 @@ void gateTask(void* pvParameters) {
 void setup() {
   Serial.begin(115200);
   delay(10);
-  const esp_reset_reason_t rr = esp_reset_reason();
-  Serial.printf("[BOOT] reset_reason=%s (%d)\n", resetReasonToString(rr), (int)rr);
+  bootResetReason = esp_reset_reason();
+  prevRtcResetReason = rtcLastResetReason;
+  rtcBootCount++;
+  bootCount = rtcBootCount;
+  rtcLastResetReason = (uint32_t)bootResetReason;
+  Serial.printf("[BOOT] boot=%lu reset_reason=%s (%d)\n",
+                (unsigned long)bootCount,
+                resetReasonToString(bootResetReason),
+                (int)bootResetReason);
   startupBootMs = millis();
+  mainLoopHeartbeatMs = startupBootMs;
+  gateTaskHeartbeatMs = startupBootMs;
   startupHomingEnabled = true;
   if (!startupHomingEnabled) {
     setStartupSafetyState(true, false, "non_cold_boot");
@@ -2097,6 +2162,7 @@ void setup() {
 }
 
 void loop() {
+  mainLoopHeartbeatMs = millis();
   WiFiManager.loop();
   if (hcs) hcs->loop();
 
@@ -2115,11 +2181,10 @@ void loop() {
   unsigned long now = millis();
   updateHallStats(now);
   runStartupHoming(now);
-  maybePersistPosition(now);
   updateFsStats(now);
   processPendingRuntimeConfigApply(now);
 
-  mqtt.setConnectAllowed(!gate || !gate->isMoving());
+  mqtt.setConnectAllowed(!homingActive && (!gate || !gate->isMoving()));
   mqtt.loop();
   bool nowConnected = mqtt.connected();
   bool wifiConnected = WiFiManager.isConnected();

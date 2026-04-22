@@ -72,7 +72,7 @@ void GateController::begin() {
   if (motor) {
     motor->setMotionProfile(cfg->motionProfile());
   }
-  setPosition(cfg->gateConfig.position, cfg->gateConfig.maxDistance);
+  setPosition(0.0f, cfg->gateConfig.maxDistance);
 }
 
 void GateController::loop() {
@@ -123,13 +123,14 @@ void GateController::loop() {
       lastProgressMs = millis();
     }
     const bool softLimitsEnabled = cfg ? cfg->gateConfig.softLimitsEnabled : true;
-    if (!pendingStop && softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && status.position >= status.maxDistance) {
+        const float softLimitEpsM = 0.02f;
+        if (!pendingStop && softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && status.position >= (status.maxDistance - softLimitEpsM)) {
 #if defined(GATE_DEBUG_UART)
       Serial.printf("[GATE] soft-limit OPEN reached pos=%.3fm max=%.3fm -> stop()\n", status.position, status.maxDistance);
 #endif
       stop(GATE_STOP_SOFT_LIMIT);
     }
-    if (!pendingStop && softLimitsEnabled && state == GATE_CLOSING && status.position <= 0.0f) {
+        if (!pendingStop && softLimitsEnabled && state == GATE_CLOSING && status.position <= softLimitEpsM) {
 #if defined(GATE_DEBUG_UART)
       Serial.printf("[GATE] soft-limit CLOSE reached pos=%.3fm -> stop()\n", status.position);
 #endif
@@ -151,6 +152,7 @@ void GateController::loop() {
   if (motor && motor->isHoverUart()) {
     const uint32_t kHoverTelTimeoutMs = cfg ? cfg->gateConfig.telemetryTimeoutMs : 1200;
     const uint32_t kHoverTelGraceMs   = cfg ? cfg->gateConfig.telemetryGraceMs   : 1500;
+    const uint32_t kHoverTelTimeoutHystMs = 250;
     const uint32_t kHoverRecoveryStableMs = 1500;
     const HoverTelemetry& tel = motor->hoverTelemetry();
 
@@ -270,7 +272,8 @@ void GateController::loop() {
       stop(GATE_STOP_TELEMETRY_TIMEOUT);
       return;
     } else {
-      if (moving && (millis() - moveStart) > kHoverTelGraceMs && motor->hoverTelemetryTimedOut(millis(), kHoverTelTimeoutMs)) {
+        if (moving && (millis() - moveStart) > kHoverTelGraceMs &&
+          motor->hoverTelemetryTimedOut(millis(), kHoverTelTimeoutMs + kHoverTelTimeoutHystMs)) {
 #if defined(GATE_DEBUG_UART)
         long telAge = (tel.lastTelMs == 0) ? -1 : (long)(millis() - tel.lastTelMs);
         Serial.printf("[GATE] HOVER TEL timeout while moving (telAgeMs=%ld, grace=%lums, timeout=%lums) -> stopHard\n",
@@ -285,13 +288,16 @@ void GateController::loop() {
         return;
       }
     }
-    if (pendingStop && motor->hoverTelemetryTimedOut(millis(), kHoverTelTimeoutMs)) {
+        if (pendingStop && motor->hoverTelemetryTimedOut(millis(), kHoverTelTimeoutMs + kHoverTelTimeoutHystMs)) {
 #if defined(GATE_DEBUG_UART)
       Serial.printf("[GATE] HOVER TEL timeout during pendingStop -> force stop\n");
 #endif
       motor->stopHard();
+      motor->hoverDisarm();
       moving = false;
       pendingStop = false;
+      pendingStopStartMs = 0;
+      pendingStopStableSinceMs = 0;
       setState(GATE_STOPPED);
       status.lastStopReason = GATE_STOP_TELEMETRY_TIMEOUT;
       status.targetPosition = status.position;
@@ -305,20 +311,23 @@ void GateController::loop() {
     if (motor->isHoverUart()) {
       const HoverTelemetry& tel = motor->hoverTelemetry();
       const int rpm_deadband = 10;
-      // FIX B-11: raised min_frames 3 -> 8 (≈ 160 ms at 50 Hz telemetry).
-      //           This prevents STOPPED being declared while the motor is
-      //           still spinning down after a stop command.
-      const int min_frames = 8;
+      const uint32_t minStableMs = 160;
+      const uint32_t maxPendingStopMs = 2500;
+      if (pendingStopStartMs == 0) pendingStopStartMs = millis();
+
       if (tel.lastTelMs != 0 && tel.lastTelMs != lastStopTelMs) {
         lastStopTelMs = tel.lastTelMs;
         int16_t cmdSpeed = motor->hoverLastCmdSpeed();
         if (abs(tel.rpm) <= rpm_deadband && cmdSpeed == 0) {
-          if (stopConfirmCount < 250) stopConfirmCount++;
+          if (pendingStopStableSinceMs == 0) pendingStopStableSinceMs = millis();
         } else {
-          stopConfirmCount = 0;
+          pendingStopStableSinceMs = 0;
         }
       }
-      if (stopConfirmCount < min_frames) {
+
+      const bool stable = pendingStopStableSinceMs != 0 && (millis() - pendingStopStableSinceMs) >= minStableMs;
+      const bool waitedLongEnough = (millis() - pendingStopStartMs) >= maxPendingStopMs;
+      if (!stable && !waitedLongEnough) {
         return;
       }
     }
@@ -337,6 +346,8 @@ void GateController::loop() {
 
     moving = false;
     pendingStop = false;
+    pendingStopStartMs = 0;
+    pendingStopStableSinceMs = 0;
     setState(GATE_STOPPED);
     if (status.lastStopReason == GATE_STOP_USER) {
       status.targetPosition = status.position;
@@ -416,6 +427,8 @@ bool GateController::startMove(GateMoveDirection dir, float target, GateState ne
   setTerminalState(GateTerminalState::Unknown);
   stopConfirmCount = 0;
   lastStopTelMs = 0;
+  pendingStopStartMs = 0;
+  pendingStopStableSinceMs = 0;
   moveStart = millis();
   overCurrentAutoRearmCount = 0;
   lastProgressMs = moveStart;
@@ -515,6 +528,8 @@ void GateController::stop(GateStopReason reason) {
     }
     moving = false;
     pendingStop = false;
+    pendingStopStartMs = 0;
+    pendingStopStableSinceMs = 0;
     lastProgressMs = 0;
     if (state != GATE_ERROR) {
       setState(GATE_STOPPED);
@@ -538,6 +553,8 @@ void GateController::stop(GateStopReason reason) {
     userStoppedDuringMove_ = false;
     moving = false;
     pendingStop = false;
+    pendingStopStartMs = 0;
+    pendingStopStableSinceMs = 0;
     lastProgressMs = 0;
     if (state != GATE_ERROR) {
       setState(GATE_STOPPED);
@@ -570,6 +587,8 @@ void GateController::stop(GateStopReason reason) {
     userStoppedDuringMove_ = false;
     moving = false;
     pendingStop = false;
+    pendingStopStartMs = 0;
+    pendingStopStableSinceMs = 0;
     lastProgressMs = 0;
     if (state != GATE_ERROR) {
       setState(GATE_STOPPED);
@@ -604,12 +623,16 @@ void GateController::stop(GateStopReason reason) {
       motor->hoverDisarm();
     }
     pendingStop = true;
+    pendingStopStartMs = millis();
+    pendingStopStableSinceMs = 0;
     stopConfirmCount = 0;
     lastStopTelMs = 0;
     return;
   }
   moving = false;
   pendingStop = false;
+  pendingStopStartMs = 0;
+  pendingStopStableSinceMs = 0;
   lastProgressMs = 0;
   if (state != GATE_ERROR) {
     setState(GATE_STOPPED);
@@ -644,6 +667,8 @@ void GateController::setError(GateErrorCode code) {
 #endif
   moving = false;
   pendingStop = false;
+  pendingStopStartMs = 0;
+  pendingStopStableSinceMs = 0;
   setState(GATE_ERROR);
   errorCode = code;
   status.error = errorCode;
@@ -695,6 +720,8 @@ void GateController::setError(GateErrorCode code, GateStopReason reason) {
   }
   moving = false;
   pendingStop = false;
+  pendingStopStartMs = 0;
+  pendingStopStableSinceMs = 0;
   setState(GATE_ERROR);
   errorCode = code;
   status.error = errorCode;
@@ -788,11 +815,12 @@ void GateController::setPosition(float position, float maxDistance) {
 
   if (moving) {
     const bool softLimitsEnabled = cfg ? cfg->gateConfig.softLimitsEnabled : true;
-    if (softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && status.position >= status.maxDistance) {
+    const float softLimitEpsM = 0.02f;
+    if (softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && status.position >= (status.maxDistance - softLimitEpsM)) {
       stop(GATE_STOP_SOFT_LIMIT);
       return;
     }
-    if (softLimitsEnabled && state == GATE_CLOSING && status.position <= 0.0f) {
+    if (softLimitsEnabled && state == GATE_CLOSING && status.position <= softLimitEpsM) {
       stop(GATE_STOP_SOFT_LIMIT);
       return;
     }

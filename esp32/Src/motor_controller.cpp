@@ -173,7 +173,9 @@ void MotorController::stopSoft() {
 
   // Base distance (meters) + speed-proportional term, clamped.
   // "Mini" means: stop quickly, but without a brick-wall jerk.
-  float stopDist = 0.015f + fabsf(vEst) * 0.05f;  // 1.5cm + v*50ms
+  float vAbs = isfinite(vEst) ? fabsf(vEst) : 0.0f;
+  if (vAbs > 1.5f) vAbs = 1.5f;
+  float stopDist = 0.015f + vAbs * 0.05f;  // 1.5cm + v*50ms
   if (stopDist < 0.015f) stopDist = 0.015f;       // min 1.5cm
   if (stopDist > 0.08f)  stopDist = 0.08f;        // max 8cm
 
@@ -218,6 +220,13 @@ void MotorController::tick(uint32_t nowMs, float currentDistance) {
 
   // Remaining distance to target (m)
   float remaining = motionDirectionForward ? motionTargetDistance - currentDistance : currentDistance - motionTargetDistance;
+  if (!isfinite(remaining)) {
+    motionActive = false;
+    motionStage = MOTION_IDLE;
+    motionBand = -1;
+    setDuty(0);
+    return;
+  }
 
   // --- Latency compensation (telemetry + control loop) ---
   float telAge_s = 0.0f;
@@ -229,9 +238,11 @@ void MotorController::tick(uint32_t nowMs, float currentDistance) {
   }
   // Add a small buffer for jitter + command scheduling (tune if needed)
   const float extraLatency_s = 0.02f;
-  const float d_latency = fabsf(vEst) * (telAge_s + extraLatency_s);
+  const float vAbs = isfinite(vEst) ? fabsf(vEst) : 0.0f;
+  const float d_latency = vAbs * (telAge_s + extraLatency_s);
 
   float remaining_eff = remaining - d_latency;
+  if (!isfinite(remaining_eff)) remaining_eff = remaining;
 
   // Multi-zone target approach for repeatable endpoint positioning:
   // - far: normal motion profile
@@ -242,6 +253,18 @@ void MotorController::tick(uint32_t nowMs, float currentDistance) {
   const float stopTolerance_m = 0.010f;      // 10mm target band
   const float stopToleranceExit_m = 0.018f;  // hysteresis (18mm)
   const float vStop_mps = 0.07f;
+  const float hardOverrunStop_m = -0.020f;
+
+  if (remaining <= hardOverrunStop_m || remaining_eff <= hardOverrunStop_m) {
+    motionActive = false;
+    motionStage = MOTION_IDLE;
+    motionBand = -1;
+    if (driverKind == DRIVER_HOVER_UART) {
+      hover.setDecelBoost(false);
+    }
+    setDuty(0);
+    return;
+  }
 
   int8_t nextBand = 2;
   if (remaining_eff <= precisionZone_m) nextBand = 0;
@@ -257,7 +280,8 @@ void MotorController::tick(uint32_t nowMs, float currentDistance) {
 
   // Stop when inside tolerance and nearly not moving.
   // Hysteresis avoids oscillation at band edge.
-  if (remaining_eff <= stopTolerance_m && fabsf(vEst) <= vStop_mps) {
+  if ((remaining_eff <= stopTolerance_m && vAbs <= vStop_mps) ||
+      (remaining_eff <= 0.0f && vAbs <= 0.15f)) {
     motionActive = false;
     motionStage = MOTION_IDLE;
     motionBand = -1;
@@ -380,16 +404,16 @@ int MotorController::decelSpeed(float remaining, int maxSpeed, float brakingDist
   float ratio = remaining / brakingDistance;
   if (ratio < 0.0f) ratio = 0.0f;
   if (ratio > 1.0f) ratio = 1.0f;
-  float progress = 1.0f - ratio;
+
   float strength = constrain((float)brake.force / 100.0f, 0.0f, 1.5f);
-  progress = powf(progress, 1.0f + strength);
-  if (progress >= 1.0f) progress = 1.0f;
+  float exponent = constrain(1.3f - strength * 0.35f, 0.8f, 1.3f);
+  float shapedRatio = powf(ratio, exponent);
 
   int range = maxSpeed - motionProfile.minSpeed;
-  int result = motionProfile.minSpeed + (int)(range * (1.0f - progress));
+  int result = motionProfile.minSpeed + (int)(range * shapedRatio);
   if (result < motionProfile.minSpeed) result = motionProfile.minSpeed;
 
-  if (brake.mode == "hold" && progress >= 1.0f) {
+  if (brake.mode == "hold" && shapedRatio <= 0.0f) {
     return motionProfile.minSpeed;
   }
   return result;
