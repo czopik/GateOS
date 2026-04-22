@@ -137,6 +137,12 @@ public:
   bool isHoverRecoveryActive() const { return hoverRecoveryActive; }
   uint32_t getLastHoverRestoreMs() const { return lastHoverRestoreMs; }
   uint32_t getLastHoverLossMs() const { return lastHoverLossMs; }
+  // Diagnostics: level-based safety stop counters (Fix #1 / #6)
+  uint32_t getLimitSafetyStopCount() const { return limitSafetyStopCount_; }
+  uint32_t getLimitActiveWhileMovingMs() const { return limitActiveWhileMovingMs_; }
+  // v2: Expose volatile limit states for GateTask homing (avoids inputManager reads from GateTask)
+  bool getLimitOpenActive() const { return limitOpenActive; }
+  bool getLimitCloseActive() const { return limitCloseActive; }
 
   float getPosition() const { return status.position; }
   float getMaxDistance() const { return status.maxDistance; }
@@ -215,7 +221,13 @@ private:
 
   bool lastObstacle = false;
   uint32_t obstacleRefractoryUntilMs = 0;
-  bool limitOpenActive = false;
-  bool limitCloseActive = false;
+  // Written from main loop (updateLimitState/onLimitOpen/onLimitClose),
+  // read from GateTask (loop). volatile prevents compiler caching.
+  volatile bool limitOpenActive = false;
+  volatile bool limitCloseActive = false;
   GateTerminalState terminalState = GateTerminalState::Unknown;
+  // Fix #1 / #6: level-based safety stop diagnostics
+  uint32_t limitActiveStartMs_ = 0;      // internal: when did limit-active-while-moving window start
+  uint32_t limitActiveWhileMovingMs_ = 0; // ms that a relevant limit was active during movement
+  uint32_t limitSafetyStopCount_ = 0;    // count of GateTask-triggered level-based safety stops
 };

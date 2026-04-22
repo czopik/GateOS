@@ -201,6 +201,10 @@ void ConfigManager::begin() {
   lastRemotesSaveOk = true;
   lastRemotesSaveError = "";
   lastRemotesSaveMs = 0;
+  // FIX #3: create save mutex (idempotent — safe to call begin() multiple times)
+  if (!_saveMutex) {
+    _saveMutex = xSemaphoreCreateMutex();
+  }
   ensureDefaultConfigExists();
 }
 
@@ -463,6 +467,25 @@ bool ConfigManager::ensureDefaultConfigExists(String* error) {
 }
 
 void ConfigManager::load() {
+  // === v2 FIX D: Protect load() with the same mutex used by saveInternal().
+  // Prevents a concurrent processDeferredSave() (in configSaveTask) from writing
+  // the config file while load() is reading and parsing it.
+  // processPendingRuntimeConfigApply() already suspends GateTask (the normal
+  // trigger for configSaveSem), but configSaveTask is on its own FreeRTOS task
+  // and may have a save in progress. The mutex serialises them correctly.
+  // Timeout 2 s: saves complete in <300 ms; 2 s is ample even under flash wear delays.
+  if (_saveMutex) {
+    if (xSemaphoreTake(_saveMutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+      Serial.println("[CFG_LOAD] timeout waiting for save mutex — load aborted");
+      return;
+    }
+  }
+  struct LoadMutexGuard {
+    SemaphoreHandle_t sem;
+    explicit LoadMutexGuard(SemaphoreHandle_t s) : sem(s) {}
+    ~LoadMutexGuard() { if (sem) xSemaphoreGive(sem); }
+  } guard(_saveMutex);
+
   String err;
   if (!ensureDefaultConfigExists(&err)) {
     Serial.printf("CONFIG LOAD: default ensure failed (%s)\n", err.c_str());
@@ -551,20 +574,23 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     pendingSaveAtMs = millis();
     return true;
   }
-  static volatile bool saving = false;
-    if (saving) {
-    lastSaveError = "save_busy";
-    setError(error, lastSaveError.c_str());
-    pendingSave = true;
-    pendingSaveAtMs = millis();
-    return false;
+  // FIX #3: Replace the old check-then-set volatile flag with a proper
+  // FreeRTOS mutex so concurrent calls from configSaveTask and
+  // processPendingRuntimeConfigApply() are serialised correctly.
+  if (_saveMutex) {
+    if (xSemaphoreTake(_saveMutex, pdMS_TO_TICKS(300)) != pdTRUE) {
+      lastSaveError = "save_busy";
+      setError(error, lastSaveError.c_str());
+      pendingSave = true;
+      pendingSaveAtMs = millis();
+      return false;
+    }
   }
-  saving = true;
-  struct SaveGuard {
-    volatile bool* flag;
-    explicit SaveGuard(volatile bool* f) : flag(f) {}
-    ~SaveGuard() { *flag = false; }
-  } guard(&saving);
+  struct SaveMutexGuard {
+    SemaphoreHandle_t sem;
+    explicit SaveMutexGuard(SemaphoreHandle_t s) : sem(s) {}
+    ~SaveMutexGuard() { if (sem) xSemaphoreGive(sem); }
+  } guard(_saveMutex);
   lastSaveMs = millis();
   lastSaveError = "";
   size_t written = 0;

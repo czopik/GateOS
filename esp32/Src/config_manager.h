@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <vector>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // ConfigManager - persistent JSON config stored in LittleFS (/config.json)
 static constexpr const char* CONFIG_PATH = "/config.json";
@@ -335,4 +337,7 @@ private:
   bool readConfigFileToDoc(DynamicJsonDocument& doc, String& error);
   void buildJson(JsonDocument& doc) const;
   bool saveInternal(String* error, bool force);
+  // FIX #3: mutex serialises concurrent saveInternal() calls from
+  // configSaveTask and processPendingRuntimeConfigApply().
+  SemaphoreHandle_t _saveMutex = nullptr;
 };

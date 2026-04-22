@@ -132,6 +132,44 @@ static uint32_t fsUsedBytesCached = 0;
 static unsigned long fsLastStatsMs = 0;
 static QueueHandle_t eventQueue = nullptr;
 
+// === FIX #2: Gate command queue ===
+// All gate control commands (web, MQTT, remote, button) are enqueued here and
+// drained exclusively in GateTask, eliminating concurrent gate-state access.
+struct GateCmdItem {
+  char action[32];
+};
+static QueueHandle_t gateCommandQueue = nullptr;
+
+// === FIX #3: Config save background task ===
+static SemaphoreHandle_t configSaveSem      = nullptr;
+static TaskHandle_t      configSaveTaskHandle = nullptr;
+
+// === v2.1: Inter-task communication via xTaskNotify bits ===
+// All urgent gate commands use task notifications (eSetBits) into GateTask.
+// Bits are OR-accumulated between GateTask cycles and processed atomically at
+// the top of each cycle with xTaskNotifyWait(0, UINT32_MAX, &val, 0).
+//
+//   GATE_NOTIFY_STOP        — "stop" from web/MQTT handler (no ack required)
+//   GATE_NOTIFY_EMERGENCY   — emergency stop from OTA callback (ack via sem)
+//   GATE_NOTIFY_LIMIT_OPEN  — rising edge of open limit switch (from handleInputs)
+//   GATE_NOTIFY_LIMIT_CLOSE — rising edge of close limit switch (from handleInputs)
+//
+// emergencyStopAckSem: binary semaphore given by GateTask after it processes
+//   GATE_NOTIFY_EMERGENCY so OTA callback can wait with a hard timeout.
+//
+// inputsInitialized: set by main loop after the first handleInputs() iteration;
+//   GateTask homing waits for this before reading limit switch states.
+static constexpr uint32_t GATE_NOTIFY_STOP           = (1u << 0);
+static constexpr uint32_t GATE_NOTIFY_EMERGENCY      = (1u << 1);
+static constexpr uint32_t GATE_NOTIFY_LIMIT_OPEN     = (1u << 2);
+static constexpr uint32_t GATE_NOTIFY_LIMIT_CLOSE    = (1u << 3);
+static constexpr uint32_t GATE_NOTIFY_LIMITS_INVALID = (1u << 4);  // both limits active simultaneously
+static constexpr uint32_t GATE_NOTIFY_OBSTACLE       = (1u << 5);  // obstacle sensor state changed
+static SemaphoreHandle_t  emergencyStopAckSem         = nullptr;
+// Carries the obstacle active/clear state for GATE_NOTIFY_OBSTACLE; written before xTaskNotify.
+static volatile bool      obstacleNotifyActive        = false;
+static volatile bool      inputsInitialized           = false;
+
 static DebouncedInput limitOpenInput;
 static DebouncedInput limitCloseInput;
 static DebouncedInput stopInput;
@@ -206,8 +244,48 @@ static bool homingSoftLimitsOverridden = false;
 static bool homingSoftLimitsPrev = true;
 static int homingForceCmd = 80;
 static bool homingSearchOpen = false;
-static char homingReason[24] = "none";
-static char homingResult[24] = "idle";
+
+// === v2.1: Homing status as enums (written in GateTask, read in main loop) ===
+// Stored as volatile uint8_t: single-byte write/read is atomic on Xtensa.
+// String mapping is deferred to the API/status layer only.
+enum HomingResult : uint8_t {
+  HOMING_RESULT_IDLE    = 0,
+  HOMING_RESULT_PENDING,
+  HOMING_RESULT_RUNNING,
+  HOMING_RESULT_SUCCESS,
+  HOMING_RESULT_SKIP,
+  HOMING_RESULT_BLOCKED,
+  HOMING_RESULT_ERROR,
+  HOMING_RESULT_ABORT,
+};
+enum HomingReason : uint8_t {
+  HOMING_REASON_NONE                    = 0,
+  HOMING_REASON_COLD_BOOT_PENDING,
+  HOMING_REASON_NON_COLD_BOOT,
+  HOMING_REASON_CLOSE_LIMIT_ACTIVE,
+  HOMING_REASON_OPEN_LIMIT_ACTIVE,
+  HOMING_REASON_BOTH_LIMITS_ACTIVE,
+  HOMING_REASON_MANUAL_REF_REQUIRED,
+  HOMING_REASON_LIMITS_INACTIVE_UNKNOWN,
+  HOMING_REASON_OBSTACLE_ACTIVE,
+  HOMING_REASON_WAIT_COMM_RECOVERY,
+  HOMING_REASON_CRITICAL_ERROR,
+  HOMING_REASON_WAIT_TEL_STARTUP,
+  HOMING_REASON_STARTUP_TEL_FAULT,
+  HOMING_REASON_STARTUP_TEL_MISSING,
+  HOMING_REASON_START_FAILED,
+  HOMING_REASON_SEARCH_OPEN,
+  HOMING_REASON_SEARCH_CLOSE,
+  HOMING_REASON_OPEN_LIMIT_FOUND,
+  HOMING_REASON_CLOSE_LIMIT_FOUND,
+  HOMING_REASON_OBSTACLE_DURING_HOMING,
+  HOMING_REASON_TEL_LOST_OR_FAULT,
+  HOMING_REASON_GATE_ERROR_DURING_HOMING,
+  HOMING_REASON_DISTANCE_LIMIT,
+  HOMING_REASON_TIMEOUT,
+};
+static volatile uint8_t homingResultEnum = (uint8_t)HOMING_RESULT_IDLE;
+static volatile uint8_t homingReasonEnum = (uint8_t)HOMING_REASON_NONE;
 static uint32_t homingLastChangeMs = 0;
 static char startupSafetyReason[32] = "boot_pending";
 static bool chargerConnected = false;
@@ -307,6 +385,7 @@ void scheduleRuntimeConfigApply() {
 TaskHandle_t gateTaskHandle = NULL;
 
 ControlResult handleControlCmd(const char* action);
+static bool sendGateCommand(const char* action); // FIX #2: forward declaration
 void mqttPublishEvent(const char* level, const char* message);
 void mqttPublishLedState();
 void mqttPublishTelemetry();
@@ -349,11 +428,52 @@ static ControlResult makeControlResult(bool ok,
   return result;
 }
 
-static void setHomingResult(const char* result, const char* reason) {
-  strncpy(homingResult, result ? result : "", sizeof(homingResult) - 1);
-  homingResult[sizeof(homingResult) - 1] = '\0';
-  strncpy(homingReason, reason ? reason : "", sizeof(homingReason) - 1);
-  homingReason[sizeof(homingReason) - 1] = '\0';
+static const char* homingResultStr(HomingResult r) {
+  switch (r) {
+    case HOMING_RESULT_IDLE:    return "idle";
+    case HOMING_RESULT_PENDING: return "pending";
+    case HOMING_RESULT_RUNNING: return "running";
+    case HOMING_RESULT_SUCCESS: return "success";
+    case HOMING_RESULT_SKIP:    return "skip";
+    case HOMING_RESULT_BLOCKED: return "blocked";
+    case HOMING_RESULT_ERROR:   return "error";
+    case HOMING_RESULT_ABORT:   return "abort";
+    default:                    return "unknown";
+  }
+}
+static const char* homingReasonStr(HomingReason r) {
+  switch (r) {
+    case HOMING_REASON_NONE:                     return "none";
+    case HOMING_REASON_COLD_BOOT_PENDING:        return "cold_boot_pending";
+    case HOMING_REASON_NON_COLD_BOOT:            return "non_cold_boot";
+    case HOMING_REASON_CLOSE_LIMIT_ACTIVE:       return "close_limit_active";
+    case HOMING_REASON_OPEN_LIMIT_ACTIVE:        return "open_limit_active";
+    case HOMING_REASON_BOTH_LIMITS_ACTIVE:       return "both_limits_active";
+    case HOMING_REASON_MANUAL_REF_REQUIRED:      return "manual_reference_required";
+    case HOMING_REASON_LIMITS_INACTIVE_UNKNOWN:  return "limits_inactive_unknown_position";
+    case HOMING_REASON_OBSTACLE_ACTIVE:          return "obstacle_active";
+    case HOMING_REASON_WAIT_COMM_RECOVERY:       return "wait_comm_recovery";
+    case HOMING_REASON_CRITICAL_ERROR:           return "critical_error";
+    case HOMING_REASON_WAIT_TEL_STARTUP:         return "wait_telemetry_startup";
+    case HOMING_REASON_STARTUP_TEL_FAULT:        return "startup_tel_fault";
+    case HOMING_REASON_STARTUP_TEL_MISSING:      return "startup_tel_missing_retry";
+    case HOMING_REASON_START_FAILED:             return "start_failed";
+    case HOMING_REASON_SEARCH_OPEN:              return "search_open_limit";
+    case HOMING_REASON_SEARCH_CLOSE:             return "search_close_limit";
+    case HOMING_REASON_OPEN_LIMIT_FOUND:         return "open_limit_found";
+    case HOMING_REASON_CLOSE_LIMIT_FOUND:        return "close_limit_found";
+    case HOMING_REASON_OBSTACLE_DURING_HOMING:   return "obstacle_during_homing";
+    case HOMING_REASON_TEL_LOST_OR_FAULT:        return "telemetry_lost_or_fault";
+    case HOMING_REASON_GATE_ERROR_DURING_HOMING: return "gate_error_during_homing";
+    case HOMING_REASON_DISTANCE_LIMIT:           return "distance_limit";
+    case HOMING_REASON_TIMEOUT:                  return "timeout";
+    default:                                     return "unknown";
+  }
+}
+
+static void setHomingResult(HomingResult result, HomingReason reason) {
+  homingResultEnum = (uint8_t)result;
+  homingReasonEnum = (uint8_t)reason;
   homingLastChangeMs = millis();
 }
 
@@ -372,8 +492,9 @@ static void setStartupSafetyState(bool positionCertain, bool safetyLocked, const
 }
 
 static void logStartupHomingDiag(const char* stage, uint32_t nowMs, const char* note = "") {
-  const bool openActive = inputManager.limitOpenActive(config);
-  const bool closeActive = inputManager.limitCloseActive(config);
+  // v2: Read limit states from gate volatile vars (safe from GateTask context)
+  const bool openActive  = gate ? gate->getLimitOpenActive()  : inputManager.limitOpenActive(config);
+  const bool closeActive = gate ? gate->getLimitCloseActive() : inputManager.limitCloseActive(config);
   const bool obstacle = config.sensorsConfig.photocell.enabled && inputManager.obstacleActive();
   const bool gateExists = (gate != nullptr);
   const bool motorExists = (motor != nullptr);
@@ -492,14 +613,18 @@ static void applySlowHomingProfile() {
 }
 
 static void applyStartupLimitReference() {
-  if (startupLimitRefDone || !gate || !startupHomingEnabled) return;
-  bool openActive = inputManager.limitOpenActive(config);
-  bool closeActive = inputManager.limitCloseActive(config);
+  // v2: Guard: wait for main loop to complete at least one handleInputs() so that
+  // gate->limitOpenActive/limitCloseActive reflect real hardware state, not defaults.
+  if (startupLimitRefDone || !gate || !startupHomingEnabled || !inputsInitialized) return;
+  // Read limit states from gate volatile vars (written by main-loop handleInputs() via
+  // gate->updateLimitState(); volatile guarantees cross-core visibility on Xtensa).
+  bool openActive  = gate->getLimitOpenActive();
+  bool closeActive = gate->getLimitCloseActive();
   if (closeActive && !openActive) {
     gate->onLimitClose();
     positionTracker.requestResyncClose();
     setStartupSafetyState(true, false, "close_limit_reference");
-    setHomingResult("skip", "close_limit_active");
+    setHomingResult(HOMING_RESULT_SKIP, HOMING_REASON_CLOSE_LIMIT_ACTIVE);
     Serial.println("[HOMING] startup reference from CLOSE limit (position certain)");
     homingChecked = true;
     startupLimitRefDone = true;
@@ -507,14 +632,14 @@ static void applyStartupLimitReference() {
     gate->onLimitOpen();
     positionTracker.requestResyncOpen();
     setStartupSafetyState(true, false, "open_limit_reference");
-    setHomingResult("skip", "open_limit_active");
+    setHomingResult(HOMING_RESULT_SKIP, HOMING_REASON_OPEN_LIMIT_ACTIVE);
     Serial.println("[HOMING] startup reference from OPEN limit (position certain)");
     homingChecked = true;
     startupLimitRefDone = true;
   } else if (openActive && closeActive) {
     gate->setError(GATE_ERR_LIMITS_INVALID, GATE_STOP_ERROR);
     setStartupSafetyState(false, true, "both_limits_active");
-    setHomingResult("blocked", "both_limits_active");
+    setHomingResult(HOMING_RESULT_BLOCKED, HOMING_REASON_BOTH_LIMITS_ACTIVE);
     Serial.println("[HOMING] blocked: both limits active -> ERROR");
     homingChecked = true;
     startupLimitRefDone = true;
@@ -526,7 +651,7 @@ static void applyStartupLimitReference() {
     if (!startupCanRunHoverHoming()) {
       startupUiUnknownPos10 = false;
       setStartupSafetyState(false, true, "manual_reference_required");
-      setHomingResult("blocked", "manual_reference_required");
+      setHomingResult(HOMING_RESULT_BLOCKED, HOMING_REASON_MANUAL_REF_REQUIRED);
       homingChecked = true;
       Serial.println("[HOMING] blocked: no startup homing path (limits inactive, hover unavailable)");
     } else {
@@ -535,14 +660,19 @@ static void applyStartupLimitReference() {
       Serial.printf("[HOMING_TMP_POS] set mode=temp_100mm reason=limits_inactive_unknown_position mm=%ld\n",
                     (long)lroundf(kStartupTempDistanceMeters * 1000.0f));
       setStartupSafetyState(false, false, "limits_inactive_unknown_position");
-      setHomingResult("pending", "limits_inactive_unknown_position");
+      setHomingResult(HOMING_RESULT_PENDING, HOMING_REASON_LIMITS_INACTIVE_UNKNOWN);
       homingSearchOpen = true;
     }
     startupLimitRefDone = true;
   }
 }
 
-static void runStartupHoming(uint32_t nowMs) {
+// === v2: Homing state machine — runs exclusively in GateTask ===
+// Renamed from runStartupHoming(). All motor/gate mutations happen in GateTask
+// context: no cross-task races on MotorController or GateController state.
+// Limit switch state is read from gate->limitOpen/CloseActive (volatile bool,
+// written by main-loop handleInputs() → gate->updateLimitState()).
+static void runGateTaskHoming(uint32_t nowMs) {
   static const uint32_t kHomingReadyStableMs = 1200;
   static const uint32_t kHomingTelFailDebounceMs = 1500;
   static uint32_t lastDiagMs = 0;
@@ -567,11 +697,12 @@ static void runStartupHoming(uint32_t nowMs) {
 
   if (homingChecked && !homingActive) return;
 
-  const bool openActive = inputManager.limitOpenActive(config);
-  const bool closeActive = inputManager.limitCloseActive(config);
-  const bool obstacle = config.sensorsConfig.photocell.enabled && inputManager.obstacleActive();
-  const bool criticalError = gate->getErrorCode() != GATE_ERR_NONE || gate->getState() == GATE_ERROR;
-  const bool telHealthyForStart = hoverTelemetryHealthyForStartup(nowMs);
+  const bool openActive  = gate->getLimitOpenActive();
+  const bool closeActive = gate->getLimitCloseActive();
+  // obstacle: read from inputManager (debounced by main loop, eventual-consistent — safe)
+  const bool obstacle          = config.sensorsConfig.photocell.enabled && inputManager.obstacleActive();
+  const bool criticalError     = gate->getErrorCode() != GATE_ERR_NONE || gate->getState() == GATE_ERROR;
+  const bool telHealthyForStart  = hoverTelemetryHealthyForStartup(nowMs);
   const bool telHealthyForHoming = hoverTelemetryHealthyForHomingMotion(nowMs);
 
   if (!homingActive) {
@@ -581,13 +712,13 @@ static void runStartupHoming(uint32_t nowMs) {
       positionTracker.requestResyncClose();
       setStartupSafetyState(true, false, "close_limit_reference");
       homingChecked = true;
-      setHomingResult("skip", "close_limit_active");
+      setHomingResult(HOMING_RESULT_SKIP, HOMING_REASON_CLOSE_LIMIT_ACTIVE);
       Serial.println("[HOMING] close limit active -> reference set, no movement");
       return;
     }
     if (obstacle && !homingSearchOpen) {
       setStartupSafetyState(false, false, "obstacle_active");
-      setHomingResult("blocked", "obstacle_active");
+      setHomingResult(HOMING_RESULT_BLOCKED, HOMING_REASON_OBSTACLE_ACTIVE);
       return;
     }
     if (criticalError) {
@@ -595,13 +726,14 @@ static void runStartupHoming(uint32_t nowMs) {
       const bool retryableCommErr = (ec == GATE_ERR_HOVER_TEL_TIMEOUT || ec == GATE_ERR_HOVER_OFFLINE);
       setStartupSafetyState(false, retryableCommErr ? false : true, retryableCommErr ? "wait_comm_recovery" : "critical_error");
       homingChecked = retryableCommErr ? false : true;
-      setHomingResult(retryableCommErr ? "pending" : "blocked", retryableCommErr ? "wait_comm_recovery" : "critical_error");
+      setHomingResult(retryableCommErr ? HOMING_RESULT_PENDING : HOMING_RESULT_BLOCKED,
+                   retryableCommErr ? HOMING_REASON_WAIT_COMM_RECOVERY : HOMING_REASON_CRITICAL_ERROR);
       return;
     }
     if (!telHealthyForStart) {
       const uint32_t kStartupTelGraceMs = 5000;
       if ((nowMs - startupBootMs) < kStartupTelGraceMs) {
-        setHomingResult("pending", "wait_telemetry_startup");
+        setHomingResult(HOMING_RESULT_PENDING, HOMING_REASON_WAIT_TEL_STARTUP);
         homingReadySinceMs = 0;
         return;
       }
@@ -609,13 +741,13 @@ static void runStartupHoming(uint32_t nowMs) {
       if (tel.fault != 0) {
         gate->setError(GATE_ERR_HOVER_FAULT, GATE_STOP_HOVER_FAULT);
         setStartupSafetyState(false, true, "startup_tel_fault");
-        setHomingResult("error", "startup_tel_fault");
+        setHomingResult(HOMING_RESULT_ERROR, HOMING_REASON_STARTUP_TEL_FAULT);
         Serial.printf("[HOMING] startup blocked: telemetry fault=%d -> ERROR\n", tel.fault);
       } else {
         // Telemetry may appear late after reboot / flash / hoverboard re-arm.
         // Do not permanently lock startup homing here; keep waiting and retry.
         setStartupSafetyState(false, false, "startup_tel_missing_retry");
-        setHomingResult("pending", "startup_tel_missing_retry");
+        setHomingResult(HOMING_RESULT_PENDING, HOMING_REASON_STARTUP_TEL_MISSING);
         homingChecked = false;
         if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 30000) {
           Serial.println("[HOMING] startup telemetry missing -> keep waiting/retrying");
@@ -658,7 +790,7 @@ static void runStartupHoming(uint32_t nowMs) {
       restoreNormalMotionProfile();
       homingChecked = true;
       setStartupSafetyState(false, true, "start_failed");
-      setHomingResult("blocked", "start_failed");
+      setHomingResult(HOMING_RESULT_BLOCKED, HOMING_REASON_START_FAILED);
       Serial.println("[HOMING] start failed (no motor path)");
       return;
     }
@@ -666,7 +798,7 @@ static void runStartupHoming(uint32_t nowMs) {
     homingStartMs = nowMs;
     moveStartPosition = gate->getControlPosition();
     setStartupSafetyState(false, false, "homing_running");
-    setHomingResult("running", searchOpen ? "search_open_limit" : "search_close_limit");
+    setHomingResult(HOMING_RESULT_RUNNING, searchOpen ? HOMING_REASON_SEARCH_OPEN : HOMING_REASON_SEARCH_CLOSE);
     Serial.printf("[HOMING] start -> %s at slow profile\n", searchOpen ? "OPEN" : "CLOSE");
     return;
   }
@@ -699,7 +831,7 @@ static void runStartupHoming(uint32_t nowMs) {
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
     setStartupSafetyState(true, false, searchOpen ? "open_limit_found" : "close_limit_found");
-    setHomingResult("success", searchOpen ? "open_limit_found" : "close_limit_found");
+    setHomingResult(HOMING_RESULT_SUCCESS, searchOpen ? HOMING_REASON_OPEN_LIMIT_FOUND : HOMING_REASON_CLOSE_LIMIT_FOUND);
     Serial.printf("[HOMING] success (%s limit)\n", searchOpen ? "open" : "close");
     return;
   }
@@ -712,7 +844,7 @@ static void runStartupHoming(uint32_t nowMs) {
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
     setStartupSafetyState(false, true, "obstacle_during_homing");
-    setHomingResult("abort", "obstacle");
+    setHomingResult(HOMING_RESULT_ABORT, HOMING_REASON_OBSTACLE_DURING_HOMING);
     Serial.println("[HOMING] abort: obstacle");
     return;
   }
@@ -729,7 +861,7 @@ static void runStartupHoming(uint32_t nowMs) {
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
     setStartupSafetyState(false, false, "telemetry_lost_or_fault");
-    setHomingResult("abort", "telemetry_lost_or_fault");
+    setHomingResult(HOMING_RESULT_ABORT, HOMING_REASON_TEL_LOST_OR_FAULT);
     Serial.println("[HOMING] abort: telemetry lost/fault -> retry pending");
     return;
   }
@@ -741,7 +873,7 @@ static void runStartupHoming(uint32_t nowMs) {
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
     setStartupSafetyState(false, true, "gate_error_during_homing");
-    setHomingResult("abort", "gate_error");
+    setHomingResult(HOMING_RESULT_ABORT, HOMING_REASON_GATE_ERROR_DURING_HOMING);
     Serial.println("[HOMING] abort: gate error");
     return;
   }
@@ -758,7 +890,7 @@ static void runStartupHoming(uint32_t nowMs) {
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
     setStartupSafetyState(false, true, "distance_limit");
-    setHomingResult("abort", "distance_limit");
+    setHomingResult(HOMING_RESULT_ABORT, HOMING_REASON_DISTANCE_LIMIT);
     Serial.printf("[HOMING] abort: distance limit traveled=%.2fm limit=%.2fm\n", traveled, maxAllowedTravel);
     return;
   }
@@ -771,7 +903,7 @@ static void runStartupHoming(uint32_t nowMs) {
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
     setStartupSafetyState(false, true, "timeout");
-    setHomingResult("abort", "timeout");
+    setHomingResult(HOMING_RESULT_ABORT, HOMING_REASON_TIMEOUT);
     Serial.println("[HOMING] abort: timeout");
     return;
   }
@@ -1158,12 +1290,16 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     StaticJsonDocument<128> doc;
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
       const char* action = doc["action"] | "";
-      if (action[0] != '\0') handleControlCmd(action);
+      if (action[0] != '\0') {
+        // FIX #2: route via queue
+        if (!sendGateCommand(action)) handleControlCmd(action);
+      }
     }
     return;
   }
   if (isCmd || isGateCmd) {
-    handleControlCmd(buf);
+    // FIX #2: route via queue
+    if (!sendGateCommand(buf)) handleControlCmd(buf);
   }
 }
 
@@ -1191,27 +1327,19 @@ void handleInputs() {
   gate->updateLimitState(inputManager.limitOpenActive(config), inputManager.limitCloseActive(config));
 
   if (ev.stopPressed) {
-    gate->onStopInput();
+    // v2.1: route via GATE_NOTIFY_STOP — gate->stop() executes in GateTask.
+    if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_STOP, eSetBits);
     pushEvent("warn", "stop input");
   }
 
   if (ev.obstacleChanged) {
     if (photocellEnabled) {
-      GateCommandResponse r = gate->onObstacle(ev.obstacleActive);
+      // v2.1: route gate mutation via GATE_NOTIFY_OBSTACLE + volatile state.
+      // Main loop: push conservative event. GateTask: calls gate->onObstacle().
+      obstacleNotifyActive = ev.obstacleActive;
+      if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_OBSTACLE, eSetBits);
       if (ev.obstacleActive) {
-        if (r.applied) {
-          if (r.cmd == GATE_CMD_OPEN) pushEvent("warn", "obstacle -> open");
-          else if (r.cmd == GATE_CMD_CLOSE) pushEvent("warn", "obstacle -> close");
-          else if (r.cmd == GATE_CMD_STOP) pushEvent("warn", "obstacle -> stop");
-          else pushEvent("warn", "obstacle");
-          if (r.followUpBlocked) {
-            pushEvent("warn", "obstacle reopen blocked");
-            led.setOverride("command_rejected", 600);
-          }
-        } else if (r.result == GATE_CMD_BLOCKED) {
-          pushEvent("warn", "obstacle action blocked");
-          led.setOverride("command_rejected", 600);
-        }
+        pushEvent("warn", "obstacle detected");
       }
     }
   }
@@ -1223,32 +1351,41 @@ void handleInputs() {
                     inputManager.limitCloseActive(config) ? 1 : 0);
       pushEvent("error", "limits_invalid (both active)");
     }
-    gate->onLimitsInvalid();
+    // v2.1: route gate mutation via GATE_NOTIFY_LIMITS_INVALID — executes in GateTask.
+    if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_LIMITS_INVALID, eSetBits);
   }
 
   if (ev.limitOpenRising) {
     led.setOverride("limit_open_hit", 380);
-    gate->onLimitOpen();
-    positionTracker.requestResyncOpen();
+    // v2.1: route to GateTask via xTaskNotify — gate->onLimitOpen() mutates state machine.
+    if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_LIMIT_OPEN, eSetBits);
     pushEvent("info", "limit open");
   }
 
   if (ev.limitCloseRising) {
     led.setOverride("limit_close_hit", 380);
-    gate->onLimitClose();
-    positionTracker.requestResyncClose();
+    // v2.1: route to GateTask via xTaskNotify — gate->onLimitClose() mutates state machine.
+    if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_LIMIT_CLOSE, eSetBits);
     pushEvent("info", "limit close");
   }
 
   if (ev.buttonPressed) {
-    GateCommandResponse r = gate->handleCommand("toggle");
-    if (r.result == GATE_CMD_OK) {
-      pushEvent("info", r.applied ? "button toggle" : "button toggle (no-op)");
-    } else if (r.result == GATE_CMD_BLOCKED) {
-      pushEvent("warn", "button toggle blocked");
-      led.setOverride("command_rejected", 600);
+    // FIX #2: enqueue toggle — GateTask processes it in safe context
+    if (!sendGateCommand("toggle")) {      // Queue full fallback: direct call
+      GateCommandResponse r = gate->handleCommand("toggle");
+      if (r.result == GATE_CMD_OK) {
+        pushEvent("info", r.applied ? "button toggle" : "button toggle (no-op)");
+      } else if (r.result == GATE_CMD_BLOCKED) {
+        pushEvent("warn", "button toggle blocked");
+        led.setOverride("command_rejected", 600);
+      }
+    } else {
+      pushEvent("info", "button toggle");
     }
   }
+  // v2: Signal GateTask that limit states are now valid (at least one poll done).
+  // GateTask homing waits for this before reading gate->limitOpenActive/limitCloseActive.
+  inputsInitialized = true;
 }
 
 void IRAM_ATTR hallIsr() {
@@ -1411,6 +1548,9 @@ void fillDiagnostics(JsonObject& out) {
     gateDiag["hoverRecoveryActive"] = gate->isHoverRecoveryActive();
     gateDiag["lastHoverRestoreMs"] = gate->getLastHoverRestoreMs();
     gateDiag["lastHoverLossMs"] = gate->getLastHoverLossMs();
+    // FIX #6: limit-safety diagnostic counters
+    gateDiag["limitSafetyStopCount"] = gate->getLimitSafetyStopCount();
+    gateDiag["limitActiveWhileMovingMs"] = gate->getLimitActiveWhileMovingMs();
   } else {
     gateDiag["stopReason"] = 0;
     gateDiag["stopReasonLabel"] = "none";
@@ -1453,8 +1593,8 @@ void fillDiagnostics(JsonObject& out) {
 
   JsonObject homingObj = out.createNestedObject("homing");
   homingObj["active"] = homingActive;
-  homingObj["reason"] = homingReason;
-  homingObj["result"] = homingResult;
+  homingObj["reason"] = homingReasonStr((HomingReason)homingReasonEnum);
+  homingObj["result"] = homingResultStr((HomingResult)homingResultEnum);
   homingObj["lastChangeMs"] = homingLastChangeMs;
   homingObj["enabled"] = startupHomingEnabled;
   homingObj["positionCertain"] = startupPositionCertain;
@@ -1618,8 +1758,8 @@ void fillStatus(JsonObject& out) {
 
   JsonObject homingObj = out.createNestedObject("homing");
   homingObj["active"] = homingActive;
-  homingObj["reason"] = homingReason;
-  homingObj["result"] = homingResult;
+  homingObj["reason"] = homingReasonStr((HomingReason)homingReasonEnum);
+  homingObj["result"] = homingResultStr((HomingResult)homingResultEnum);
   homingObj["lastChangeMs"] = homingLastChangeMs;
   homingObj["enabled"] = startupHomingEnabled;
   homingObj["positionCertain"] = startupPositionCertain;
@@ -1723,12 +1863,17 @@ void fillRemoteState(JsonObject& out) {
 ControlResult handleControlCmd(const char* action) {
   if (!gate) return makeControlResult(false, false, 503, "error", "gate_not_ready");
   if (!action || action[0] == '\0') return makeControlResult(false, false, 422, "invalid", "missing_action");
-  if (startupHomingEnabled && !startupPositionCertain) {
-    pushEvent("warn", "control blocked: position not referenced");
-    Serial.printf("[UI] control blocked: startup safety (reason=%s)\n", startupSafetyReason);
+
+  // FIX #4: Allow "stop" even when position is not yet referenced (safety measure).
+  // Movement commands are still blocked until homing establishes position.
+  const bool isStopCmd = (strcmp(action, "stop") == 0);
+  if (startupHomingEnabled && !startupPositionCertain && !isStopCmd) {
+    pushEvent("warn", "control blocked: homing pending — stop still allowed");
+    Serial.printf("[UI] control blocked: startup_safety reason=%s action=%s (stop always permitted)\n",
+                  startupSafetyReason, action);
     return makeControlResult(false, false, 409, "blocked", "position_not_referenced");
   }
-  if (startupSafetyLocked) {
+  if (startupSafetyLocked && !isStopCmd) {
     pushEvent("warn", "control blocked: startup safety lock");
     Serial.printf("[UI] control blocked: startup safety lock (reason=%s)\n", startupSafetyReason);
     return makeControlResult(false, false, 423, "blocked", "startup_safety_lock");
@@ -1837,6 +1982,40 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
 }
 
 ControlResult handleControlWrapper(const String& action) {
+  // === v2.1 FIX B: "stop" routed via xTaskNotify — no volatile flag, no direct gate->stop().
+  // GateTask processes GATE_NOTIFY_STOP within ≤10 ms (one cycle).
+  if (action == "stop") {
+    const bool wasMoving = gate && gate->isMoving();  // bool read: atomic on Xtensa
+    if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_STOP, eSetBits);
+    return makeControlResult(true, wasMoving, 200, "ok");
+  }
+  // Pre-validate startup safety before enqueuing (so we can return an
+  // accurate HTTP status to the caller right now).
+  if (!gate) return makeControlResult(false, false, 503, "error", "gate_not_ready");
+  const bool isStopCmd = false;  // already handled above
+  if (startupHomingEnabled && !startupPositionCertain && !isStopCmd) {
+    pushEvent("warn", "control blocked: homing pending");
+    return makeControlResult(false, false, 409, "blocked", "position_not_referenced");
+  }
+  if (startupSafetyLocked) {
+    pushEvent("warn", "control blocked: startup safety lock");
+    return makeControlResult(false, false, 423, "blocked", "startup_safety_lock");
+  }
+  if (homingActive) {
+    pushEvent("warn", "control blocked by homing");
+    return makeControlResult(false, false, 409, "blocked", "homing_active");
+  }
+  if (otaActive) {
+    pushEvent("warn", "control blocked by ota");
+    return makeControlResult(false, false, 423, "blocked", "ota_active");
+  }
+  // Enqueue movement command for GateTask
+  if (sendGateCommand(action.c_str())) {
+    Serial.printf("[UI] control queued action=%s\n", action.c_str());
+    return makeControlResult(true, true, 200, "ok");
+  }
+  // Queue full fallback: direct synchronous call
+  Serial.printf("[UI] control queue full, direct call action=%s\n", action.c_str());
   return handleControlCmd(action.c_str());
 }
 
@@ -1952,7 +2131,8 @@ void onHcsReceived(unsigned long serial, unsigned long encript, bool btnToggle, 
   seen.lastActionMs = now;
   seen.encript = encript;
 
-  handleControlCmd("toggle");
+  // FIX #2: enqueue toggle command for GateTask
+  if (!sendGateCommand("toggle")) handleControlCmd("toggle");
   pushEvent("info", "remote: toggle");
 }
 
@@ -2000,11 +2180,14 @@ void setupOta() {
     otaProgress = 0;
     otaError[0] = '\0';
     pushEvent("info", "ota start");
-    if (gate) gate->stop(GATE_STOP_USER);
-    if (motor) {
-      motor->stopHard();
-      if (motor->isHoverUart()) {
-        motor->hoverDisarm();
+    // === v2.1 FIX A: Emergency stop via xTaskNotify + ack semaphore handshake.
+    // GateTask processes GATE_NOTIFY_EMERGENCY within ≤10 ms (one cycle), then
+    // gives emergencyStopAckSem. OTA waits up to 50 ms for the ack.
+    // If ack times out, GateTask was likely blocked (log error, continue OTA).
+    if (gateTaskHandle && emergencyStopAckSem) {
+      xTaskNotify(gateTaskHandle, GATE_NOTIFY_EMERGENCY, eSetBits);
+      if (xSemaphoreTake(emergencyStopAckSem, pdMS_TO_TICKS(50)) != pdTRUE) {
+        Serial.println("[OTA] WARNING: emergency stop ack timeout — GateTask may be blocked");
       }
     }
     led.setOtaActive(true);
@@ -2029,6 +2212,33 @@ void setupOta() {
   otaReady = true;
 }
 
+// === FIX #2: Send a gate action to the command queue (fire-and-forget). ===
+// Safe to call from any task/context. Returns false if queue is full.
+static bool sendGateCommand(const char* action) {
+  if (!gateCommandQueue || !action) return false;
+  GateCmdItem item;
+  strncpy(item.action, action, sizeof(item.action) - 1);
+  item.action[sizeof(item.action) - 1] = '\0';
+  return xQueueSend(gateCommandQueue, &item, 0) == pdTRUE;
+}
+
+// === FIX #3: Background task for deferred config saves. ===
+// Triggered by a binary semaphore; saves at most once per 500 ms.
+static void configSaveTask(void* pvParameters) {
+  const TickType_t kMinIntervalTicks = pdMS_TO_TICKS(500);
+  TickType_t lastSaveTick = xTaskGetTickCount() - kMinIntervalTicks;
+  while (1) {
+    xSemaphoreTake(configSaveSem, portMAX_DELAY);  // wait for signal
+    const TickType_t nowTick = xTaskGetTickCount();
+    const TickType_t elapsed = nowTick - lastSaveTick;
+    if (elapsed < kMinIntervalTicks) {
+      vTaskDelay(kMinIntervalTicks - elapsed);
+    }
+    config.processDeferredSave();
+    lastSaveTick = xTaskGetTickCount();
+  }
+}
+
 void gateTask(void* pvParameters) {
   const bool wdtEnabled = config.safetyConfig.watchdogEnabled;
   if (wdtEnabled) {
@@ -2036,7 +2246,81 @@ void gateTask(void* pvParameters) {
   }
   while (1) {
     gateTaskHeartbeatMs = millis();
-    if (gate) gate->loop();
+    const uint32_t nowMs = (uint32_t)gateTaskHeartbeatMs;
+
+    // === v2.1: Drain all pending task notifications (non-blocking, bits OR-accumulated). ===
+    // xTaskNotify(gateTaskHandle, bit, eSetBits) from any context; processed here in
+    // priority order before any gate/motor mutation this cycle.
+    uint32_t notifyVal = 0;
+    xTaskNotifyWait(0, UINT32_MAX, &notifyVal, 0);
+
+    // FIX A: Emergency stop from OTA callback — with ack handshake.
+    // OTA sets GATE_NOTIFY_EMERGENCY and waits (≤50 ms) on emergencyStopAckSem.
+    // ack is given AFTER gate->stop() + motor->stopHard() + hoverDisarm() complete.
+    if (notifyVal & GATE_NOTIFY_EMERGENCY) {
+      if (gate) gate->stop(GATE_STOP_USER);
+      if (motor) {
+        motor->stopHard();
+        if (motor->isHoverUart()) motor->hoverDisarm();
+      }
+      if (emergencyStopAckSem) xSemaphoreGive(emergencyStopAckSem);  // ack after full stop
+    }
+
+    // FIX B: Stop from web/MQTT / stop-button — no ack needed, ≤10 ms latency.
+    // Also handles gate->onStopInput() routed from handleInputs().
+    if (notifyVal & GATE_NOTIFY_STOP) {
+      if (gate) gate->stop(GATE_STOP_USER);
+    }
+
+    // Safety: both limits active simultaneously → gate error + stop.
+    // Runs regardless of calibration (safety override).
+    if (notifyVal & GATE_NOTIFY_LIMITS_INVALID) {
+      if (gate) gate->onLimitsInvalid();
+    }
+
+    // Safety: obstacle sensor rising/falling edge — gate->onObstacle() mutates state machine.
+    // Runs regardless of calibration (safety override).
+    // obstacleNotifyActive written by main loop before xTaskNotify; volatile guarantees visibility.
+    if (notifyVal & GATE_NOTIFY_OBSTACLE) {
+      if (gate) gate->onObstacle(obstacleNotifyActive);
+    }
+
+    // Limit rising-edge events routed from handleInputs() via xTaskNotify.
+    // onLimitOpen/Close mutate position + state machine — runs in GateTask only.
+    // Guarded by calibration check: calibration handles its own limit detection internally.
+    if (!calibration.isRunning()) {
+      if (notifyVal & GATE_NOTIFY_LIMIT_OPEN) {
+        if (gate) gate->onLimitOpen();
+        positionTracker.requestResyncOpen();
+      }
+      if (notifyVal & GATE_NOTIFY_LIMIT_CLOSE) {
+        if (gate) gate->onLimitClose();
+        positionTracker.requestResyncClose();
+      }
+    }
+
+    // FIX #2 (CalibrationManager): while calibration owns the motor, GateTask yields
+    // all gate/motor mutations (homing, queue drain, gate->loop). WDT still resets.
+    // Safety events above (EMERGENCY, STOP, LIMITS_INVALID, OBSTACLE) bypass this guard.
+    if (!calibration.isRunning()) {
+      // FIX C: Homing runs exclusively in GateTask (sole motor/gate owner).
+      if (startupHomingEnabled && (!startupPositionCertain || homingActive)) {
+        runGateTaskHoming(nowMs);
+      }
+
+      // Drain command queue (skipped during active homing to prevent commands
+      // from interfering with the homing motor drive).
+      if (!homingActive && gateCommandQueue && gate) {
+        GateCmdItem item;
+        while (xQueueReceive(gateCommandQueue, &item, 0) == pdTRUE) {
+          handleControlCmd(item.action);
+        }
+      }
+
+      // gate->loop(): FIX #1 level-based stop, over-current, stall, status publish.
+      if (gate) gate->loop();
+    }
+
     if (wdtEnabled) {
       esp_task_wdt_reset();
     }
@@ -2062,11 +2346,11 @@ void setup() {
   startupHomingEnabled = true;
   if (!startupHomingEnabled) {
     setStartupSafetyState(true, false, "non_cold_boot");
-    setHomingResult("skip", "non_cold_boot");
+    setHomingResult(HOMING_RESULT_SKIP, HOMING_REASON_NON_COLD_BOOT);
     homingChecked = true;
   } else {
     setStartupSafetyState(false, false, "cold_boot_pending");
-    setHomingResult("pending", "cold_boot_pending");
+    setHomingResult(HOMING_RESULT_PENDING, HOMING_REASON_COLD_BOOT_PENDING);
     homingChecked = false;
   }
 
@@ -2115,6 +2399,13 @@ void setup() {
   gate->begin();
   gate->setStatusCallback(onGateStatusChanged, nullptr);
   eventQueue = xQueueCreate(64, sizeof(EventEntry));
+  // FIX #2: gate command queue (32 slots × 32-byte action string)
+  gateCommandQueue = xQueueCreate(32, sizeof(GateCmdItem));
+  // FIX #3: config save semaphore + background task
+  configSaveSem = xSemaphoreCreateBinary();
+  xTaskCreate(configSaveTask, "ConfigSave", 4096, nullptr, 1, &configSaveTaskHandle);
+  // v2.1 FIX A: emergency stop ack semaphore (OTA callback waits for GateTask ack)
+  emergencyStopAckSem = xSemaphoreCreateBinary();
   positionTracker.begin(&config, motor, gate);
   positionTracker.initializeFromConfig();
   syncLegacyPositionState();
@@ -2181,7 +2472,8 @@ void loop() {
   updatePositionPercent();
   unsigned long now = millis();
   updateHallStats(now);
-  runStartupHoming(now);
+  // v2: runStartupHoming() removed from main loop — homing now runs in GateTask
+  // (runGateTaskHoming) as the sole owner of MotorController and GateController.
   updateFsStats(now);
   processPendingRuntimeConfigApply(now);
 
@@ -2286,7 +2578,11 @@ void loop() {
     pushEvent("info", "config save completed");
   }
   saveWasPending = savePending;
-  config.processDeferredSave();
+  // FIX #3: Signal background ConfigSaveTask — no more blocking LittleFS I/O
+  // in main loop. configSaveTask rate-limits to ≤ once per 500 ms.
+  if (savePending && configSaveSem) {
+    xSemaphoreGive(configSaveSem);
+  }
   if (factoryResetPending && (int32_t)(now - factoryResetAtMs) >= 0) {
     factoryResetPending = false;
     config.resetToDefaults();

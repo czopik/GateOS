@@ -108,6 +108,42 @@ void GateController::loop() {
     publishStatusIfChanged();
   }
 
+  // === FIX #1: Level-based limit safety check ===
+  // Runs in GateTask every 10 ms. Stops the gate within ≤10 ms of a limit
+  // switch activation, independent of main-loop timing jitter.
+  // limitOpenActive / limitCloseActive are volatile — written atomically from
+  // main loop (updateLimitState / onLimitOpen / onLimitClose), read here.
+  if (moving && !pendingStop) {
+    const bool relevantLimitActive =
+        (state == GATE_OPENING && limitOpenActive) ||
+        (state == GATE_CLOSING && limitCloseActive);
+    if (relevantLimitActive) {
+      const uint32_t nowMs = millis();
+      if (limitActiveStartMs_ == 0) limitActiveStartMs_ = nowMs;
+      limitActiveWhileMovingMs_ = nowMs - limitActiveStartMs_;
+      const GateStopReason safetyReason =
+          (state == GATE_OPENING) ? GATE_STOP_LIMIT_OPEN : GATE_STOP_LIMIT_CLOSE;
+      limitSafetyStopCount_++;
+      Serial.printf("[GATE] SAFETY level-stop: %s=1 while %s pos=%.3fm activeMs=%lu stopCount=%lu\n",
+                    (state == GATE_OPENING) ? "limitOpen" : "limitClose",
+                    (state == GATE_OPENING) ? "OPENING" : "CLOSING",
+                    status.position,
+                    (unsigned long)limitActiveWhileMovingMs_,
+                    (unsigned long)limitSafetyStopCount_);
+      stop(safetyReason);
+      limitActiveStartMs_ = 0;
+      limitActiveWhileMovingMs_ = 0;
+      return;
+    } else {
+      // Limit inactive or wrong direction — reset diagnostic timer
+      limitActiveStartMs_ = 0;
+      limitActiveWhileMovingMs_ = 0;
+    }
+  } else if (!moving) {
+    limitActiveStartMs_ = 0;
+    limitActiveWhileMovingMs_ = 0;
+  }
+
   if (moving) {
     float progressPos = status.position;
     if (motor && motor->isHoverUart()) {
