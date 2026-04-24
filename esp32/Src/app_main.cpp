@@ -187,6 +187,7 @@ static char otaError[48] = {0};
 static bool otaNetDiagLogged = false;
 static unsigned long lastMqttPublish = 0;
 static unsigned long lastMqttTelemetryMs = 0;
+static unsigned long lastMqttHoverTelMs = 0;  // v2.2: hover telemetry at 5s (separate from motion 1s)
 static bool mqttWasConnected = false;
 static unsigned long lastCalibWsMs = 0;
 static bool restartPending = false;
@@ -2520,12 +2521,18 @@ void loop() {
       mqttPublishStatus();
       mqttPublishLedState();
     }
+    // v2.2: Split MQTT publish burst to reduce LwIP tcpip_task contention.
+    // Motion-critical topics (position, state) at 1s — automation needs these.
+    // Hover telemetry at 5s — hover not always connected, large JSON, low urgency.
     if (now - lastMqttTelemetryMs > 1000) {
       lastMqttTelemetryMs = now;
-      mqttPublishTelemetry();
       mqttPublishPosition();
       mqttPublishMotionState();
       mqttPublishMotionPosition();
+    }
+    if (now - lastMqttHoverTelMs > 5000) {
+      lastMqttHoverTelMs = now;
+      mqttPublishTelemetry();
     }
   }
 

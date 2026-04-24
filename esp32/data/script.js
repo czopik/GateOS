@@ -404,7 +404,7 @@ function connectWs() {
 function startPollingOnce() {
   if (state.intervalsStarted) return;
   state.intervalsStarted = true;
-  setInterval(fetchStatusLite, 500);
+  setInterval(fetchStatusLite, 1000);  // v2.2: 1s instead of 500ms — halves HTTP/LwIP load when idle
   setInterval(fetchStatusFull, 10000);
 }
 
