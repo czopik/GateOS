@@ -194,6 +194,9 @@ private:
   GateErrorCode errorCode = GATE_ERR_NONE;
   float lastProgressPos = 0.0f;
   float controlPosition = 0.0f;
+  // controlPosition recorded at the start of each move; used by soft-limit check
+  // to prevent immediate fire when gate starts from within the soft-limit zone.
+  float moveStartControlPos_ = 0.0f;
   // Set when the user manually stops the gate during movement.
   // Cleared when a new movement starts or gate reaches an endpoint.
   bool userStoppedDuringMove_ = false;

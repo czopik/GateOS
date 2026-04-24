@@ -54,17 +54,19 @@ inline GateMoveDirection resolveToggleDirection(const GateDecisionContext& ctx) 
   if (ctx.limitOpenActive) return GateMoveDirection::Close;
   if (ctx.limitCloseActive) return GateMoveDirection::Open;
 
-  // 2. Terminal states (gate reached an endpoint via soft limit or limit switch)
-  if (ctx.terminalState == GateTerminalState::FullyOpen) return GateMoveDirection::Close;
-  if (ctx.terminalState == GateTerminalState::FullyClosed) return GateMoveDirection::Open;
-
-  // 3. If the user manually stopped the gate during movement,
-  //    always reverse direction — even if near an endpoint.
-  //    This prevents the confusing behavior where the gate
-  //    continues in the same direction after a user stop.
+  // 2. If the user manually stopped the gate during movement, ALWAYS reverse direction.
+  //    This has higher priority than terminal state to handle the case where
+  //    gate barely moved from OPEN limit (terminalState may still be FullyOpen
+  //    due to race with refreshTerminalStateFromPosition) but user clearly
+  //    wants to reverse.  The physical hard-limit check above is still the
+  //    ultimate guard.
   if (ctx.userStoppedDuringMove) {
     return ctx.lastDirection >= 0 ? GateMoveDirection::Close : GateMoveDirection::Open;
   }
+
+  // 3. Terminal states (gate reached an endpoint via soft limit or limit switch)
+  if (ctx.terminalState == GateTerminalState::FullyOpen) return GateMoveDirection::Close;
+  if (ctx.terminalState == GateTerminalState::FullyClosed) return GateMoveDirection::Open;
 
   // 4. Position-based fallbacks for idle/unknown states
   if (ctx.maxDistance <= 0.0f || gateNearClosed(ctx)) return GateMoveDirection::Open;
@@ -82,10 +84,14 @@ inline GateMoveBlockReason validateMoveDirection(const GateDecisionContext& ctx,
 
   if (dir == GateMoveDirection::Open) {
     if (ctx.limitOpenActive) return GateMoveBlockReason::LimitOpenActive;
-    if (ctx.terminalState == GateTerminalState::FullyOpen) return GateMoveBlockReason::FullyOpen;
+    // When user manually stopped mid-move, bypass stale FullyOpen terminal state.
+    // The physical limit check above already guards the real hardware limit.
+    if (!ctx.userStoppedDuringMove && ctx.terminalState == GateTerminalState::FullyOpen)
+      return GateMoveBlockReason::FullyOpen;
   } else if (dir == GateMoveDirection::Close) {
     if (ctx.limitCloseActive) return GateMoveBlockReason::LimitCloseActive;
-    if (ctx.terminalState == GateTerminalState::FullyClosed) return GateMoveBlockReason::FullyClosed;
+    if (!ctx.userStoppedDuringMove && ctx.terminalState == GateTerminalState::FullyClosed)
+      return GateMoveBlockReason::FullyClosed;
   }
 
   return GateMoveBlockReason::None;

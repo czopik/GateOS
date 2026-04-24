@@ -159,21 +159,36 @@ void GateController::loop() {
       lastProgressMs = millis();
     }
     const bool softLimitsEnabled = cfg ? cfg->gateConfig.softLimitsEnabled : true;
-    // Hover motors need a larger margin: after emergencyStop the motor still decelerates
-    // over ~10-20 cm before stopping. 20 cm gives room to stop at the physical limit switch.
+    // Soft-limit is a BACKUP safety net at maxDistance / 0.  The primary stop
+    // mechanism is the physical limit switch (level-based check above, ≤10 ms).
+    // Epsilon = 0: fire only when position reaches the clamped max (or 0),
+    // so the gate can always travel to the limit switch first.
     const bool isHoverMotor = motor && motor->isHoverUart() && motor->hoverEnabled();
-    const float softLimitEpsM = isHoverMotor ? 0.20f : 0.02f;
+    const float softLimitEpsM = isHoverMotor ? 0.0f : 0.02f;
+    // Minimum advance from trip-start before soft-limit fires.
+    // Prevents immediate fire when gate starts within the soft-limit zone
+    // (e.g. user stopped 5 cm from OPEN limit, next open move must be allowed
+    // to reach the physical limit switch rather than stopping instantly).
+    const float minAdvanceM = 0.05f;
     // Use raw controlPosition (less filter lag) so the check fires closer to true position.
     const float posCheck = controlPosition;
-        if (!pendingStop && softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && posCheck >= (status.maxDistance - softLimitEpsM)) {
+    if (!pendingStop && softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f &&
+        posCheck >= (status.maxDistance - softLimitEpsM) &&
+        (posCheck - moveStartControlPos_) >= minAdvanceM) {
 #if defined(GATE_DEBUG_UART)
-      Serial.printf("[GATE] soft-limit OPEN reached raw=%.3fm filt=%.3fm max=%.3fm eps=%.3fm -> stop()\n", controlPosition, status.position, status.maxDistance, softLimitEpsM);
+      Serial.printf("[GATE] soft-limit OPEN reached raw=%.3fm filt=%.3fm max=%.3fm eps=%.3fm adv=%.3fm -> stop()\n",
+                    controlPosition, status.position, status.maxDistance, softLimitEpsM,
+                    posCheck - moveStartControlPos_);
 #endif
       stop(GATE_STOP_SOFT_LIMIT);
     }
-        if (!pendingStop && softLimitsEnabled && state == GATE_CLOSING && posCheck <= softLimitEpsM) {
+    if (!pendingStop && softLimitsEnabled && state == GATE_CLOSING &&
+        posCheck <= softLimitEpsM &&
+        (moveStartControlPos_ - posCheck) >= minAdvanceM) {
 #if defined(GATE_DEBUG_UART)
-      Serial.printf("[GATE] soft-limit CLOSE reached raw=%.3fm filt=%.3fm eps=%.3fm -> stop()\n", controlPosition, status.position, softLimitEpsM);
+      Serial.printf("[GATE] soft-limit CLOSE reached raw=%.3fm filt=%.3fm eps=%.3fm adv=%.3fm -> stop()\n",
+                    controlPosition, status.position, softLimitEpsM,
+                    moveStartControlPos_ - posCheck);
 #endif
       stop(GATE_STOP_SOFT_LIMIT);
     }
@@ -466,6 +481,8 @@ bool GateController::startMove(GateMoveDirection dir, float target, GateState ne
   setState(nextState);
   lastDirection = forward ? 1 : -1;
   setTerminalState(GateTerminalState::Unknown);
+  // Record start position for per-trip soft-limit advance guard.
+  moveStartControlPos_ = controlPosition;
   stopConfirmCount = 0;
   lastStopTelMs = 0;
   pendingStopStartMs = 0;
@@ -511,6 +528,9 @@ void GateController::stop(GateStopReason reason) {
   // reversal on the next toggle — even if the gate is near an endpoint.
   if (reason == GATE_STOP_USER && moving) {
     userStoppedDuringMove_ = true;
+    // Clear stale terminal state so the next toggle decision is not blocked
+    // by FullyOpen/FullyClosed when the gate barely moved from an endpoint.
+    setTerminalState(GateTerminalState::Unknown);
     Serial.printf("[GATE] userStoppedDuringMove set, lastDir=%d\n", lastDirection);
   }
 
@@ -857,12 +877,16 @@ void GateController::setPosition(float position, float maxDistance) {
   if (moving) {
     const bool softLimitsEnabled = cfg ? cfg->gateConfig.softLimitsEnabled : true;
     const bool isHoverMotor = motor && motor->isHoverUart() && motor->hoverEnabled();
-    const float softLimitEpsM = isHoverMotor ? 0.20f : 0.02f;
-    if (softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f && status.position >= (status.maxDistance - softLimitEpsM)) {
+    const float softLimitEpsM = isHoverMotor ? 0.0f : 0.02f;
+    const float minAdvanceM = 0.05f;
+    if (softLimitsEnabled && state == GATE_OPENING && status.maxDistance > 0.0f &&
+        status.position >= (status.maxDistance - softLimitEpsM) &&
+        (status.position - moveStartControlPos_) >= minAdvanceM) {
       stop(GATE_STOP_SOFT_LIMIT);
       return;
     }
-    if (softLimitsEnabled && state == GATE_CLOSING && status.position <= softLimitEpsM) {
+    if (softLimitsEnabled && state == GATE_CLOSING && status.position <= softLimitEpsM &&
+        (moveStartControlPos_ - status.position) >= minAdvanceM) {
       stop(GATE_STOP_SOFT_LIMIT);
       return;
     }

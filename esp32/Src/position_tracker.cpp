@@ -453,10 +453,17 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
       if (!gate_->isMoving() && maxDistanceMeters_ > 0.0f) {
         const float endEps    = 0.02f;
         const float snapWindow= 0.35f;
+        // Auto-snap: when gate rests within 2 cm of an endpoint and the raw
+        // odometer also agrees (within 35 cm of the endpoint), recalibrate
+        // hoverOffsetMeters_ so future readings are pinned to 0 / maxDist.
+        // Only update hbOriginDistMm if the change exceeds 20 mm to avoid
+        // unnecessary RAM churn on every telemetry frame.
         if (positionMeters_ <= endEps && fabsf(pos_raw_adj) <= snapWindow) {
           hoverOffsetMeters_ = -pos_raw;
           hoverOffsetValid_  = true;
-          cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf(pos_raw * 1000.0f);
+          const int32_t newOrigin = (int32_t)lroundf(pos_raw * 1000.0f);
+          if (abs(newOrigin - cfg_->gateConfig.hbOriginDistMm) > 20)
+            cfg_->gateConfig.hbOriginDistMm = newOrigin;
           pos_f_             = 0.0f;
           positionMeters_    = 0.0f;
           positionMetersRaw_ = 0.0f;
@@ -465,7 +472,9 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
                    fabsf(maxDistanceMeters_ - pos_raw_adj) <= snapWindow) {
           hoverOffsetMeters_ = maxDistanceMeters_ - pos_raw;
           hoverOffsetValid_  = true;
-          cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters_) * 1000.0f);
+          const int32_t newOrigin = (int32_t)lroundf((pos_raw - maxDistanceMeters_) * 1000.0f);
+          if (abs(newOrigin - cfg_->gateConfig.hbOriginDistMm) > 20)
+            cfg_->gateConfig.hbOriginDistMm = newOrigin;
           pos_f_             = maxDistanceMeters_;
           positionMeters_    = maxDistanceMeters_;
           positionMetersRaw_ = maxDistanceMeters_;

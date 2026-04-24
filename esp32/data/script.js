@@ -106,6 +106,7 @@ function stopReasonLabel(code) {
     7: 'limit_close',
     8: 'obstacle',
     9: 'error',
+    10: 'over_current',
   };
   return map[code] || 'unknown';
 }
