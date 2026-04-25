@@ -69,7 +69,8 @@ void PositionTracker::initializeFromConfig() {
   positionMetersRaw_ = positionMeters_;
 
   if (cfg_->gateConfig.positionSource == "hoverboard_tel") {
-    hoverOffsetMeters_ = -((float)cfg_->gateConfig.hbOriginDistMm) / 1000.0f;
+    float hbS = (cfg_->gateConfig.hbDistScale > 0.0f) ? cfg_->gateConfig.hbDistScale : 1.0f;
+    hoverOffsetMeters_ = -((float)cfg_->gateConfig.hbOriginDistMm) / 1000.0f * hbS;
     hoverOffsetValid_  = true;
   } else {
     hoverOffsetMeters_ = 0.0f;
@@ -175,7 +176,8 @@ bool PositionTracker::calibrateToMode(const char* mode, bool calibrationRunning)
   if (motor_ && motor_->isHoverUart() && motor_->hoverEnabled()) {
     const HoverTelemetry& tel = motor_->hoverTelemetry();
     if (tel.lastTelMs != 0) {
-      const float pos_raw = (float)tel.distMm / 1000.0f;
+      const float hbS2 = (cfg_->gateConfig.hbDistScale > 0.0f) ? cfg_->gateConfig.hbDistScale : 1.0f;
+      const float pos_raw = (float)tel.distMm / 1000.0f * hbS2;
       if (setZero) {
         hoverOffsetMeters_ = -pos_raw;
         hoverOffsetValid_  = true;
@@ -183,7 +185,7 @@ bool PositionTracker::calibrateToMode(const char* mode, bool calibrationRunning)
       } else if (setMax && maxDistanceMeters_ > 0.0f) {
         hoverOffsetMeters_ = maxDistanceMeters_ - pos_raw;
         hoverOffsetValid_  = true;
-        cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters_) * 1000.0f);
+        cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf((float)tel.distMm - maxDistanceMeters_ * 1000.0f / hbS2);
       }
     }
   }
@@ -375,7 +377,8 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
 
     uint32_t telTimeoutMs = cfg_->gateConfig.telemetryTimeoutMs > 0 ? cfg_->gateConfig.telemetryTimeoutMs : 1000;
     if (tel.lastTelMs != 0 && !motor_->hoverTelemetryTimedOut(now, telTimeoutMs)) {
-      const float pos_raw = (float)tel.distMm / 1000.0f;
+      const float hbScale = (cfg_->gateConfig.hbDistScale > 0.0f) ? cfg_->gateConfig.hbDistScale : 1.0f;
+      const float pos_raw = (float)tel.distMm / 1000.0f * hbScale;
       if (!isfinite(pos_raw)) {
         syncConfigPosition();
         positionMetersRaw_ = positionMeters_;
@@ -384,7 +387,7 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
       }
       float pos_raw_adj   = pos_raw;
       if (!hoverOffsetValid_ && cfg_->gateConfig.hbOriginDistMm != 0) {
-        hoverOffsetMeters_ = -((float)cfg_->gateConfig.hbOriginDistMm) / 1000.0f;
+        hoverOffsetMeters_ = -((float)cfg_->gateConfig.hbOriginDistMm) / 1000.0f * hbScale;
         hoverOffsetValid_  = true;
       }
       if (hoverOffsetValid_) {
@@ -423,11 +426,11 @@ void PositionTracker::updatePosition(bool calibrationRunning) {
         if (resyncClose) {
           hoverOffsetMeters_ = -pos_raw;
           hoverOffsetValid_  = true;
-          cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf(pos_raw * 1000.0f);
+          cfg_->gateConfig.hbOriginDistMm = tel.distMm;
         } else if (resyncOpen && maxDistanceMeters_ > 0.0f) {
           hoverOffsetMeters_ = maxDistanceMeters_ - pos_raw;
           hoverOffsetValid_  = true;
-          cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf((pos_raw - maxDistanceMeters_) * 1000.0f);
+          cfg_->gateConfig.hbOriginDistMm = (int32_t)lroundf((float)tel.distMm - maxDistanceMeters_ * 1000.0f / hbScale);
         }
         if (hoverOffsetValid_) {
           pos_raw_adj  = pos_raw + hoverOffsetMeters_;

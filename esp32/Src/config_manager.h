@@ -19,6 +19,7 @@ struct GateConfig {
   float maxDistance = 12.0f;
   float position = 0.0f;
   int32_t hbOriginDistMm = 0;
+  float hbDistScale = 1.0f; // scale factor applied to hoverboard dist_mm telemetry (use to correct odometry error)
   float wheelCircumference = 0.132f;
   int pulsesPerRevolution = 12;
   unsigned long movementTimeout = 30000;

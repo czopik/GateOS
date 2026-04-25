@@ -291,6 +291,7 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
   gate["totalDistance"] = maxDistance;
   gate["maxDistance"] = maxDistance;
   gate["hbOriginDistMm"] = gateConfig.hbOriginDistMm;
+  gate["hbDistScale"] = gateConfig.hbDistScale;
   gate["wheelCircumference"] = gateConfig.wheelCircumference;
   gate["pulsesPerRevolution"] = gateConfig.pulsesPerRevolution;
   gate["movementTimeout"] = gateConfig.movementTimeout;
@@ -771,6 +772,7 @@ bool ConfigManager::fromJsonVariant(JsonVariantConst root) {
       gateConfig.totalDistance = maxDistance;
       gateConfig.position = 0.0f;
       gateConfig.hbOriginDistMm = gate["hbOriginDistMm"] | gateConfig.hbOriginDistMm;
+      gateConfig.hbDistScale = gate["hbDistScale"] | gateConfig.hbDistScale;
       gateConfig.wheelCircumference = gate["wheelCircumference"] | gateConfig.wheelCircumference;
       gateConfig.pulsesPerRevolution = gate["pulsesPerRevolution"] | gateConfig.pulsesPerRevolution;
       gateConfig.movementTimeout = gate["movementTimeout"] | gateConfig.movementTimeout;
