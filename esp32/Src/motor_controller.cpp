@@ -271,11 +271,13 @@ void MotorController::tick(uint32_t nowMs, float currentDistance) {
   else if (remaining_eff <= approachZone_m) nextBand = 1;
   if (nextBand != motionBand) {
     motionBand = nextBand;
+#if defined(GATE_DEBUG_MOTOR)
     Serial.printf("[MOTOR] band=%d rem=%.3fm v=%.3fm/s dir=%s\n",
                   (int)motionBand,
                   remaining_eff,
                   vEst,
                   motionDirectionForward ? "open" : "close");
+#endif
   }
 
   // Stop when inside tolerance and nearly not moving.
@@ -353,11 +355,13 @@ void MotorController::tick(uint32_t nowMs, float currentDistance) {
 
   int duty = convertSpeedToDuty(desired);
   if (motionBand == 0) {
+#if defined(GATE_DEBUG_MOTOR)
     Serial.printf("[MOTOR] precise rem=%.3fm v=%.3fm/s desired=%d duty=%d\n",
                   remaining_eff,
                   vEst,
                   desired,
                   duty);
+#endif
   }
   setDuty(duty);
 }

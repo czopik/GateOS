@@ -100,7 +100,9 @@ bool MqttManager::testPublish(String& outTopic, String& outMsg) {
   outTopic = base + "/test";
   outMsg = String("gateos test ") + String(millis());
   bool ok = client.publish(outTopic.c_str(), outMsg.c_str(), cfg.retain);
+#if defined(GATE_DEBUG_MQTT)
   Serial.printf("MQTT publish %s ok=%d state=%d\n", outTopic.c_str(), ok, client.state());
+#endif
   if (!ok) {
     lastErrorMsg = String("publish_failed:") + String(client.state());
   }
@@ -176,10 +178,12 @@ bool MqttManager::connectNow() {
   if (qos < 0) qos = 0;
   if (qos > 1) qos = 1;
 
+#if defined(GATE_DEBUG_MQTT)
   Serial.printf("MQTT connect %s:%d user=%s state=%d\n",
                 cfg.server.c_str(), cfg.port,
                 cfg.user.length() ? "yes" : "no",
                 client.state());
+#endif
 
   bool ok = false;
   if (cfg.user.length() > 0) {
@@ -206,7 +210,9 @@ bool MqttManager::connectNow() {
   }
 
   lastErrorMsg = "";
+#if defined(GATE_DEBUG_MQTT)
   Serial.printf("MQTT connected state=%d\n", lastState);
+#endif
   return true;
 }
 

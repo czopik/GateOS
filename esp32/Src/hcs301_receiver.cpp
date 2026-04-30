@@ -58,6 +58,7 @@ void HCS301Receiver::begin() {
 void HCS301Receiver::loop() {
   // Wyświetl debug info jeśli dostępne
   if (hcs_debug_ready) {
+#if defined(GATE_DEBUG_HCS)
     Serial.print("[HCS] BtnBits: ");
     Serial.print(hcs_debug_bits[0]); // Repeat
     Serial.print(hcs_debug_bits[1]); // BatteryLow  
@@ -66,6 +67,7 @@ void HCS301Receiver::loop() {
     Serial.print(hcs_debug_bits[4]); // BtnClose/Green
     Serial.print(hcs_debug_bits[5]); // BtnRing
     Serial.println();
+#endif
     hcs_debug_ready = false;
   }
   
@@ -81,6 +83,7 @@ void HCS301Receiver::loop() {
     HCS_listening = true; // ponownie włączamy nasłuchiwanie
     interrupts();
 
+#if defined(GATE_DEBUG_HCS)
     Serial.print("[HCS] Loop callback: Serial=");
     Serial.print(serial);
     Serial.print(" Encript=");
@@ -91,6 +94,7 @@ void HCS301Receiver::loop() {
     Serial.print(g);
     Serial.print(" BatteryLow=");
     Serial.println(b);
+#endif
 
     // Wywołaj callback poza sekcją krytyczną
     cb(serial, encript, t, g, b);

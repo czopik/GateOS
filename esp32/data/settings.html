@@ -17,7 +17,6 @@
         <a href="/">Dashboard</a>
         <a href="/control.html">Sterowanie</a>
         <a class="active" href="/settings.html">Ustawienia</a>
-        <a href="/calibration.html">Kalibracja</a>
         <a href="/remotes.html">Piloty</a>
         <a href="#diagnostyka">Diagnostyka</a>
         <a href="#ota">Aktualizacje</a>
@@ -170,8 +169,8 @@
         <div class="card">
           <div class="accordion-header">
             <div>
-              <h2>Silnik i rampy</h2>
-              <div class="info-row">Sterownik, PWM, rampy i timeouty ruchu.</div>
+              <h2>Hover UART</h2>
+              <div class="info-row">Sterownik hoverboarda i parametry komunikacji.</div>
             </div>
             <div class="tooltip" data-tip="Parametry napedu">i</div>
           </div>
@@ -180,41 +179,7 @@
               <div class="field">
                 <label>Typ sterownika</label>
                 <select data-path="motor.driverType">
-                  <option value="hbridge">H-bridge</option>
-                  <option value="pwm_dir">PWM + DIR</option>
                   <option value="hover_uart">Hover UART</option>
-                  <option value="relay">Przekazniki</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>PWM min</label>
-                <input type="number" data-type="int" data-path="motor.pwmMin">
-              </div>
-              <div class="field">
-                <label>PWM max</label>
-                <input type="number" data-type="int" data-path="motor.pwmMax">
-              </div>
-              <div class="field">
-                <label>Czestotliwosc PWM (Hz)</label>
-                <input type="number" data-type="int" data-path="motor.pwmFreq">
-              </div>
-              <div class="field">
-                <label>Rozdzielczosc PWM (bit)</label>
-                <input type="number" data-type="int" data-path="motor.pwmResolution">
-              </div>
-              <div class="field">
-                <label>Soft start (ms)</label>
-                <input type="number" data-type="int" data-path="motor.softStartMs">
-              </div>
-              <div class="field">
-                <label>Soft stop (ms)</label>
-                <input type="number" data-type="int" data-path="motor.softStopMs">
-              </div>
-              <div class="field">
-                <label>Krzywa rampy</label>
-                <select data-path="motor.rampCurve">
-                  <option value="linear">Linear</option>
-                  <option value="ease">Ease</option>
                 </select>
               </div>
               <div class="field">
@@ -226,7 +191,6 @@
               </div>
             </div>
 
-            <h3 style="margin-top:16px">Hover UART</h3>
             <div class="form-grid">
               <div class="field">
                 <label>RX</label>
@@ -908,6 +872,20 @@
               <div class="status-line"><span>Free sketch space</span><span id="otaFreeSketch">-</span></div>
             </div>
             <div class="info-row" id="otaErrorLine" style="margin-top:8px; color:#ff8a80;"></div>
+
+            <h3 style="margin-top:20px">Wgrywanie firmware przez przeglądarkę</h3>
+            <div class="info-row" style="margin-bottom:8px">Wybierz skompilowany plik <code>.bin</code> — urządzenie zaktualizuje się i uruchomi ponownie.</div>
+            <div class="section-actions" style="align-items:center; gap:12px; flex-wrap:wrap">
+              <button class="btn ghost" id="otaUploadBtn" type="button">Wybierz plik firmware (.bin)</button>
+              <input type="file" id="otaUploadFile" accept=".bin" style="display:none">
+              <span id="otaUploadFileName" style="color:#aaa; font-size:0.9em"></span>
+            </div>
+            <div id="otaUploadProgress" style="display:none; margin-top:12px">
+              <div style="background:#222; border-radius:4px; height:12px; overflow:hidden; margin-bottom:6px">
+                <div id="otaUploadBar" style="background:#4caf50; height:100%; width:0%; transition:width 0.2s"></div>
+              </div>
+              <div id="otaUploadStatus" style="font-size:0.9em; color:#aaa"></div>
+            </div>
             <div class="info-row" style="margin-top:8px;">Dla PlatformIO OTA uzyj env: <code>esp32_ota</code> i ustaw upload_port na IP urzadzenia.</div>
           </div>
         </div>

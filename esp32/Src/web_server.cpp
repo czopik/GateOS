@@ -2,8 +2,8 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <map>
+#include <Update.h>
 #include "mqtt_manager.h"
-#include "calibration_manager.h"
 #include "led_controller.h"
 #include "motor_controller.h"
 #include <new>
@@ -25,6 +25,8 @@ struct BodyBuffer {
   String body;
   size_t total = 0;
   bool badOffset = false;
+  // FIX A4: timestamp for stale-buffer cleanup in maintenance().
+  unsigned long startMs = 0;
 };
 
 struct JsonParseDiag {
@@ -73,6 +75,7 @@ BodyBuffer* getBodyBuffer(AsyncWebServerRequest* request, size_t total) {
   if (it != g_bodyBuffers.end()) return it->second;
   auto* buf = new BodyBuffer();
   buf->total = total;
+  buf->startMs = millis(); // FIX A4: record creation time
   if (total > 0) buf->body.reserve(total + 1);
   g_bodyBuffers[request] = buf;
   return buf;
@@ -341,7 +344,9 @@ void WebServerManager::setupRoutes() {
       }
     }
     if (requestedBrakingForce >= 0) {
+#if defined(GATE_DEBUG_CONFIG)
       Serial.printf("[config] motion.advanced.braking.force=%d\n", requestedBrakingForce);
+#endif
     }
 
     const int previousWebPort = cfg ? cfg->deviceConfig.webPort : 80;
@@ -362,12 +367,16 @@ void WebServerManager::setupRoutes() {
       request->send(400, "application/json", "{\"status\":\"bad_payload\"}");
       return;
     }
+#if defined(GATE_DEBUG_CONFIG)
     Serial.printf("[CFG_SAVE] web POST: gate.maxDistance=%.3f\n", updated.gateConfig.maxDistance);
+#endif
     if (!updated.save(nullptr)) {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"fs_write_failed\"}");
       return;
     }
+#if defined(GATE_DEBUG_CONFIG)
     Serial.printf("[CFG_SAVE] web POST: save OK, scheduling apply\n");
+#endif
     cfg->adoptPersistenceMetaFrom(updated);
     if (updated.deviceConfig.webPort != previousWebPort) {
       char response[128];
@@ -392,7 +401,9 @@ void WebServerManager::setupRoutes() {
     if (index + len != total) return;
 
     String head = buf->body.length() > 80 ? buf->body.substring(0, 80) : buf->body;
+#if defined(GATE_DEBUG_CONFIG)
     Serial.printf("[validate] total=%u head=%s\n", (unsigned)total, head.c_str());
+#endif
 
     DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
     if (!parseJsonBody(request, doc, "api_config_validate")) {
@@ -630,168 +641,6 @@ void WebServerManager::setupRoutes() {
     } else {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"led_not_ready\"}");
     }
-  });
-
-  server.on("/api/calibration/status", HTTP_GET, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    StaticJsonDocument<768> doc;
-    if (calibration) {
-      JsonObject root = doc.to<JsonObject>();
-      calibration->fillStatus(root);
-    } else {
-      doc["running"] = false;
-      doc["step"] = "unavailable";
-      doc["progress"] = 0;
-      doc["message"] = "";
-      doc["error"] = "calibration_not_ready";
-    }
-    sendJson(request, doc);
-  });
-
-  server.on("/api/calibration/manual/status", HTTP_GET, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    // CALIB_FIX: manual API alias for calibration status contract.
-    StaticJsonDocument<768> doc;
-    if (calibration) {
-      JsonObject root = doc.to<JsonObject>();
-      calibration->fillStatus(root);
-    } else {
-      doc["enabled"] = false;
-      doc["active"] = false;
-      doc["step"] = "unavailable";
-      doc["error"] = "calibration_not_ready";
-    }
-    sendJson(request, doc);
-  });
-
-  server.on("/api/calibration/start", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    StaticJsonDocument<256> doc;
-    if (!calibration) {
-      doc["status"] = "error";
-      doc["error"] = "calibration_not_ready";
-      sendJson(request, doc, 500);
-      return;
-    }
-    if (!calibration->start()) {
-      doc["status"] = "error";
-      doc["error"] = "already_running";
-      sendJson(request, doc, 409);
-      return;
-    }
-    doc["status"] = "ok";
-    sendJson(request, doc);
-  });
-
-  server.on("/api/calibration/manual/start", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    // CALIB_FIX: manual API alias for start.
-    StaticJsonDocument<256> doc;
-    if (!calibration) {
-      doc["status"] = "error";
-      doc["error"] = "calibration_not_ready";
-      sendJson(request, doc, 500);
-      return;
-    }
-    if (!calibration->start()) {
-      doc["status"] = "error";
-      doc["error"] = "already_running";
-      sendJson(request, doc, 409);
-      return;
-    }
-    doc["status"] = "ok";
-    sendJson(request, doc);
-  });
-
-  server.on("/api/calibration/stop", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    if (calibration) {
-      calibration->stop();
-    }
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
-  });
-
-  server.on("/api/calibration/manual/cancel", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    // CALIB_FIX: manual API alias for cancel.
-    if (calibration) {
-      calibration->stop();
-    }
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
-  });
-
-  server.on("/api/calibration/confirm_dir", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    if (!calibration) {
-      request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"calibration_not_ready\"}");
-      return;
-    }
-  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    bool invert = false;
-    if (total > 0) {
-      BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
-      if (!buf) return;
-      if (index + len != total) return;
-
-      StaticJsonDocument<128> doc;
-      if (!parseJsonBody(request, doc, "api_calibration_confirm_dir")) {
-        request->send(400, "application/json", "{\"status\":\"bad_json\"}");
-        return;
-      }
-      invert = doc["invert"] | false;
-    } else if (request->hasParam("invert")) {
-      invert = request->getParam("invert")->value().toInt() != 0;
-    }
-
-    if (!calibration->confirmDirection(invert)) {
-      request->send(409, "application/json", "{\"status\":\"error\",\"error\":\"not_waiting\"}");
-      return;
-    }
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
-  });
-
-  server.on("/api/calibration/apply", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    StaticJsonDocument<256> doc;
-    if (!calibration) {
-      doc["status"] = "error";
-      doc["error"] = "calibration_not_ready";
-      sendJson(request, doc, 500);
-      return;
-    }
-    String err;
-    if (!calibration->apply(&err)) {
-      doc["status"] = "error";
-      doc["error"] = err.length() ? err : "apply_failed";
-      sendJson(request, doc, 500);
-      return;
-    }
-    doc["status"] = "ok";
-    sendJson(request, doc);
-    scheduleRestart(200);
-  });
-
-  server.on("/api/calibration/manual/apply", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-    // CALIB_FIX: manual API alias for apply.
-    StaticJsonDocument<256> doc;
-    if (!calibration) {
-      doc["status"] = "error";
-      doc["error"] = "calibration_not_ready";
-      sendJson(request, doc, 500);
-      return;
-    }
-    String err;
-    if (!calibration->apply(&err)) {
-      doc["status"] = "error";
-      doc["error"] = err.length() ? err : "apply_failed";
-      sendJson(request, doc, 409);
-      return;
-    }
-    doc["status"] = "ok";
-    sendJson(request, doc);
-    scheduleRestart(200);
   });
 
   server.on("/api/remotes", HTTP_GET, [this](AsyncWebServerRequest *request){
@@ -1045,6 +894,55 @@ void WebServerManager::setupRoutes() {
     request->send(200, "application/json", "{\"status\":\"ok\"}");
     scheduleRestart(100);
   });
+
+  // HTTP OTA upload — prześlij skompilowany .bin przez przeglądarkę.
+  // Autoryzacja jak pozostałe endpointy API.
+  server.on("/api/ota/upload", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      // Odpowiedź wysyłana po zakończeniu przesyłania pliku.
+      bool ok = !Update.hasError();
+      String resp = ok
+        ? "{\"ok\":true}"
+        : String("{\"ok\":false,\"error\":\"") + Update.errorString() + "\"}";
+      request->send(200, "application/json", resp);
+      if (ok) {
+        // Restart z lekkim opóźnieniem, żeby odpowiedź dotarła do klienta.
+        delay(300);
+        ESP.restart();
+      }
+    },
+    [this](AsyncWebServerRequest *request, const String &filename,
+           size_t index, uint8_t *data, size_t len, bool final) {
+      // Sprawdź autoryzację przy pierwszym chunку.
+      if (index == 0 && !isAuthorized(request)) {
+        // Nie możemy wysłać 401 z handlera upload — przerywamy przez błąd.
+        Update.abort();
+        return;
+      }
+      if (index == 0) {
+        Serial.printf("[OTA-HTTP] Start: %s size=%u\n",
+                      filename.c_str(), request->contentLength());
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
+          Serial.printf("[OTA-HTTP] begin error: %s\n", Update.errorString());
+        }
+      }
+      if (Update.isRunning()) {
+        if (Update.write(data, len) != len) {
+          Serial.printf("[OTA-HTTP] write error: %s\n", Update.errorString());
+        }
+      }
+      if (final) {
+        if (Update.isRunning()) {
+          if (Update.end(true)) {
+            Serial.printf("[OTA-HTTP] Done: %u B\n", index + len);
+          } else {
+            Serial.printf("[OTA-HTTP] end error: %s\n", Update.errorString());
+          }
+        }
+      }
+    }
+  );
+
 
   server.on("/api/factory_reset", HTTP_POST, [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
@@ -1301,10 +1199,6 @@ void WebServerManager::setMqttManager(MqttManager* mqtt_) {
   mqtt = mqtt_;
 }
 
-void WebServerManager::setCalibrationManager(CalibrationManager* calibration_) {
-  calibration = calibration_;
-}
-
 void WebServerManager::setLedController(LedController* led_) {
   led = led_;
 }
@@ -1356,6 +1250,25 @@ void WebServerManager::broadcastEvent(const char* level, const char* message) {
 void WebServerManager::maintenance() {
   stats.lastMaintenanceMs = millis();
   ws.cleanupClients();
+
+  // FIX A4: Remove stale BodyBuffers whose HTTP connections were dropped
+  // before the body handler completed (no onDisconnect for raw HTTP in
+  // ESPAsyncWebServer).  Buffers older than 8 s or when the map exceeds 8
+  // entries are freed unconditionally to prevent heap exhaustion under load.
+  const unsigned long now = millis();
+  constexpr unsigned long kBodyBufStaleMs = 8000;
+  constexpr size_t kBodyBufMaxEntries = 8;
+  for (auto it = g_bodyBuffers.begin(); it != g_bodyBuffers.end(); ) {
+    const unsigned long age = (it->second && it->second->startMs)
+                                ? (now - it->second->startMs)
+                                : ULONG_MAX;
+    if (age > kBodyBufStaleMs || g_bodyBuffers.size() > kBodyBufMaxEntries) {
+      delete it->second;
+      it = g_bodyBuffers.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 WebRuntimeStats WebServerManager::runtimeStats() const {

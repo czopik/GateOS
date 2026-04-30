@@ -462,15 +462,21 @@ bool GateController::startMove(GateMoveDirection dir, float target, GateState ne
   const GateDecisionContext ctx = decisionContext();
   const GateMoveBlockReason block = validateMoveDirection(ctx, dir);
   if (block != GateMoveBlockReason::None) {
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[GATE] startMove blocked: reason=%d target=%.3fm\n", (int)block, target);
+#endif
     return false;
   }
   if (!canMove(bypassOCCooldown)) {
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[GATE] startMove blocked: canMove=false target=%.3fm\n", target);
+#endif
     return false;
   }
   if (motor && motor->isHoverUart() && !motor->hoverEnabled()) {
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[GATE] startMove blocked: hover offline target=%.3fm\n", target);
+#endif
     return false;
   }
   const bool forward = dir == GateMoveDirection::Open;
@@ -531,7 +537,9 @@ void GateController::stop(GateStopReason reason) {
     // Clear stale terminal state so the next toggle decision is not blocked
     // by FullyOpen/FullyClosed when the gate barely moved from an endpoint.
     setTerminalState(GateTerminalState::Unknown);
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[GATE] userStoppedDuringMove set, lastDir=%d\n", lastDirection);
+#endif
   }
 
 #if defined(GATE_DEBUG_UART)
@@ -557,10 +565,12 @@ void GateController::stop(GateStopReason reason) {
     stallAgeMs = millis() - lastProgressMs;
     hasStallAge = true;
   }
-  Serial.printf("[GATE] STOP reason=%s telAgeMs=%ld stallAgeMs=%ld\n",
-                getStopReasonString(reason),
-                hasTelAge   ? (long)telAgeMs   : -1L,
-                hasStallAge ? (long)stallAgeMs : -1L);
+  if (reason != GATE_STOP_USER) {
+    Serial.printf("[GATE] STOP reason=%s telAgeMs=%ld stallAgeMs=%ld\n",
+                  getStopReasonString(reason),
+                  hasTelAge   ? (long)telAgeMs   : -1L,
+                  hasStallAge ? (long)stallAgeMs : -1L);
+  }
 
   const bool hardImmediate =
       (reason == GATE_STOP_USER) ||
@@ -572,7 +582,9 @@ void GateController::stop(GateStopReason reason) {
       (reason == GATE_STOP_OVER_CURRENT);
 
   if (hardImmediate) {
-    Serial.printf("[GATE] STOP mode=hard_immediate reason=%s\n", getStopReasonString(reason));
+    if (reason != GATE_STOP_USER) {
+      Serial.printf("[GATE] STOP mode=hard_immediate reason=%s\n", getStopReasonString(reason));
+    }
     userStopBoostUntilMs = 0;
     if (motor) {
       motor->setForceDecelBoost(false);
@@ -1191,10 +1203,12 @@ GateCommandResponse GateController::handleCommand(const char* cmd) {
 
     const GateDecisionContext ctx = decisionContext();
     const GateMoveDirection dir = resolveToggleDirection(ctx);
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[GATE] toggle: pos=%.3f max=%.3f lastDir=%d userStopped=%d terminal=%d -> dir=%d\n",
                   ctx.position, ctx.maxDistance, ctx.lastDirection,
                   ctx.userStoppedDuringMove ? 1 : 0,
                   (int)ctx.terminalState, (int)dir);
+#endif
     bool ok = false;
     if (dir == GateMoveDirection::Open) {
       ok = open();

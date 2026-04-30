@@ -18,11 +18,14 @@
 #include "config_manager.h"
 #include "wifi_manager.h"
 #include "motor_controller.h"
+
+// Wersja firmware — aktualizowana automatycznie przy każdej kompilacji.
+// Format: "YYYY-MM-DD HH:MM:SS" wynikający z makr __DATE__ i __TIME__.
+static const char FW_VERSION[] = __DATE__ " " __TIME__;
 #include "gate_controller.h"
 #include "hcs301_receiver.h"
 #include "web_server.h"
 #include "mqtt_manager.h"
-#include "calibration_manager.h"
 #include "led_controller.h"
 #include "input_manager.h"
 #include "position_tracker.h"
@@ -32,7 +35,6 @@ MotorController* motor = nullptr;
 GateController* gate = nullptr;
 HCS301Receiver* hcs = nullptr;
 WebServerManager webserver(&config);
-CalibrationManager calibration;
 
 MqttManager mqtt;
 LedController led;
@@ -139,6 +141,23 @@ struct GateCmdItem {
   char action[32];
 };
 static QueueHandle_t gateCommandQueue = nullptr;
+static constexpr uint32_t kGateCommandMinIntervalMs = 180;
+static constexpr uint32_t kGateCommandDuplicateWindowMs = 120;
+static constexpr uint8_t kGateCommandDrainPerCycle = 1;
+
+struct GateCommandIngressStats {
+  uint32_t accepted = 0;
+  uint32_t rateLimited = 0;
+  uint32_t duplicates = 0;
+  uint32_t queueFull = 0;
+  uint32_t stopNotifications = 0;
+  uint32_t lastAcceptedMs = 0;
+  char lastAction[32] = {0};
+};
+static GateCommandIngressStats gateCommandIngress;
+// FIX C1: portMUX_TYPE spinlock guards gateCommandIngress from concurrent
+// writes by AsyncWebServer task (Core 0) and main loop (Core 1).
+static portMUX_TYPE gateCommandIngressMux = portMUX_INITIALIZER_UNLOCKED;
 
 // === FIX #3: Config save background task ===
 static SemaphoreHandle_t configSaveSem      = nullptr;
@@ -189,13 +208,18 @@ static unsigned long lastMqttPublish = 0;
 static unsigned long lastMqttTelemetryMs = 0;
 static unsigned long lastMqttHoverTelMs = 0;  // v2.2: hover telemetry at 5s (separate from motion 1s)
 static bool mqttWasConnected = false;
-static unsigned long lastCalibWsMs = 0;
 static bool restartPending = false;
 static uint32_t restartAtMs = 0;
 static bool factoryResetPending = false;
 static uint32_t factoryResetAtMs = 0;
 static volatile bool runtimeConfigApplyPending = false;
 static volatile uint32_t runtimeConfigApplyRequestedMs = 0;
+// FIX A1: cooperative pause flag for processPendingRuntimeConfigApply().
+// Main loop sets configApplyPausing=true; GateTask sees it at the top of its
+// while(1) loop and parks in a WDT-safe spin until the flag is cleared.
+// configApplyPaused is set by GateTask to acknowledge it has entered the park.
+static volatile bool configApplyPausing = false;
+static volatile bool configApplyPaused  = false;
 static volatile uint32_t mainLoopHeartbeatMs = 0;
 static volatile uint32_t gateTaskHeartbeatMs = 0;
 RTC_DATA_ATTR static uint32_t rtcBootCount = 0;
@@ -683,9 +707,11 @@ static void runGateTaskHoming(uint32_t nowMs) {
     kHomingTimeoutMs = 45000;
   }
 
-  if (!startupHomingEnabled || !gate || calibration.isRunning()) return;
+  if (!startupHomingEnabled || !gate) return;
   if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 15000) {
+#if defined(GATE_DEBUG_HOMING)
     logStartupHomingDiag("loop", nowMs, "tick");
+#endif
     lastDiagMs = nowMs;
   }
   applyStartupLimitReference();
@@ -751,7 +777,9 @@ static void runGateTaskHoming(uint32_t nowMs) {
         setHomingResult(HOMING_RESULT_PENDING, HOMING_REASON_STARTUP_TEL_MISSING);
         homingChecked = false;
         if (lastDiagMs == 0 || (nowMs - lastDiagMs) > 30000) {
+#if defined(GATE_DEBUG_HOMING)
           Serial.println("[HOMING] startup telemetry missing -> keep waiting/retrying");
+#endif
           lastDiagMs = nowMs;
         }
         homingReadySinceMs = 0;
@@ -936,6 +964,9 @@ void syncLegacyPositionState() {
 }
 
 void pushEvent(const char* level, const char* code, const char* message) {
+#if !defined(GATE_LOG_INFO_EVENTS)
+  if (level && strcmp(level, "info") == 0) return;
+#endif
   EventEntry& e = events[eventHead];
   e.ts = millis();
   strncpy(e.level, level, sizeof(e.level) - 1);
@@ -1112,6 +1143,9 @@ void mqttPublishPosition() {
 }
 
 void logSummary1Hz() {
+#if !defined(GATE_LOG_PERIODIC)
+  return;
+#endif
   static unsigned long lastLogMs = 0;
   unsigned long now = millis();
   const uint32_t logIntervalMs = (!startupPositionCertain && !homingActive) ? 15000 : 5000;
@@ -1293,14 +1327,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       const char* action = doc["action"] | "";
       if (action[0] != '\0') {
         // FIX #2: route via queue
-        if (!sendGateCommand(action)) handleControlCmd(action);
+        if (!sendGateCommand(action)) pushEvent("warn", "mqtt command throttled");
       }
     }
     return;
   }
   if (isCmd || isGateCmd) {
     // FIX #2: route via queue
-    if (!sendGateCommand(buf)) handleControlCmd(buf);
+    if (!sendGateCommand(buf)) pushEvent("warn", "mqtt command throttled");
   }
 }
 
@@ -1311,7 +1345,7 @@ bool applyMaxDistance(float value, bool persist) {
 }
 
 bool handleGateCalibrate(const char* mode) {
-  bool ok = positionTracker.calibrateToMode(mode, calibration.isRunning());
+  bool ok = positionTracker.calibrateToMode(mode, false);
   syncLegacyPositionState();
   return ok;
 }
@@ -1372,16 +1406,11 @@ void handleInputs() {
 
   if (ev.buttonPressed) {
     // FIX #2: enqueue toggle — GateTask processes it in safe context
-    if (!sendGateCommand("toggle")) {      // Queue full fallback: direct call
-      GateCommandResponse r = gate->handleCommand("toggle");
-      if (r.result == GATE_CMD_OK) {
-        pushEvent("info", r.applied ? "button toggle" : "button toggle (no-op)");
-      } else if (r.result == GATE_CMD_BLOCKED) {
-        pushEvent("warn", "button toggle blocked");
-        led.setOverride("command_rejected", 600);
-      }
-    } else {
+    if (sendGateCommand("toggle")) {
       pushEvent("info", "button toggle");
+    } else {
+      pushEvent("warn", "button toggle throttled");
+      led.setOverride("command_rejected", 300);
     }
   }
   // v2: Signal GateTask that limit states are now valid (at least one poll done).
@@ -1394,7 +1423,7 @@ void IRAM_ATTR hallIsr() {
 }
 
 void updateHallAttachment() {
-  positionTracker.updateHallAttachment(calibration.isRunning());
+  positionTracker.updateHallAttachment(false);
 }
 
 void updatePositionPercent() {
@@ -1424,7 +1453,7 @@ void updatePositionPercent() {
     }
     return;
   }
-  positionTracker.updatePosition(calibration.isRunning());
+  positionTracker.updatePosition(false);
   syncLegacyPositionState();
 }
 
@@ -1557,6 +1586,14 @@ void fillDiagnostics(JsonObject& out) {
     gateDiag["stopReasonLabel"] = "none";
   }
   gateDiag["softLimitsEnabled"] = config.gateConfig.softLimitsEnabled;
+  JsonObject cmdIngressObj = gateDiag.createNestedObject("commandIngress");
+  cmdIngressObj["accepted"] = gateCommandIngress.accepted;
+  cmdIngressObj["rateLimited"] = gateCommandIngress.rateLimited;
+  cmdIngressObj["duplicates"] = gateCommandIngress.duplicates;
+  cmdIngressObj["queueFull"] = gateCommandIngress.queueFull;
+  cmdIngressObj["stopNotifications"] = gateCommandIngress.stopNotifications;
+  cmdIngressObj["lastAcceptedMs"] = gateCommandIngress.lastAcceptedMs;
+  cmdIngressObj["lastAction"] = gateCommandIngress.lastAction;
   gateDiag["telemetryTimeoutMs"] = config.gateConfig.telemetryTimeoutMs;
   gateDiag["telemetryGraceMs"] = config.gateConfig.telemetryGraceMs;
   gateDiag["stallTimeoutMs"] = config.gateConfig.stallTimeoutMs;
@@ -1591,6 +1628,7 @@ void fillDiagnostics(JsonObject& out) {
   otaObj["wifiConnected"] = WiFiManager.isConnected();
   otaObj["ip"] = WiFiManager.isConnected() ? WiFi.localIP().toString() : "";
   otaObj["freeSketchSpace"] = ESP.getFreeSketchSpace();
+  out["build"] = FW_VERSION;
 
   JsonObject homingObj = out.createNestedObject("homing");
   homingObj["active"] = homingActive;
@@ -1677,7 +1715,10 @@ void fillStatus(JsonObject& out) {
   otaObj["port"] = config.otaConfig.port;
   otaObj["hostname"] = config.deviceConfig.hostname;
   otaObj["passwordSet"] = config.otaConfig.password.length() > 0;
-  otaObj["localOnly"] = true;
+  otaObj["wifiConnected"] = WiFiManager.isConnected();
+  otaObj["ip"] = WiFiManager.isConnected() ? WiFi.localIP().toString() : "";
+  otaObj["freeSketchSpace"] = ESP.getFreeSketchSpace();
+  out["build"] = FW_VERSION;
 
   JsonObject hbObj = out.createNestedObject("hb");
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
@@ -1870,30 +1911,36 @@ ControlResult handleControlCmd(const char* action) {
   const bool isStopCmd = (strcmp(action, "stop") == 0);
   if (startupHomingEnabled && !startupPositionCertain && !isStopCmd) {
     pushEvent("warn", "control blocked: homing pending — stop still allowed");
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control blocked: startup_safety reason=%s action=%s (stop always permitted)\n",
                   startupSafetyReason, action);
+#endif
     return makeControlResult(false, false, 409, "blocked", "position_not_referenced");
   }
   if (startupSafetyLocked && !isStopCmd) {
     pushEvent("warn", "control blocked: startup safety lock");
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control blocked: startup safety lock (reason=%s)\n", startupSafetyReason);
+#endif
     return makeControlResult(false, false, 423, "blocked", "startup_safety_lock");
   }
   if (homingActive) {
     pushEvent("warn", "control blocked by homing");
+#if defined(GATE_DEBUG_UI)
     Serial.println("[UI] control blocked: homing active");
+#endif
     return makeControlResult(false, false, 409, "blocked", "homing_active");
   }
   if (otaActive) {
     pushEvent("warn", "control blocked by ota");
+#if defined(GATE_DEBUG_UI)
     Serial.println("[UI] control blocked: OTA active");
+#endif
     return makeControlResult(false, false, 423, "blocked", "ota_active");
   }
+#if defined(GATE_DEBUG_UI)
   Serial.printf("[UI] control action=%s\n", action);
-  if (calibration.isRunning()) {
-    pushEvent("warn", "control blocked by calibration");
-    return makeControlResult(false, false, 423, "blocked", "calibration_active");
-  }
+#endif
   if (strcmp(action, "zero") == 0) {
     if (handleGateCalibrate("zero")) {
       pushEvent("info", "command zero");
@@ -1906,7 +1953,9 @@ ControlResult handleControlCmd(const char* action) {
   GateCommandResponse r = gate->handleCommand(action);
   if (r.result == GATE_CMD_UNKNOWN) {
     pushEvent("warn", "command unknown");
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control result=unknown\n");
+#endif
     return makeControlResult(false, false, 422, "invalid", "unknown_command");
   }
 
@@ -1916,33 +1965,45 @@ ControlResult handleControlCmd(const char* action) {
     else if (r.cmd == GATE_CMD_TOGGLE) pushEvent("warn", "command toggle blocked");
     else pushEvent("warn", "command blocked");
     led.setOverride("command_rejected", 600);
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control result=blocked cmd=%d\n", (int)r.cmd);
+#endif
     return makeControlResult(false, false, 409, "blocked", "command_blocked");
   }
 
   // OK
   if (r.cmd == GATE_CMD_OPEN) {
     pushEvent("info", "command open");
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control result=open applied=%d\n", r.applied ? 1 : 0);
+#endif
   } else if (r.cmd == GATE_CMD_CLOSE) {
     pushEvent("info", "command close");
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control result=close applied=%d\n", r.applied ? 1 : 0);
+#endif
   } else if (r.cmd == GATE_CMD_STOP) {
     pushEvent("info", "command stop");
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control result=stop applied=%d\n", r.applied ? 1 : 0);
+#endif
   } else if (r.cmd == GATE_CMD_TOGGLE) {
     pushEvent("info", r.applied ? "command toggle" : "command toggle (no-op)");
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control result=toggle applied=%d\n", r.applied ? 1 : 0);
+#endif
   } else {
     pushEvent("info", "command ok");
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control result=ok cmd=%d applied=%d\n", (int)r.cmd, r.applied ? 1 : 0);
+#endif
   }
   return makeControlResult(true, r.applied, 200, "ok");
 }
 
 static void processPendingRuntimeConfigApply(uint32_t nowMs) {
   if (!runtimeConfigApplyPending) return;
-  if (otaActive || calibration.isRunning() || homingActive) return;
+  if (otaActive || homingActive) return;
     if (gate && gate->getState() != GATE_STOPPED) return;
 
   runtimeConfigApplyPending = false;
@@ -1950,16 +2011,30 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
     (runtimeConfigApplyRequestedMs != 0 && nowMs >= runtimeConfigApplyRequestedMs)
       ? (nowMs - runtimeConfigApplyRequestedMs)
       : 0;
+#if defined(GATE_DEBUG_CONFIG)
   Serial.printf("[CFG_APPLY] start reqAgeMs=%lu\n",
                 (unsigned long)reqAgeMs);
+#endif
 
   if (gateTaskHandle != NULL) {
-    vTaskSuspend(gateTaskHandle);
+    // FIX A1: instead of vTaskSuspend (which starves the WDT), ask GateTask
+    // to park itself in a WDT-safe spin and wait for its acknowledgement.
+    configApplyPausing = true;
+    portMEMORY_BARRIER();
+    const uint32_t pauseWaitStart = millis();
+    while (!configApplyPaused && (millis() - pauseWaitStart < 120)) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    if (!configApplyPaused) {
+      Serial.println("[CFG_APPLY] WARNING: GateTask pause ack timeout – proceeding anyway");
+    }
   }
 
   config.load();
+#if defined(GATE_DEBUG_CONFIG)
   Serial.printf("[CFG_APPLY] after load: gate.maxDistance=%.3f gate.position=%.3f\n",
                 config.gateConfig.maxDistance, config.gateConfig.position);
+#endif
   setupInputs();
   updateHallAttachment();
 
@@ -1974,12 +2049,16 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
   }
 
   if (gateTaskHandle != NULL) {
-    vTaskResume(gateTaskHandle);
+    // FIX A1: clear the pause flag so GateTask exits its spin loop.
+    configApplyPausing = false;
+    portMEMORY_BARRIER();
   }
 
+#if defined(GATE_DEBUG_CONFIG)
   Serial.printf("[CFG_APPLY] done rev=%lu heap=%u\n",
                 (unsigned long)config.getRevision(),
                 (unsigned)ESP.getFreeHeap());
+#endif
 }
 
 ControlResult handleControlWrapper(const String& action) {
@@ -2012,12 +2091,15 @@ ControlResult handleControlWrapper(const String& action) {
   }
   // Enqueue movement command for GateTask
   if (sendGateCommand(action.c_str())) {
+#if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control queued action=%s\n", action.c_str());
+#endif
     return makeControlResult(true, true, 200, "ok");
   }
-  // Queue full fallback: direct synchronous call
-  Serial.printf("[UI] control queue full, direct call action=%s\n", action.c_str());
-  return handleControlCmd(action.c_str());
+#if defined(GATE_DEBUG_UI)
+  Serial.printf("[UI] control rejected by ingress guard action=%s\n", action.c_str());
+#endif
+  return makeControlResult(false, false, 429, "busy", "command_rate_limited");
 }
 
 void handleLedCmd(const char* payload) {
@@ -2133,8 +2215,11 @@ void onHcsReceived(unsigned long serial, unsigned long encript, bool btnToggle, 
   seen.encript = encript;
 
   // FIX #2: enqueue toggle command for GateTask
-  if (!sendGateCommand("toggle")) handleControlCmd("toggle");
-  pushEvent("info", "remote: toggle");
+  if (sendGateCommand("toggle")) {
+    pushEvent("info", "remote: toggle");
+  } else {
+    pushEvent("warn", "remote: toggle throttled");
+  }
 }
 
 void learnCallback(bool enable) {
@@ -2220,7 +2305,51 @@ static bool sendGateCommand(const char* action) {
   GateCmdItem item;
   strncpy(item.action, action, sizeof(item.action) - 1);
   item.action[sizeof(item.action) - 1] = '\0';
-  return xQueueSend(gateCommandQueue, &item, 0) == pdTRUE;
+  if (strcmp(item.action, "stop") == 0) {
+    if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_STOP, eSetBits);
+    gateCommandIngress.stopNotifications++;
+    return true;
+  }
+
+  const uint32_t nowMs = millis();
+  // FIX C1: take the ingress spinlock before reading/writing shared stats.
+  portENTER_CRITICAL_SAFE(&gateCommandIngressMux);
+  const uint32_t sinceLast =
+      (gateCommandIngress.lastAcceptedMs == 0 || nowMs < gateCommandIngress.lastAcceptedMs)
+        ? UINT32_MAX
+        : (nowMs - gateCommandIngress.lastAcceptedMs);
+  const bool sameAsLast = strncmp(gateCommandIngress.lastAction,
+                                  item.action,
+                                  sizeof(gateCommandIngress.lastAction)) == 0;
+  if (sameAsLast && sinceLast < kGateCommandDuplicateWindowMs) {
+    gateCommandIngress.duplicates++;
+    portEXIT_CRITICAL_SAFE(&gateCommandIngressMux);
+    return false;
+  }
+  if (sinceLast < kGateCommandMinIntervalMs) {
+    gateCommandIngress.rateLimited++;
+    portEXIT_CRITICAL_SAFE(&gateCommandIngressMux);
+    return false;
+  }
+  if (uxQueueSpacesAvailable(gateCommandQueue) == 0) {
+    gateCommandIngress.queueFull++;
+    portEXIT_CRITICAL_SAFE(&gateCommandIngressMux);
+    return false;
+  }
+  portEXIT_CRITICAL_SAFE(&gateCommandIngressMux);
+  if (xQueueSend(gateCommandQueue, &item, 0) != pdTRUE) {
+    portENTER_CRITICAL_SAFE(&gateCommandIngressMux);
+    gateCommandIngress.queueFull++;
+    portEXIT_CRITICAL_SAFE(&gateCommandIngressMux);
+    return false;
+  }
+  portENTER_CRITICAL_SAFE(&gateCommandIngressMux);
+  gateCommandIngress.accepted++;
+  gateCommandIngress.lastAcceptedMs = nowMs;
+  strncpy(gateCommandIngress.lastAction, item.action, sizeof(gateCommandIngress.lastAction) - 1);
+  gateCommandIngress.lastAction[sizeof(gateCommandIngress.lastAction) - 1] = '\0';
+  portEXIT_CRITICAL_SAFE(&gateCommandIngressMux);
+  return true;
 }
 
 // === FIX #3: Background task for deferred config saves. ===
@@ -2249,6 +2378,23 @@ void gateTask(void* pvParameters) {
     gateTaskHeartbeatMs = millis();
     const uint32_t nowMs = (uint32_t)gateTaskHeartbeatMs;
 
+    // FIX A1: cooperative pause for processPendingRuntimeConfigApply().
+    // When main loop sets configApplyPausing, we park here resetting the WDT
+    // so the watchdog never fires during a config reload.  This replaces the
+    // previous vTaskSuspend(gateTaskHandle) which starved the WDT.
+    if (configApplyPausing) {
+      configApplyPaused = true;
+      portMEMORY_BARRIER();
+      while (configApplyPausing) {
+        if (wdtEnabled) esp_task_wdt_reset();
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      configApplyPaused = false;
+      portMEMORY_BARRIER();
+      gateTaskHeartbeatMs = millis(); // refresh heartbeat after pause
+      continue;                       // restart the loop (re-drain notifications)
+    }
+
     // === v2.1: Drain all pending task notifications (non-blocking, bits OR-accumulated). ===
     // xTaskNotify(gateTaskHandle, bit, eSetBits) from any context; processed here in
     // priority order before any gate/motor mutation this cycle.
@@ -2274,13 +2420,13 @@ void gateTask(void* pvParameters) {
     }
 
     // Safety: both limits active simultaneously → gate error + stop.
-    // Runs regardless of calibration (safety override).
+    // Safety override.
     if (notifyVal & GATE_NOTIFY_LIMITS_INVALID) {
       if (gate) gate->onLimitsInvalid();
     }
 
     // Safety: obstacle sensor rising/falling edge — gate->onObstacle() mutates state machine.
-    // Runs regardless of calibration (safety override).
+    // Safety override.
     // obstacleNotifyActive written by main loop before xTaskNotify; volatile guarantees visibility.
     if (notifyVal & GATE_NOTIFY_OBSTACLE) {
       if (gate) gate->onObstacle(obstacleNotifyActive);
@@ -2288,39 +2434,34 @@ void gateTask(void* pvParameters) {
 
     // Limit rising-edge events routed from handleInputs() via xTaskNotify.
     // onLimitOpen/Close mutate position + state machine — runs in GateTask only.
-    // Guarded by calibration check: calibration handles its own limit detection internally.
-    if (!calibration.isRunning()) {
-      if (notifyVal & GATE_NOTIFY_LIMIT_OPEN) {
-        if (gate) gate->onLimitOpen();
-        positionTracker.requestResyncOpen();
-      }
-      if (notifyVal & GATE_NOTIFY_LIMIT_CLOSE) {
-        if (gate) gate->onLimitClose();
-        positionTracker.requestResyncClose();
+    if (notifyVal & GATE_NOTIFY_LIMIT_OPEN) {
+      if (gate) gate->onLimitOpen();
+      positionTracker.requestResyncOpen();
+    }
+    if (notifyVal & GATE_NOTIFY_LIMIT_CLOSE) {
+      if (gate) gate->onLimitClose();
+      positionTracker.requestResyncClose();
+    }
+
+    // Homing runs exclusively in GateTask (sole motor/gate owner).
+    if (startupHomingEnabled && (!startupPositionCertain || homingActive)) {
+      runGateTaskHoming(nowMs);
+    }
+
+    // Drain command queue (skipped during active homing to prevent commands
+    // from interfering with the homing motor drive).
+    if (!homingActive && gateCommandQueue && gate) {
+      GateCmdItem item;
+      uint8_t drained = 0;
+      while (drained < kGateCommandDrainPerCycle &&
+             xQueueReceive(gateCommandQueue, &item, 0) == pdTRUE) {
+        handleControlCmd(item.action);
+        drained++;
       }
     }
 
-    // FIX #2 (CalibrationManager): while calibration owns the motor, GateTask yields
-    // all gate/motor mutations (homing, queue drain, gate->loop). WDT still resets.
-    // Safety events above (EMERGENCY, STOP, LIMITS_INVALID, OBSTACLE) bypass this guard.
-    if (!calibration.isRunning()) {
-      // FIX C: Homing runs exclusively in GateTask (sole motor/gate owner).
-      if (startupHomingEnabled && (!startupPositionCertain || homingActive)) {
-        runGateTaskHoming(nowMs);
-      }
-
-      // Drain command queue (skipped during active homing to prevent commands
-      // from interfering with the homing motor drive).
-      if (!homingActive && gateCommandQueue && gate) {
-        GateCmdItem item;
-        while (xQueueReceive(gateCommandQueue, &item, 0) == pdTRUE) {
-          handleControlCmd(item.action);
-        }
-      }
-
-      // gate->loop(): FIX #1 level-based stop, over-current, stall, status publish.
-      if (gate) gate->loop();
-    }
+    // gate->loop(): level-based stop, over-current, stall, status publish.
+    if (gate) gate->loop();
 
     if (wdtEnabled) {
       esp_task_wdt_reset();
@@ -2447,8 +2588,6 @@ void setup() {
   webserver.setLedController(&led);
   webserver.setMotorController(motor);
   webserver.setOtaActiveCallback(isOtaActive);
-  calibration.begin(&config, motor, gate);
-  webserver.setCalibrationManager(&calibration);
   webserver.begin();
 
   pushEvent("info", "setup done");
@@ -2463,10 +2602,7 @@ void loop() {
     learnCallback(false);
   }
 
-  calibration.loop();
-  if (!calibration.isRunning()) {
-    handleInputs();
-  }
+  handleInputs();
   syncLegacyPositionState();
   logSummary1Hz();
   updateHallAttachment();
@@ -2551,18 +2687,6 @@ void loop() {
     otaNetDiagLogged = false;
   }
 
-  if (calibration.isRunning() || calibration.hasError() || calibration.isComplete()) {
-    if (now - lastCalibWsMs > 250) {
-      lastCalibWsMs = now;
-      StaticJsonDocument<768> doc;
-      doc["type"] = "calibration";
-      JsonObject data = doc.createNestedObject("data");
-      calibration.fillStatus(data);
-      char payload[768];
-      serializeJson(doc, payload, sizeof(payload));
-      webserver.broadcastJson(payload);
-    }
-  }
   // Push status frequently while moving (smooth UI), slower when idle.
   uint32_t statusIntervalMs = 1000;
   if (gate && gate->isMoving()) statusIntervalMs = 500;

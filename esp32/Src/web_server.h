@@ -5,7 +5,6 @@
 #include "config_manager.h"
 
 class MqttManager;
-class CalibrationManager;
 class LedController;
 
 struct ControlResult {
@@ -59,7 +58,6 @@ public:
   void setRemoteStateCallback(RemoteStateCb cb);
   void setOtaActiveCallback(OtaActiveCb cb);
   void setMqttManager(MqttManager* mqtt);
-  void setCalibrationManager(CalibrationManager* calibration);
   void setLedController(LedController* led);
   void setMotorController(MotorController* motor);
   void setLearnState(bool enabled);
@@ -74,7 +72,6 @@ public:
 private:
   ConfigManager* cfg;
   MqttManager* mqtt = nullptr;
-  CalibrationManager* calibration = nullptr;
   LedController* led = nullptr;
   MotorController* motor = nullptr;
   AsyncWebServer server{80};

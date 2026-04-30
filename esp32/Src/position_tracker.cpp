@@ -11,8 +11,6 @@
 PositionTracker* PositionTracker::instance_ = nullptr;
 
 namespace {
-static constexpr const char* kPositionSnapshotPath = "/position.bin";
-static constexpr const char* kPositionSnapshotTmpPath = "/position.tmp";
 } // namespace
 
 void PositionTracker::begin(ConfigManager* cfg, MotorController* motor, GateController* gate) {
@@ -82,9 +80,6 @@ void PositionTracker::initializeFromConfig() {
   posFilterInit_   = false;
   pos_f_           = 0.0f;
   lastTelMsFilter_ = 0;
-
-  LittleFS.remove(kPositionSnapshotPath);
-  LittleFS.remove(kPositionSnapshotTmpPath);
 
   syncConfigPosition();
   syncGatePosition();
@@ -518,4 +513,3 @@ void PositionTracker::updateHallStats(uint32_t nowMs) {
   hallPpsLastMs_   = nowMs;
   hallPpsLastCount_= count;
 }
-

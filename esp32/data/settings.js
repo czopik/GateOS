@@ -794,6 +794,76 @@ function setupListeners() {
     });
   });
 
+  // --- HTTP OTA upload przez przeglądarkę ---
+  const otaUploadBtn  = document.getElementById('otaUploadBtn');
+  const otaUploadFile = document.getElementById('otaUploadFile');
+  const otaUploadFileName = document.getElementById('otaUploadFileName');
+  const otaUploadProgress = document.getElementById('otaUploadProgress');
+  const otaUploadBar    = document.getElementById('otaUploadBar');
+  const otaUploadStatus = document.getElementById('otaUploadStatus');
+
+  otaUploadBtn.addEventListener('click', () => otaUploadFile.click());
+
+  otaUploadFile.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    otaUploadFileName.textContent = file.name;
+    openConfirm(`Wgrać firmware: ${file.name} (${(file.size/1024).toFixed(1)} KB)?`, () => {
+      uploadFirmware(file);
+    });
+    e.target.value = '';
+  });
+
+  async function uploadFirmware(file) {
+    otaUploadProgress.style.display = 'block';
+    otaUploadBar.style.width = '0%';
+    otaUploadStatus.textContent = 'Przesyłanie...';
+    otaUploadBtn.disabled = true;
+
+    const formData = new FormData();
+    formData.append('firmware', file, file.name);
+
+    const xhr = new XMLHttpRequest();
+    const token = getToken();
+
+    xhr.upload.addEventListener('progress', (ev) => {
+      if (ev.lengthComputable) {
+        const pct = Math.round(ev.loaded / ev.total * 100);
+        otaUploadBar.style.width = pct + '%';
+        otaUploadStatus.textContent = `Przesyłanie: ${pct}% (${(ev.loaded/1024).toFixed(0)} / ${(ev.total/1024).toFixed(0)} KB)`;
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      let ok = false;
+      try { ok = JSON.parse(xhr.responseText)?.ok === true; } catch {}
+      if (ok) {
+        otaUploadBar.style.width = '100%';
+        otaUploadBar.style.background = '#4caf50';
+        otaUploadStatus.textContent = 'Wgrano pomyślnie! Urządzenie restartuje się...';
+        showToast('Firmware wgrane — restart urządzenia');
+      } else {
+        otaUploadBar.style.background = '#f44336';
+        let errMsg = '-';
+        try { errMsg = JSON.parse(xhr.responseText)?.error || xhr.responseText; } catch {}
+        otaUploadStatus.textContent = `Błąd: ${errMsg}`;
+        showToast('Błąd wgrywania firmware');
+        otaUploadBtn.disabled = false;
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      otaUploadBar.style.background = '#f44336';
+      otaUploadStatus.textContent = 'Błąd sieci — sprawdź połączenie';
+      showToast('Błąd sieci');
+      otaUploadBtn.disabled = false;
+    });
+
+    xhr.open('POST', '/api/ota/upload');
+    if (token) xhr.setRequestHeader('X-Api-Key', token);
+    xhr.send(formData);
+  }
+
   confirmYes.addEventListener('click', async () => {
     if (pendingConfirm) await pendingConfirm();
     closeConfirm();

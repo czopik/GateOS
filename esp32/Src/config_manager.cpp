@@ -596,7 +596,32 @@ bool ConfigManager::saveInternal(String* error, bool force) {
   lastSaveError = "";
   size_t written = 0;
 
+  // FIX A2+A3: Use a SINGLE DynamicJsonDocument (reused via clear()) instead of
+  // three separate 16 KB allocations.  Peak heap: 16 KB instead of 49 KB.
+  // Guard against OOM before allocating: if the largest free block is smaller
+  // than CONFIG_JSON_CAPACITY + 2 KB headroom, defer and retry later.
+  if (ESP.getMaxAllocHeap() < CONFIG_JSON_CAPACITY + 2048) {
+    lastSaveError = "low_heap";
+    Serial.printf("[save] deferred: low_heap maxAlloc=%u need=%u\n",
+                  (unsigned)ESP.getMaxAllocHeap(),
+                  (unsigned)(CONFIG_JSON_CAPACITY + 2048));
+    setError(error, lastSaveError.c_str());
+    pendingSave = true;
+    pendingSaveAtMs = millis();
+    return false;
+  }
+
   DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
+  // Verify the document was actually allocated (OOM guard for ArduinoJson).
+  if (doc.capacity() == 0) {
+    lastSaveError = "json_alloc_failed";
+    setError(error, lastSaveError.c_str());
+    pendingSave = true;
+    pendingSaveAtMs = millis();
+    return false;
+  }
+
+  // Step 1: build + write tmp file.
   buildJson(doc);
   attachDocumentChecksum(doc);
 
@@ -608,9 +633,11 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     pendingSaveAtMs = millis();
     return false;
   }
-  DynamicJsonDocument verifyTmp(CONFIG_JSON_CAPACITY);
+
+  // Step 2: verify tmp by reusing doc (clear() does NOT free heap).
+  doc.clear();
   String verifyTmpErr;
-  if (!readJsonFile(CONFIG_TMP_PATH, verifyTmp, verifyTmpErr)) {
+  if (!readJsonFile(CONFIG_TMP_PATH, doc, verifyTmpErr)) {
     LittleFS.remove(CONFIG_TMP_PATH);
     lastSaveError = "tmp_readback_failed";
     Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
@@ -619,7 +646,7 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     pendingSaveAtMs = millis();
     return false;
   }
-  if (!validateAndStripChecksum(verifyTmp, verifyTmpErr)) {
+  if (!validateAndStripChecksum(doc, verifyTmpErr)) {
     LittleFS.remove(CONFIG_TMP_PATH);
     lastSaveError = "tmp_crc_failed";
     Serial.printf("[save] bytes=%u fail crc=%s\n", (unsigned)written, verifyTmpErr.c_str());
@@ -628,7 +655,9 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     pendingSaveAtMs = millis();
     return false;
   }
+  // doc now holds the verified config (without crc32 field).
 
+  // Step 3: atomically commit tmp → primary.
   bool committed = false;
   if (!LittleFS.exists(CONFIG_PATH)) {
     committed = LittleFS.rename(CONFIG_TMP_PATH, CONFIG_PATH);
@@ -637,7 +666,11 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     if (!committed) {
       // LittleFS may reject unlink/replace when another request still has CONFIG_PATH open.
       // Fallback to an in-place rewrite to avoid "Has open FD" on remove(CONFIG_PATH).
+      // Rebuild doc because it was cleared/modified by step 2.
       Serial.printf("[save] rename fallback path errno=%d\n", errno);
+      doc.clear();
+      buildJson(doc);
+      attachDocumentChecksum(doc);
       committed = writeJsonFile(CONFIG_PATH, doc, &written);
       LittleFS.remove(CONFIG_TMP_PATH);
     }
@@ -651,9 +684,10 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     return false;
   }
 
-  DynamicJsonDocument verify(CONFIG_JSON_CAPACITY);
+  // Step 4: final readback verify (reuse doc).
+  doc.clear();
   String verifyErr;
-  if (!readConfigFileToDoc(verify, verifyErr)) {
+  if (!readConfigFileToDoc(doc, verifyErr)) {
     lastSaveError = "readback_failed";
     Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
     setError(error, verifyErr.c_str());
@@ -661,7 +695,7 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     pendingSaveAtMs = millis();
     return false;
   }
-  if (!verify.is<JsonObject>()) {
+  if (!doc.is<JsonObject>()) {
     lastSaveError = "readback_invalid";
     Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
     setError(error, lastSaveError.c_str());
@@ -670,7 +704,10 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     return false;
   }
 
+  // Step 5: write backup (rebuild doc with CRC — no extra heap allocation).
   pendingSave = false;
+  doc.clear();
+  buildJson(doc);
   attachDocumentChecksum(doc);
   if (!writeJsonFile(CONFIG_BAK_PATH, doc, nullptr)) {
     Serial.println("[save] warning: backup_write_failed");
