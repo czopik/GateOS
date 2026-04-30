@@ -121,8 +121,8 @@ static int parsePullMode(const String& mode) {
 
 static std::map<unsigned long, RemoteSeen> lastRemoteMap;
 static LastRemote lastRemote;
-static bool learnMode = false;
-static uint32_t learnModeUntilMs = 0;
+static volatile bool learnMode = false;
+static volatile uint32_t learnModeUntilMs = 0;
 static constexpr uint32_t kLearnModeWindowMs = 30000;
 static const int kMaxEvents = 80;
 static EventEntry events[kMaxEvents];
@@ -208,10 +208,10 @@ static unsigned long lastMqttPublish = 0;
 static unsigned long lastMqttTelemetryMs = 0;
 static unsigned long lastMqttHoverTelMs = 0;  // v2.2: hover telemetry at 5s (separate from motion 1s)
 static bool mqttWasConnected = false;
-static bool restartPending = false;
-static uint32_t restartAtMs = 0;
-static bool factoryResetPending = false;
-static uint32_t factoryResetAtMs = 0;
+static volatile bool restartPending = false;
+static volatile uint32_t restartAtMs = 0;
+static volatile bool factoryResetPending = false;
+static volatile uint32_t factoryResetAtMs = 0;
 static volatile bool runtimeConfigApplyPending = false;
 static volatile uint32_t runtimeConfigApplyRequestedMs = 0;
 // FIX A1: cooperative pause flag for processPendingRuntimeConfigApply().

@@ -924,6 +924,8 @@ void WebServerManager::setupRoutes() {
                       filename.c_str(), request->contentLength());
         if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
           Serial.printf("[OTA-HTTP] begin error: %s\n", Update.errorString());
+        } else {
+          otaHttpUploadStarted = true;
         }
       }
       if (Update.isRunning()) {

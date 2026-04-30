@@ -566,9 +566,10 @@ async function saveConfig() {
 
   try {
     const result = await postJson('/api/config', cfg);
-    if (result && result.apply === 'restart' && result.redirectPort) {
-      showToast(`Zapisano, restart i zmiana na port ${result.redirectPort}...`);
-      setTimeout(() => redirectToPort(result.redirectPort), 2500);
+    const rd = result && result.data;
+    if (rd && rd.apply === 'restart' && rd.redirectPort) {
+      showToast(`Zapisano, restart i zmiana na port ${rd.redirectPort}...`);
+      setTimeout(() => redirectToPort(rd.redirectPort), 2500);
       return;
     }
     showToast('Zapisano');

@@ -77,6 +77,7 @@ private:
   AsyncWebServer server{80};
   AsyncWebSocket ws{ "/ws" };
   bool fsMounted = false;
+  bool otaHttpUploadStarted = false;
   WebRuntimeStats stats;
 
   void setupRoutes();
