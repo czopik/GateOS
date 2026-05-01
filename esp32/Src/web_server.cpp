@@ -7,8 +7,10 @@
 #include "led_controller.h"
 #include "motor_controller.h"
 #include <new>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
-extern void scheduleRestart(uint32_t delayMs);
+extern void scheduleRestart(uint32_t delayMs, const char* reason);
 extern void scheduleFactoryReset(uint32_t delayMs);
 extern void scheduleRuntimeConfigApply();
 
@@ -39,6 +41,29 @@ struct JsonParseDiag {
 
 static JsonParseDiag g_jsonParseDiag;
 static std::map<AsyncWebServerRequest*, BodyBuffer*> g_bodyBuffers;
+static SemaphoreHandle_t g_bodyBuffersMutex = nullptr;
+static uint32_t g_bodyBufferCleanupCount = 0;
+
+static bool pathRequiresConfiguredToken(const String& url) {
+  return url == "/api/reboot" ||
+         url == "/api/factory_reset" ||
+         url == "/api/ota/upload";
+}
+
+static void initBodyBufferMutex() {
+  if (!g_bodyBuffersMutex) {
+    g_bodyBuffersMutex = xSemaphoreCreateMutex();
+  }
+}
+
+static bool lockBodyBuffers(TickType_t waitTicks = pdMS_TO_TICKS(100)) {
+  if (!g_bodyBuffersMutex) initBodyBufferMutex();
+  return g_bodyBuffersMutex && xSemaphoreTake(g_bodyBuffersMutex, waitTicks) == pdTRUE;
+}
+
+static void unlockBodyBuffers() {
+  if (g_bodyBuffersMutex) xSemaphoreGive(g_bodyBuffersMutex);
+}
 
 static void copyPrintable(char* dst, size_t dstSize, const char* src, size_t srcLen) {
   if (!dst || dstSize == 0) return;
@@ -62,7 +87,7 @@ static void setJsonBad(const char* tag, const char* err, size_t len, const Strin
   copyPrintable(g_jsonParseDiag.lastBadHead, sizeof(g_jsonParseDiag.lastBadHead), head.c_str(), head.length());
 }
 
-void releaseBody(AsyncWebServerRequest* request) {
+static void releaseBodyUnlocked(AsyncWebServerRequest* request) {
   auto it = g_bodyBuffers.find(request);
   if (it != g_bodyBuffers.end()) {
     delete it->second;
@@ -70,7 +95,13 @@ void releaseBody(AsyncWebServerRequest* request) {
   }
 }
 
-BodyBuffer* getBodyBuffer(AsyncWebServerRequest* request, size_t total) {
+void releaseBody(AsyncWebServerRequest* request) {
+  if (!lockBodyBuffers()) return;
+  releaseBodyUnlocked(request);
+  unlockBodyBuffers();
+}
+
+BodyBuffer* getBodyBufferUnlocked(AsyncWebServerRequest* request, size_t total) {
   auto it = g_bodyBuffers.find(request);
   if (it != g_bodyBuffers.end()) return it->second;
   auto* buf = new BodyBuffer();
@@ -103,42 +134,58 @@ BodyAppendResult appendBody(BodyBuffer* buf, const uint8_t* data, size_t len, si
 }
 
 BodyBuffer* appendBodyChunk(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-  BodyBuffer* buf = getBodyBuffer(request, total);
+  if (!lockBodyBuffers()) {
+    request->send(503, "application/json", "{\"status\":\"busy\"}");
+    return nullptr;
+  }
+  BodyBuffer* buf = getBodyBufferUnlocked(request, total);
   BodyAppendResult res = appendBody(buf, data, len, index, total);
+  if (res != BodyAppendResult::Ok) {
+    releaseBodyUnlocked(request);
+  }
+  unlockBodyBuffers();
   if (res != BodyAppendResult::Ok) {
     if (res == BodyAppendResult::BadOffset) {
       request->send(400, "application/json", "{\"status\":\"bad_body_offset\"}");
     } else {
       request->send(400, "application/json", "{\"status\":\"bad_body\"}");
     }
-    releaseBody(request);
     return nullptr;
   }
   return buf;
 }
 
 bool parseJsonBody(AsyncWebServerRequest* request, JsonDocument& doc, const char* tag) {
+  String bodyCopy;
+  size_t len = 0;
+  if (!lockBodyBuffers()) {
+    setJsonBad(tag, "body_buffer_busy", 0, "");
+    return false;
+  }
   auto it = g_bodyBuffers.find(request);
   if (it == g_bodyBuffers.end()) {
+    unlockBodyBuffers();
     setJsonBad(tag, "no_body_buffer", 0, "");
     return false;
   }
   BodyBuffer* buf = it->second;
-  size_t len = buf->body.length();
-  const char* body = buf->body.c_str();
+  len = buf->body.length();
+  bodyCopy = buf->body;
+  releaseBodyUnlocked(request);
+  unlockBodyBuffers();
+
+  const char* body = bodyCopy.c_str();
   if (len >= 3 &&
       static_cast<uint8_t>(body[0]) == 0xEF &&
       static_cast<uint8_t>(body[1]) == 0xBB &&
       static_cast<uint8_t>(body[2]) == 0xBF) {
     Serial.printf("JSON parse error (%s): utf8_bom len=%u\n", tag, (unsigned)len);
-    setJsonBad(tag, "utf8_bom", len, len > 80 ? buf->body.substring(0, 80) : buf->body);
-    releaseBody(request);
+    setJsonBad(tag, "utf8_bom", len, len > 80 ? bodyCopy.substring(0, 80) : bodyCopy);
     return false;
   }
   // Parse from String directly to preserve length and avoid early-NULL truncation edge-cases.
-  DeserializationError err = deserializeJson(doc, buf->body);
-  String head = len > 80 ? buf->body.substring(0, 80) : buf->body;
-  releaseBody(request);
+  DeserializationError err = deserializeJson(doc, bodyCopy);
+  String head = len > 80 ? bodyCopy.substring(0, 80) : bodyCopy;
   if (err) {
     Serial.printf("JSON parse error (%s): %s (len=%u head=%s)\n",
                   tag, err.c_str(), (unsigned)len, head.c_str());
@@ -195,6 +242,7 @@ const char* contentTypeForPath(const String& path) {
 WebServerManager::WebServerManager(ConfigManager* cfg_) : cfg(cfg_) {}
 
 void WebServerManager::begin() {
+  initBodyBufferMutex();
   const uint16_t webPort =
     (cfg && cfg->deviceConfig.webPort >= 1 && cfg->deviceConfig.webPort <= 65535)
       ? (uint16_t)cfg->deviceConfig.webPort
@@ -214,10 +262,12 @@ void WebServerManager::begin() {
 
 bool WebServerManager::isAuthorized(AsyncWebServerRequest* request) const {
   if (!cfg) return true;
-  if (!cfg->securityConfig.enabled) return true;
+  const String url = request ? request->url() : "";
+  const bool forceToken = pathRequiresConfiguredToken(url) &&
+                          cfg->securityConfig.apiToken.length() > 0;
+  if (!cfg->securityConfig.enabled && !forceToken) return true;
 
   // Allow configuring security only when no token is set yet (initial setup).
-  const String url = request ? request->url() : "";
   if (url == "/api/security" && cfg->securityConfig.apiToken.length() == 0) return true;
 
   if (cfg->securityConfig.apiToken.length() == 0) return false;
@@ -384,7 +434,7 @@ void WebServerManager::setupRoutes() {
                sizeof(response),
                "{\"status\":\"ok\",\"apply\":\"restart\",\"restartMs\":1500,\"redirectPort\":%d}",
                updated.deviceConfig.webPort);
-      scheduleRestart(1500);
+      scheduleRestart(1500, "config_web_port_change");
       request->send(200, "application/json", response);
       return;
     }
@@ -892,7 +942,7 @@ void WebServerManager::setupRoutes() {
   server.on("/api/reboot", HTTP_POST, [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
     request->send(200, "application/json", "{\"status\":\"ok\"}");
-    scheduleRestart(100);
+    scheduleRestart(100, "api_reboot");
   });
 
   // HTTP OTA upload — prześlij skompilowany .bin przez przeglądarkę.
@@ -907,8 +957,7 @@ void WebServerManager::setupRoutes() {
       request->send(200, "application/json", resp);
       if (ok) {
         // Restart z lekkim opóźnieniem, żeby odpowiedź dotarła do klienta.
-        delay(300);
-        ESP.restart();
+        scheduleRestart(300, "http_ota_upload");
       }
     },
     [this](AsyncWebServerRequest *request, const String &filename,
@@ -1260,6 +1309,7 @@ void WebServerManager::maintenance() {
   const unsigned long now = millis();
   constexpr unsigned long kBodyBufStaleMs = 8000;
   constexpr size_t kBodyBufMaxEntries = 8;
+  if (!lockBodyBuffers(0)) return;
   for (auto it = g_bodyBuffers.begin(); it != g_bodyBuffers.end(); ) {
     const unsigned long age = (it->second && it->second->startMs)
                                 ? (now - it->second->startMs)
@@ -1267,14 +1317,21 @@ void WebServerManager::maintenance() {
     if (age > kBodyBufStaleMs || g_bodyBuffers.size() > kBodyBufMaxEntries) {
       delete it->second;
       it = g_bodyBuffers.erase(it);
+      g_bodyBufferCleanupCount++;
     } else {
       ++it;
     }
   }
+  unlockBodyBuffers();
 }
 
 WebRuntimeStats WebServerManager::runtimeStats() const {
   WebRuntimeStats out = stats;
   out.wsClients = (uint16_t)ws.count();
+  out.bodyBufferCleanupCount = g_bodyBufferCleanupCount;
+  if (lockBodyBuffers(0)) {
+    out.bodyBuffers = (uint16_t)g_bodyBuffers.size();
+    unlockBodyBuffers();
+  }
   return out;
 }

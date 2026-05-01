@@ -40,7 +40,9 @@ struct WebRuntimeStats {
   uint32_t lastMaintenanceMs = 0;
   uint32_t lastWsConnectMs = 0;
   uint32_t lastWsDisconnectMs = 0;
+  uint32_t bodyBufferCleanupCount = 0;
   uint16_t wsClients = 0;
+  uint16_t bodyBuffers = 0;
 };
 
 class WebServerManager {
