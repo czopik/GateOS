@@ -20,7 +20,13 @@ bool WiFiManagerClass::applyStaticIp() {
 void WiFiManagerClass::startAp(const char* reason) {
   if (apMode) return;
   apMode = true;
-  WiFi.disconnect();
+  if (cfg->wifiConfig.ssid.length() > 0) {
+    WiFi.mode(WIFI_AP_STA);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+  } else {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_AP);
+  }
   String ssid = cfg->wifiConfig.apFallback.ssid;
   if (ssid.length() == 0) ssid = "GateOS-AP";
   const char* pass = cfg->wifiConfig.apFallback.password.c_str();
@@ -32,6 +38,17 @@ void WiFiManagerClass::startAp(const char* reason) {
   Serial.printf("AP mode (%s): %s\n", reason, ssid.c_str());
 }
 
+void WiFiManagerClass::stopAp(const char* reason) {
+  if (!apMode) return;
+  WiFi.softAPdisconnect(true);
+  apMode = false;
+  if (cfg->wifiConfig.ssid.length() > 0) {
+    WiFi.mode(WIFI_STA);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+  }
+  Serial.printf("AP mode off (%s)\n", reason);
+}
+
 void WiFiManagerClass::begin(ConfigManager* cfg_) {
   cfg = cfg_;
   apMode = false;
@@ -39,9 +56,9 @@ void WiFiManagerClass::begin(ConfigManager* cfg_) {
   lastAttempt = 0;
   firstAttempt = millis();
 
-  WiFi.mode(WIFI_STA);
-  esp_wifi_set_ps(WIFI_PS_NONE);   // Disable power save — eliminates 200-500ms ping latency
   if (cfg->wifiConfig.ssid.length() > 0) {
+    WiFi.mode(WIFI_STA);
+    esp_wifi_set_ps(WIFI_PS_NONE);   // Disable power save - eliminates 200-500ms ping latency.
     applyStaticIp();
     WiFi.begin(cfg->wifiConfig.ssid.c_str(), cfg->wifiConfig.password.c_str());
     lastAttempt = millis();
@@ -52,6 +69,7 @@ void WiFiManagerClass::begin(ConfigManager* cfg_) {
 
   if (WiFi.status() == WL_CONNECTED) {
     wasConnected = true;
+    stopAp("sta_connected");
     Serial.printf("WiFi connected to %s, IP: %s\n",
                   WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str());
@@ -59,11 +77,10 @@ void WiFiManagerClass::begin(ConfigManager* cfg_) {
 }
 
 void WiFiManagerClass::loop() {
-  if (apMode) return;
-
   if (WiFi.status() == WL_CONNECTED) {
     if (!wasConnected) {
       wasConnected = true;
+      stopAp("sta_recovered");
       Serial.printf("WiFi connected to %s, IP: %s\n",
                     WiFi.SSID().c_str(),
                     WiFi.localIP().toString().c_str());
@@ -73,11 +90,15 @@ void WiFiManagerClass::loop() {
 
   if (wasConnected) {
     wasConnected = false;
+    firstAttempt = millis();
+    lastAttempt = 0;
+    Serial.println("WiFi disconnected - reconnecting");
   }
 
   unsigned long now = millis();
   if (cfg->wifiConfig.ssid.length() > 0 && now - lastAttempt > 10000) {
     lastAttempt = now;
+    applyStaticIp();
     WiFi.begin(cfg->wifiConfig.ssid.c_str(), cfg->wifiConfig.password.c_str());
   }
 

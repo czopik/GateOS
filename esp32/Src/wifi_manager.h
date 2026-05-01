@@ -15,6 +15,7 @@ public:
 
 private:
   void startAp(const char* reason);
+  void stopAp(const char* reason);
   bool applyStaticIp();
 
   ConfigManager* cfg;
