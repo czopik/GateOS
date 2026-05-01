@@ -210,6 +210,7 @@ static unsigned long lastMqttHoverTelMs = 0;  // v2.2: hover telemetry at 5s (se
 static bool mqttWasConnected = false;
 static volatile bool restartPending = false;
 static volatile uint32_t restartAtMs = 0;
+static char pendingRestartReason[32] = "";
 static volatile bool factoryResetPending = false;
 static volatile uint32_t factoryResetAtMs = 0;
 static volatile bool runtimeConfigApplyPending = false;
@@ -224,9 +225,11 @@ static volatile uint32_t mainLoopHeartbeatMs = 0;
 static volatile uint32_t gateTaskHeartbeatMs = 0;
 RTC_DATA_ATTR static uint32_t rtcBootCount = 0;
 RTC_DATA_ATTR static uint32_t rtcLastResetReason = 0;
+RTC_DATA_ATTR static char rtcLastRestartReason[32] = "";
 static uint32_t prevRtcResetReason = 0;
 static uint32_t bootCount = 0;
 static esp_reset_reason_t bootResetReason = ESP_RST_UNKNOWN;
+static char bootRestartReason[32] = "";
 
 static volatile long hallCount = 0;
 static portMUX_TYPE hallMux = portMUX_INITIALIZER_UNLOCKED;
@@ -392,9 +395,16 @@ bool isSafeToSaveConfig() {
   return !gate || !gate->isMoving();
 }
 
-void scheduleRestart(uint32_t delayMs) {
+void scheduleRestart(uint32_t delayMs, const char* reason) {
   restartPending = true;
   restartAtMs = millis() + delayMs;
+  strncpy(pendingRestartReason, reason ? reason : "unspecified", sizeof(pendingRestartReason) - 1);
+  pendingRestartReason[sizeof(pendingRestartReason) - 1] = '\0';
+  strncpy(rtcLastRestartReason, pendingRestartReason, sizeof(rtcLastRestartReason) - 1);
+  rtcLastRestartReason[sizeof(rtcLastRestartReason) - 1] = '\0';
+  Serial.printf("[RESTART] scheduled reason=%s delayMs=%lu\n",
+                pendingRestartReason,
+                (unsigned long)delayMs);
 }
 
 void scheduleFactoryReset(uint32_t delayMs) {
@@ -422,7 +432,7 @@ bool isSafeToSaveConfig();
 void updateHallAttachment();
 void updatePositionPercent();
 void updateFsStats(uint32_t nowMs);
-void scheduleRestart(uint32_t delayMs);
+void scheduleRestart(uint32_t delayMs, const char* reason);
 void scheduleFactoryReset(uint32_t delayMs);
 void scheduleRuntimeConfigApply();
 void onGateStatusChanged(const GateStatus& status, void* ctx);
@@ -806,7 +816,9 @@ static void runGateTaskHoming(uint32_t nowMs) {
                       searchOpen ? "OPEN" : "CLOSE",
                       searchOpen ? homingForceCmd : -homingForceCmd);
       } else {
-        int duty = searchOpen ? max(40, homingForceCmd) : -max(40, homingForceCmd);
+        // FIX: setDuty() clamps to [0, maxDuty]; direction is already set by setDirection().
+        // Always pass positive duty — negative duty would be clamped to 0 (motor stall).
+        int duty = max(40, homingForceCmd);
         motor->setDuty(duty);
         started = true;
         Serial.printf("[HOMING] force start %s via PWM duty=%d\n",
@@ -840,7 +852,8 @@ static void runGateTaskHoming(uint32_t nowMs) {
       motor->hoverArm();
       motor->setHoverTargetSpeed((int16_t)(searchOpen ? homingForceCmd : -homingForceCmd));
     } else {
-      motor->setDuty(searchOpen ? max(40, homingForceCmd) : -max(40, homingForceCmd));
+      // FIX: setDuty() clamps to [0, maxDuty]; direction is already set by setDirection().
+      motor->setDuty(max(40, homingForceCmd));
     }
   }
   if (searchOpen ? openActive : closeActive) {
@@ -1492,6 +1505,9 @@ static void fillRuntimeSnapshot(JsonObject& runtimeObj, const WebRuntimeStats& w
   runtimeObj["bootCount"] = bootCount;
   runtimeObj["resetReasonCode"] = (int)bootResetReason;
   runtimeObj["resetReason"] = resetReasonToString(bootResetReason);
+  runtimeObj["scheduledRestartReason"] = bootRestartReason[0] ? bootRestartReason : "";
+  runtimeObj["restartPending"] = restartPending;
+  runtimeObj["pendingRestartReason"] = pendingRestartReason[0] ? pendingRestartReason : "";
   runtimeObj["prevResetReasonCodeRtc"] = (int)prevRtcResetReason;
   runtimeObj["prevResetReasonRtc"] = resetReasonToString((esp_reset_reason_t)prevRtcResetReason);
   runtimeObj["freeHeap"] = ESP.getFreeHeap();
@@ -1517,6 +1533,8 @@ static void fillRuntimeSnapshot(JsonObject& runtimeObj, const WebRuntimeStats& w
   runtimeObj["lastWsConnectMs"] = ws.lastWsConnectMs;
   runtimeObj["lastWsDisconnectMs"] = ws.lastWsDisconnectMs;
   runtimeObj["wsClients"] = ws.wsClients;
+  runtimeObj["bodyBuffers"] = ws.bodyBuffers;
+  runtimeObj["bodyBufferCleanupCount"] = ws.bodyBufferCleanupCount;
 }
 
 void fillDiagnostics(JsonObject& out) {
@@ -1630,6 +1648,18 @@ void fillDiagnostics(JsonObject& out) {
   otaObj["freeSketchSpace"] = ESP.getFreeSketchSpace();
   out["build"] = FW_VERSION;
 
+  JsonObject wifiObj = out.createNestedObject("wifi");
+  const bool wifiConnected = WiFiManager.isConnected();
+  wifiObj["connected"] = wifiConnected;
+  wifiObj["mode"] = WiFiManager.getModeCString();
+  wifiObj["status"] = WiFiManager.getLastStatusCString();
+  wifiObj["statusCode"] = WiFiManager.getLastStatus();
+  wifiObj["ssid"] = wifiConnected ? WiFi.SSID() : "";
+  wifiObj["ip"] = wifiConnected ? WiFi.localIP().toString() : "";
+  wifiObj["rssi"] = wifiConnected ? WiFi.RSSI() : 0;
+  wifiObj["reconnectAttempts"] = WiFiManager.getReconnectAttempts();
+  wifiObj["retryIntervalMs"] = WiFiManager.getRetryIntervalMs();
+
   JsonObject homingObj = out.createNestedObject("homing");
   homingObj["active"] = homingActive;
   homingObj["reason"] = homingReasonStr((HomingReason)homingReasonEnum);
@@ -1702,6 +1732,10 @@ void fillStatus(JsonObject& out) {
   wifiObj["ip"] = wifiConnected ? WiFi.localIP().toString() : "";
   wifiObj["rssi"] = wifiConnected ? WiFi.RSSI() : 0;
   wifiObj["apMode"] = strcmp(wifiMode, "AP") == 0;
+  wifiObj["status"] = WiFiManager.getLastStatusCString();
+  wifiObj["statusCode"] = WiFiManager.getLastStatus();
+  wifiObj["reconnectAttempts"] = WiFiManager.getReconnectAttempts();
+  wifiObj["retryIntervalMs"] = WiFiManager.getRetryIntervalMs();
 
   JsonObject mqttObj = out.createNestedObject("mqtt");
   mqttObj["connected"] = mqtt.connected();
@@ -1884,6 +1918,11 @@ void fillStatusLite(JsonObject& out) {
     out["chargerKnown"] = false;
     out["chargerPending"] = false;
   }
+
+  const bool wifiConnected = WiFiManager.isConnected();
+  out["wifiConnected"] = wifiConnected;
+  out["wifiRssi"] = wifiConnected ? WiFi.RSSI() : 0;
+  out["wifiMode"] = WiFiManager.getModeCString();
 }
 
 void fillRemoteState(JsonObject& out) {
@@ -2259,7 +2298,7 @@ void setupOta() {
     pushEvent("info", "ota end");
     led.setOtaActive(false);
     if (gate) gate->setOtaActive(false);
-    scheduleRestart(1200);
+    scheduleRestart(1200, "arduino_ota_end");
   });
   ArduinoOTA.onStart([]() {
     otaActive = true;
@@ -2475,13 +2514,20 @@ void setup() {
   delay(10);
   bootResetReason = esp_reset_reason();
   prevRtcResetReason = rtcLastResetReason;
+  strncpy(bootRestartReason, rtcLastRestartReason, sizeof(bootRestartReason) - 1);
+  bootRestartReason[sizeof(bootRestartReason) - 1] = '\0';
+  if (bootResetReason != ESP_RST_SW) {
+    bootRestartReason[0] = '\0';
+  }
+
   rtcBootCount++;
   bootCount = rtcBootCount;
   rtcLastResetReason = (uint32_t)bootResetReason;
-  Serial.printf("[BOOT] boot=%lu reset_reason=%s (%d)\n",
+  Serial.printf("[BOOT] boot=%lu reset_reason=%s (%d) scheduled_restart=%s\n",
                 (unsigned long)bootCount,
                 resetReasonToString(bootResetReason),
-                (int)bootResetReason);
+                (int)bootResetReason,
+                bootRestartReason[0] ? bootRestartReason : "");
   startupBootMs = millis();
   mainLoopHeartbeatMs = startupBootMs;
   gateTaskHeartbeatMs = startupBootMs;
