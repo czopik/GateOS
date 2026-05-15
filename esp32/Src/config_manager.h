@@ -76,8 +76,8 @@ struct StaticIpConfig {
 };
 
 struct WiFiConfig {
-  String ssid = "ChemiXv3";
-  String password = "chemik123";
+  String ssid = "";
+  String password = "";
   WiFiApConfig apFallback;
   StaticIpConfig staticIp;
 };
@@ -252,6 +252,9 @@ struct DeviceConfig {
   String name = "GateOS";
   String hostname = "gateos";
   int webPort = 80;
+  bool diagnosticsEnabled = false;
+  String mode = "bench";
+  String localBaseUrl = "";
 };
 
 struct RemoteEntry {
@@ -294,6 +297,7 @@ public:
 
   // Serialize/deserialize JSON for web UI
   String toJson();
+  String toApiJson(bool redactSecrets = false);
   bool fromJson(const String& json);
   bool fromJsonVariant(JsonVariantConst root);
   bool validate(JsonVariantConst root, String& error);
@@ -337,6 +341,7 @@ private:
   unsigned long lastDeferredAttemptMs = 0;
   bool readConfigFileToDoc(DynamicJsonDocument& doc, String& error);
   void buildJson(JsonDocument& doc) const;
+  void buildJson(JsonDocument& doc, bool redactSecrets) const;
   bool saveInternal(String* error, bool force);
   // FIX #3: mutex serialises concurrent saveInternal() calls from
   // configSaveTask and processPendingRuntimeConfigApply().

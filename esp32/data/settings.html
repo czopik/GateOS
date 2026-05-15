@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>GateOS - Ustawienia</title>
-  <link rel="stylesheet" href="/styles.css?v=20260102">
+  <link rel="stylesheet" href="/styles.css?v=20260515a">
 </head>
 <body>
   <header class="topbar">
@@ -18,8 +18,6 @@
         <a href="/control.html">Sterowanie</a>
         <a class="active" href="/settings.html">Ustawienia</a>
         <a href="/remotes.html">Piloty</a>
-        <a href="#diagnostyka">Diagnostyka</a>
-        <a href="#ota">Aktualizacje</a>
       </nav>
     </div>
   </header>
@@ -28,6 +26,10 @@
     <section class="card" style="--delay:0s">
       <h2>Konfiguracja systemu</h2>
       <div class="info-row">Wszystkie zmiany sa walidowane lokalnie i przez API przed zapisem.</div>
+      <div class="section-shortcuts" aria-label="Skróty ustawień">
+        <a class="section-shortcut" href="#diagnostyka">Diagnostyka</a>
+        <a class="section-shortcut" href="#ota">Aktualizacje</a>
+      </div>
       <div class="field" style="max-width:320px">
         <label for="apiToken">Token API (do autoryzacji)</label>
         <input id="apiToken" type="password" placeholder="np. gateos123" data-path="security.apiToken">
@@ -871,6 +873,11 @@
                 <small class="field-note">Zmiana portu moze wymusic restart uslugi WWW i ponowne polaczenie z nowym adresem.</small>
               </div>
               <div class="field">
+                <label>Lokalny URL urzadzenia</label>
+                <input type="url" data-path="device.localBaseUrl" placeholder="http://192.168.1.44:8080">
+                <small class="field-note">Jesli ustawiony, ten adres ma pierwszenstwo dla API, WebSocket i modulow UI. Zostaw puste, aby uzyc biezacego origin.</small>
+              </div>
+              <div class="field">
                 <label>Haslo OTA</label>
                 <input type="password" data-path="ota.password">
               </div>
@@ -947,6 +954,7 @@
     </div>
   </div>
 
-  <script src="/settings.js?v=20260102"></script>
+  <script src="/webui-core.js?v=20260515b"></script>
+  <script src="/settings.js?v=20260515c"></script>
 </body>
 </html>

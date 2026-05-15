@@ -18,6 +18,11 @@ const els = {
   fsUsedPct: document.getElementById('fsUsedPct')
 };
 
+const core = window.GateOSWeb;
+const logger = core.createLogger('sensors');
+const apiClient = core.createApiClient({ logger: core.createLogger('sensors-api'), defaultTimeoutMs: 2500 });
+const scheduler = core.createScheduler();
+
 const state = {
   intervalStarted: false,
   inFlight: false,
@@ -51,13 +56,15 @@ function fmtMb(bytes) {
 async function loadStatus() {
   if (document.hidden || state.inFlight) return;
   state.inFlight = true;
-  const controller = new AbortController();
-  state.abort = controller;
-  const timeout = setTimeout(() => controller.abort(), 2000);
+  state.abort = true;
   try {
-    const res = await fetch('/api/status', { signal: controller.signal, cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    const result = await apiClient.request('/api/status', {
+      requestKey: 'sensors-status',
+      timeoutMs: 2000,
+      responseType: 'json',
+      cache: 'no-store'
+    });
+    const data = result.data;
 
     const limits = data?.limits || {};
     const inputs = data?.inputs || {};
@@ -104,8 +111,7 @@ async function loadStatus() {
     setText(els.fsFree, 'NO DATA');
     setText(els.fsUsedPct, 'NO DATA');
   } finally {
-    clearTimeout(timeout);
-    if (state.abort === controller) state.abort = null;
+    state.abort = null;
     state.inFlight = false;
   }
 }
@@ -113,18 +119,30 @@ async function loadStatus() {
 function startPollingOnce() {
   if (state.intervalStarted) return;
   state.intervalStarted = true;
-  setInterval(loadStatus, 5000);
+  scheduler.every(loadStatus, 10000);
 }
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (state.abort) state.abort.abort();
-    return;
+core.bindPageLifecycle({
+  onHide() {
+    apiClient.abort('sensors-status', 'page_hidden');
+  },
+  onShow() {
+    loadStatus();
+  },
+  onWake() {
+    loadStatus();
+  },
+  onOnline() {
+    loadStatus();
+  },
+  onOffline() {
+    logger.debug('offline');
   }
-  loadStatus();
 });
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  await core.ensurePreferredBaseUrlLoaded({ navigate: true });
+  if (core.isRedirectingToPreferredBase()) return;
   loadStatus();
   startPollingOnce();
 });

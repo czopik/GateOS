@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>GateOS - Dashboard</title>
-  <link rel="stylesheet" href="/styles.css?v=20260102">
+  <link rel="stylesheet" href="/styles.css?v=20260515a">
 </head>
 <body>
   <header class="topbar">
@@ -16,23 +16,25 @@
       <nav class="nav" aria-label="Nawigacja">
         <a class="active" href="/">Dashboard</a>
         <a href="/control.html">Sterowanie</a>
-        <a href="/settings.html">Ustawienia</a>
-        <a href="/sensors.html">Czujniki info</a>
         <a href="/remotes.html">Piloty</a>
-        <a href="/settings.html#diagnostyka">Diagnostyka</a>
-        <a href="/settings.html#ota">Aktualizacje</a>
+        <a href="/settings.html">Ustawienia</a>
       </nav>
     </div>
   </header>
 
-  <main class="page">
+  <main class="page dashboard-page">
     <div class="grid">
-      <section class="card" style="--delay:0s">
+      <section class="card dashboard-status-card" style="--delay:0s">
         <h2>Stan bramy</h2>
         <div class="status-big" id="gateState">LADOWANIE</div>
         <div class="status-summary">
           <span class="status-pill ok" id="safetyBadge">OK</span>
           <span class="status-pill neutral" id="controlBadge">Sterowanie: dozwolone</span>
+        </div>
+        <div class="section-shortcuts dashboard-shortcuts" aria-label="Szybkie przejscia">
+          <a class="section-shortcut" href="/control.html">Sterowanie</a>
+          <a class="section-shortcut" href="/remotes.html">Piloty</a>
+          <a class="section-shortcut" href="/sensors.html">Czujniki info</a>
         </div>
         <div class="progress-track" aria-label="Otwarcie bramy">
           <div class="progress-bar" id="gateProgress"></div>
@@ -127,7 +129,7 @@
         </div>
       </section>
 
-      <section class="card" style="--delay:0.05s">
+      <section class="card dashboard-controls-card" style="--delay:0.05s">
         <h2>Sterowanie</h2>
         <div class="controls">
           <button id="openBtn" class="btn primary" aria-label="Otworz">
@@ -200,6 +202,7 @@
   </main>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/script.js?v=20260102"></script>
+  <script src="/webui-core.js?v=20260515b"></script>
+  <script src="/script.js?v=20260515b"></script>
 </body>
 </html>

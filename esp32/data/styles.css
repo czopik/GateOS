@@ -22,7 +22,7 @@
 }
 
 *{box-sizing:border-box}
-html,body{height:100%}
+html,body{height:100%;overflow-x:hidden}
 body{
   margin:0;
   font-family:var(--font-sans);
@@ -100,6 +100,14 @@ img{max-width:100%;display:block}
 @media (max-width:900px){
   .grid{grid-template-columns:1fr}
   .topbar-inner{flex-direction:column;align-items:flex-start}
+}
+
+.dashboard-shortcuts{
+  margin:10px 0 14px;
+}
+
+.dashboard-shortcuts .section-shortcut{
+  background:rgba(255,255,255,0.08);
 }
 
 .card{
@@ -513,6 +521,56 @@ img{max-width:100%;display:block}
   font-size:12px;
   border-radius:10px;
 }
+
+@media (max-width:720px){
+  .table,
+  .table tbody,
+  .table tr,
+  .table td{
+    display:block;
+    width:100%;
+  }
+
+  .table thead{
+    display:none;
+  }
+
+  .table tr{
+    padding:14px;
+    margin-bottom:10px;
+    border-radius:18px;
+    border:1px solid rgba(255,255,255,0.08);
+    background:rgba(255,255,255,0.04);
+  }
+
+  .table td{
+    border-bottom:none;
+    padding:0;
+    margin-bottom:10px;
+  }
+
+  .table td::before{
+    content:attr(data-label);
+    display:block;
+    margin-bottom:4px;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+
+  .table td:last-child{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-bottom:0;
+  }
+
+  .dashboard-shortcuts .section-shortcut{
+    flex:1 1 calc(50% - 10px);
+  }
+}
 .badge{
   padding:4px 8px;
   border-radius:999px;
@@ -557,6 +615,34 @@ img{max-width:100%;display:block}
   gap:10px;
   flex-wrap:wrap;
   margin-top:12px;
+}
+
+.section-shortcuts{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin:12px 0 16px;
+}
+
+.section-shortcut{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:40px;
+  padding:8px 14px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.12);
+  color:var(--text);
+  font-size:13px;
+  font-weight:600;
+  transition:background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.section-shortcut:hover{
+  background:rgba(255,255,255,0.1);
+  border-color:rgba(255,255,255,0.18);
+  transform:translateY(-1px);
 }
 
 .alert{

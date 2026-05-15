@@ -1164,11 +1164,21 @@ void mqttPublishPosition() {
 }
 
 void logSummary1Hz() {
+  static unsigned long lastDiagLogMs = 0;
+  const unsigned long now = millis();
+  if (config.deviceConfig.diagnosticsEnabled && (lastDiagLogMs == 0 || now - lastDiagLogMs >= 60000)) {
+    lastDiagLogMs = now;
+    const WebRuntimeStats ws = webserver.runtimeStats();
+    Serial.printf("[DIAG] heap=%u minHeap=%u maxAlloc=%u ws=%u\n",
+                  (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMinFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap(),
+                  (unsigned)ws.wsClients);
+  }
 #if !defined(GATE_LOG_PERIODIC)
   return;
 #endif
   static unsigned long lastLogMs = 0;
-  unsigned long now = millis();
   const uint32_t logIntervalMs = (!startupPositionCertain && !homingActive) ? 15000 : 5000;
   if (now - lastLogMs < logIntervalMs) return;
   lastLogMs = now;

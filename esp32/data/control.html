@@ -6,55 +6,172 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>GateOS - Sterowanie</title>
-  <link rel="stylesheet" href="/styles.css?v=20260417">
+  <link rel="stylesheet" href="/styles.css?v=20260515a">
   <style>
     :root{
-      --vh:1dvh;
-      --content-h:calc(100 * var(--vh) - 56px); /* viewport minus topbar */
+      --safe-top:env(safe-area-inset-top, 0px);
+      --safe-bottom:env(safe-area-inset-bottom, 0px);
     }
-    body{
-      display:flex;
-      flex-direction:column;
-      height:100vh;
-      height:100dvh;
-      overflow:hidden;
+
+    body.control-mobile{
+      min-height:100vh;
+      min-height:100dvh;
+      overflow-x:hidden;
     }
-    .ctrl-page{
-      flex:1;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:space-evenly;
-      padding:clamp(4px,1.2dvh,16px) 16px clamp(6px,1.5dvh,24px);
-      gap:clamp(4px,1dvh,16px);
-      max-width:480px;
+
+    .control-topbar .topbar-inner{
+      max-width:1160px;
+    }
+
+    .control-app-shell{
+      width:min(100%, 1120px);
       margin:0 auto;
-      width:100%;
-      overflow:hidden;
-      min-height:0;
+      padding:24px 16px calc(28px + var(--safe-bottom));
+      display:grid;
+      grid-template-columns:minmax(0, 1.08fr) minmax(320px, 0.92fr);
+      gap:20px;
+      align-items:start;
     }
 
-    /* Gate animation — fluid height */
-    .gate-vis{
-      width:100%;
-      max-width:min(80vw,360px);
-      height:clamp(80px,18dvh,240px);
-      flex-shrink:1;
-      min-height:0;
+    .control-primary,
+    .control-secondary{
+      display:grid;
+      gap:20px;
     }
-    .gate-vis svg{width:100%;height:100%}
 
-    /* Gate panel (animated via SVG transform attribute — no CSS px issues on mobile) */
+    .control-card{
+      background:rgba(11,18,30,0.82);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:26px;
+      padding:18px;
+      box-shadow:0 24px 60px rgba(0,0,0,0.32);
+      backdrop-filter:blur(16px);
+    }
 
-    /* State label */
-    .state-label{
-      font-size:clamp(16px,2.8dvh,24px);
+    .camera-card-head,
+    .status-card-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+    }
+
+    .camera-kicker,
+    .eyebrow{
+      margin:0 0 6px;
+      font-size:12px;
       font-weight:700;
+      letter-spacing:0.08em;
+      color:var(--muted);
+      text-transform:uppercase;
+    }
+
+    .camera-card h2,
+    .status-card h2{
+      margin:0;
+      font-size:22px;
+    }
+
+    .camera-frame{
+      position:relative;
+      width:100%;
+      aspect-ratio:16 / 9;
+      margin-top:14px;
+      border-radius:22px;
+      overflow:hidden;
+      background:
+        radial-gradient(circle at 15% 20%, rgba(61,217,182,0.18), transparent 38%),
+        linear-gradient(180deg, rgba(10,18,30,0.95), rgba(5,10,18,0.98));
+      border:1px solid rgba(255,255,255,0.08);
+    }
+
+    .camera-frame img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:none;
+    }
+
+    .camera-frame iframe{
+      width:100%;
+      height:100%;
+      border:0;
+      display:none;
+      background:rgba(8,14,24,0.92);
+    }
+
+    .camera-frame.has-image img{
+      display:block;
+    }
+
+    .camera-frame.has-image .camera-empty,
+    .camera-frame.has-embed .camera-empty{
+      display:none;
+    }
+
+    .camera-frame.has-embed iframe{
+      display:block;
+    }
+
+    .camera-empty{
+      position:absolute;
+      inset:0;
+      display:grid;
+      place-content:center;
+      gap:10px;
+      padding:18px;
+      text-align:center;
+      color:var(--muted);
+      background:linear-gradient(180deg, rgba(8,14,24,0.7), rgba(8,14,24,0.88));
+    }
+
+    .camera-empty strong{
+      color:var(--text);
+      font-size:18px;
+    }
+
+    .camera-actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:14px;
+    }
+
+    .camera-actions .btn,
+    .camera-config .btn{
+      min-height:44px;
+      padding:12px 16px;
+    }
+
+    .camera-actions .btn.is-disabled{
+      opacity:0.45;
+      pointer-events:none;
+    }
+
+    .camera-config{
+      margin-top:14px;
+    }
+
+    .camera-config .info-row{
+      margin-top:12px;
+      margin-bottom:0;
+      line-height:1.5;
+      align-items:flex-start;
+    }
+
+    .status-card-head{
+      align-items:stretch;
+    }
+
+    .state-label{
+      font-size:clamp(20px, 3.4vw, 30px);
+      font-weight:800;
       text-transform:uppercase;
       letter-spacing:0.08em;
-      text-align:center;
-      flex-shrink:0;
+      line-height:1.05;
+      margin-top:4px;
     }
+
     .state-label.opening{color:var(--accent)}
     .state-label.closing{color:var(--warn)}
     .state-label.stopped,.state-label.idle{color:var(--muted)}
@@ -62,306 +179,648 @@
     .state-label.closed{color:var(--text)}
     .state-label.error{color:var(--danger)}
 
-    /* Position percentage */
-    .pos-pct{
-      font-size:clamp(28px,6dvh,52px);
-      font-weight:800;
-      letter-spacing:-0.02em;
-      background:linear-gradient(135deg,var(--accent),var(--accent-2));
-      -webkit-background-clip:text;
-      -webkit-text-fill-color:transparent;
-      background-clip:text;
-      line-height:1;
-    }
-    .pos-sub{
-      font-size:clamp(10px,1.5dvh,14px);
-      color:var(--muted);
-      margin-top:1px;
-      text-align:center;
+    .opening-panel{
+      min-width:124px;
+      padding:12px 14px;
+      border-radius:18px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.08);
+      display:grid;
+      gap:4px;
+      text-align:right;
     }
 
-    /* Toggle button — scales with viewport */
-    .toggle-gate{
-      --sz:clamp(80px,14dvh,140px);
-      width:var(--sz);
-      height:var(--sz);
-      border-radius:50%;
-      border:3px solid rgba(255,255,255,0.15);
-      background:radial-gradient(circle at 40% 35%,rgba(61,217,182,0.25),rgba(90,169,255,0.15) 70%,transparent);
+    .opening-label{
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:0.06em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+
+    .opening-value{
+      font-size:clamp(28px, 5vw, 44px);
+      font-weight:800;
+      line-height:1;
+      letter-spacing:-0.04em;
+      color:var(--text);
+    }
+
+    .status-summary{
+      margin:16px 0 14px;
+    }
+
+    .progress-arc{
+      width:100%;
+      height:14px;
+      border-radius:999px;
+      background:rgba(255,255,255,0.08);
+      overflow:hidden;
+      margin-top:6px;
+    }
+
+    .progress-arc-fill{
+      height:100%;
+      width:0%;
+      background:linear-gradient(90deg, var(--accent), var(--success));
+      transition:width 260ms ease;
+      border-radius:999px;
+    }
+
+    .opening-copy{
+      margin-top:10px;
+      font-size:13px;
+      color:var(--muted);
+      line-height:1.45;
+    }
+
+    .status-tiles{
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:10px;
+      margin-top:16px;
+    }
+
+    .status-tile{
+      padding:14px 12px;
+      border-radius:20px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.08);
+      display:grid;
+      gap:8px;
+    }
+
+    .status-tile span{
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:0.06em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+
+    .status-tile strong{
+      font-size:clamp(20px, 3vw, 28px);
+      line-height:1;
+      color:var(--text);
+    }
+
+    .status-tile strong[data-tone="good"]{color:var(--success)}
+    .status-tile strong[data-tone="warn"]{color:var(--warn)}
+    .status-tile strong[data-tone="danger"]{color:var(--danger)}
+    .status-tile strong[data-tone="info"]{color:var(--accent-2)}
+
+    .action-card{
+      display:grid;
+      gap:14px;
+    }
+
+    .hold-hint{
+      margin:0;
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:0.08em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+
+    .hold-button{
+      width:100%;
+      min-height:110px;
+      border-radius:30px;
+      border:1px solid rgba(255,255,255,0.1);
+      background:
+        radial-gradient(circle at 14% 22%, rgba(61,217,182,0.18), transparent 34%),
+        linear-gradient(180deg, rgba(12,24,38,0.96), rgba(6,14,24,0.99));
+      box-shadow:0 24px 60px rgba(0,0,0,0.34);
+      color:var(--text);
       display:flex;
       align-items:center;
-      justify-content:center;
+      gap:16px;
+      padding:16px 18px;
       cursor:pointer;
-      transition:transform 180ms ease,box-shadow 180ms ease,border-color 180ms ease;
-      box-shadow:0 0 40px rgba(61,217,182,0.12),0 12px 32px rgba(0,0,0,0.3);
+      position:relative;
+      text-align:left;
+      transition:transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, opacity 160ms ease;
       -webkit-tap-highlight-color:transparent;
-      touch-action:manipulation;
-      flex-shrink:0;
-    }
-    .toggle-gate:active{
-      transform:scale(0.93);
-      box-shadow:0 0 20px rgba(61,217,182,0.25),0 6px 16px rgba(0,0,0,0.4);
-    }
-    .toggle-gate.moving{
-      border-color:var(--warn);
-      background:radial-gradient(circle at 40% 35%,rgba(244,195,92,0.25),rgba(253,160,133,0.15) 70%,transparent);
-      box-shadow:0 0 40px rgba(244,195,92,0.15),0 12px 32px rgba(0,0,0,0.3);
-      animation:pulse-ring 1.8s ease infinite;
-    }
-    .toggle-gate.error{
-      border-color:var(--danger);
-      background:radial-gradient(circle at 40% 35%,rgba(255,107,107,0.25),rgba(255,75,75,0.15) 70%,transparent);
-      box-shadow:0 0 40px rgba(255,107,107,0.15),0 12px 32px rgba(0,0,0,0.3);
-    }
-    .toggle-gate svg{
-      width:clamp(32px,5dvh,52px);
-      height:clamp(32px,5dvh,52px);
-      color:var(--text);
-      transition:transform 260ms ease;
-    }
-    .toggle-gate.moving svg{
-      color:var(--warn);
-    }
-    @keyframes pulse-ring{
-      0%{box-shadow:0 0 40px rgba(244,195,92,0.15),0 12px 32px rgba(0,0,0,0.3)}
-      50%{box-shadow:0 0 60px rgba(244,195,92,0.25),0 12px 32px rgba(0,0,0,0.3)}
-      100%{box-shadow:0 0 40px rgba(244,195,92,0.15),0 12px 32px rgba(0,0,0,0.3)}
+      touch-action:none;
     }
 
-    /* Status chips bar */
-    .status-bar{
-      display:flex;
-      flex-wrap:wrap;
-      justify-content:center;
-      gap:6px;
-      width:100%;
-      flex-shrink:0;
-    }
-    .status-bar .chip{
-      font-size:clamp(10px,1.3dvh,12px);
-      padding:4px 8px;
+    .hold-button:hover{
+      transform:translateY(-1px);
     }
 
-    /* Compact metrics */
-    .metrics-row{
-      display:grid;
-      grid-template-columns:repeat(3,1fr);
-      gap:clamp(4px,1vw,8px);
-      width:100%;
-      max-width:min(90vw,360px);
-      flex-shrink:0;
+    .hold-button:disabled{
+      opacity:0.45;
+      cursor:not-allowed;
+      box-shadow:none;
     }
-    .m-item{
-      text-align:center;
-      padding:clamp(6px,1dvh,12px) 4px;
-      border-radius:10px;
-      background:rgba(255,255,255,0.06);
+
+    .hold-button.is-holding{
+      border-color:rgba(99,230,165,0.96);
+      box-shadow:0 0 0 12px rgba(61,217,182,0.1), 0 24px 70px rgba(61,217,182,0.18);
+      transform:scale(0.99);
+    }
+
+    .hold-button.hold-fired{
+      border-color:rgba(99,230,165,1);
+      box-shadow:0 0 0 14px rgba(61,217,182,0.12), 0 24px 70px rgba(61,217,182,0.22);
+    }
+
+    .hold-button.moving{
+      border-color:rgba(244,195,92,0.92);
+    }
+
+    .hold-button.error{
+      border-color:rgba(255,107,107,0.92);
+      box-shadow:0 0 0 10px rgba(255,107,107,0.08), 0 24px 60px rgba(0,0,0,0.3);
+    }
+
+    .hold-button-track{
+      --track-width:116px;
+      --track-height:60px;
+      --thumb-size:48px;
+      flex:0 0 auto;
+      width:var(--track-width);
+      height:var(--track-height);
+      padding:6px;
+      border-radius:999px;
+      background:rgba(255,255,255,0.08);
       border:1px solid rgba(255,255,255,0.08);
     }
-    .m-item .m-val{
-      font-size:clamp(12px,1.8dvh,16px);
+
+    .hold-button-thumb{
+      width:var(--thumb-size);
+      height:var(--thumb-size);
+      border-radius:50%;
+      display:grid;
+      place-items:center;
+      color:#06211a;
+      background:linear-gradient(135deg, var(--accent), var(--success));
+      box-shadow:0 12px 24px rgba(0,0,0,0.22);
+      transform:translateX(0);
+      transition:transform 220ms ease, background 180ms ease, color 180ms ease;
+    }
+
+    .hold-button.is-on .hold-button-thumb,
+    .hold-button.moving .hold-button-thumb{
+      transform:translateX(calc(var(--track-width) - var(--thumb-size) - 12px));
+    }
+
+    .hold-button.moving .hold-button-thumb{
+      background:linear-gradient(135deg, #f6d365, #f4c35c);
+      color:#2a1b04;
+    }
+
+    .hold-button.error .hold-button-thumb{
+      background:linear-gradient(135deg, #ff8a8a, #ff6b6b);
+      color:#2b0f0f;
+    }
+
+    .hold-button-copy{
+      min-width:0;
+      flex:1;
+      display:grid;
+      gap:6px;
+    }
+
+    .hold-icon{
+      width:28px;
+      height:28px;
+    }
+
+    .hold-title{
+      font-size:clamp(28px, 4vw, 38px);
+      font-weight:800;
+      line-height:1;
+      text-transform:uppercase;
+      letter-spacing:0.02em;
+    }
+
+    .hold-subtitle{
+      font-size:13px;
+      line-height:1.45;
+      color:var(--muted);
+      max-width:320px;
+    }
+
+    .quick-metrics,
+    .details-grid{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:10px;
+      width:100%;
+    }
+
+    .metric-pill{
+      padding:12px 10px;
+      border-radius:18px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.08);
+      display:grid;
+      gap:8px;
+      text-align:center;
+    }
+
+    .metric-pill span{
+      font-size:11px;
+      font-weight:700;
+      letter-spacing:0.05em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+
+    .metric-pill strong{
+      font-size:18px;
+      color:var(--text);
       font-weight:700;
     }
-    .m-item .m-lbl{
-      font-size:clamp(8px,1.1dvh,11px);
+
+    .details-card{
+      padding:18px;
+    }
+
+    .details-card > summary{
+      cursor:pointer;
+      list-style:none;
+      font-size:14px;
+      font-weight:700;
+      color:var(--text);
+    }
+
+    .details-card > summary::-webkit-details-marker{display:none}
+
+    .details-card > summary::after{
+      content:'Rozwin';
+      float:right;
       color:var(--muted);
-      margin-top:1px;
+      font-size:12px;
+      font-weight:600;
       text-transform:uppercase;
       letter-spacing:0.05em;
     }
 
-    /* Mini nav */
-    .mini-nav{
-      padding:10px 16px;
+    .details-card[open] > summary::after{content:'Zwin'}
+
+    .details-card .details-grid,
+    .details-card .status-bar{
+      margin-top:16px;
+    }
+
+    .details-card .status-bar{
+      width:100%;
       display:flex;
-      justify-content:center;
+      flex-wrap:wrap;
       gap:8px;
     }
-    .mini-nav a{
-      padding:6px 12px;
-      border-radius:999px;
-      font-size:12px;
-      color:var(--muted);
-      border:1px solid transparent;
-      transition:all 180ms ease;
-    }
-    .mini-nav a.active{
-      color:var(--text);
-      background:rgba(255,255,255,0.08);
-      border-color:rgba(255,255,255,0.12);
+
+    .toast{
+      right:14px;
+      bottom:calc(14px + var(--safe-bottom));
+      max-width:min(360px, calc(100vw - 28px));
     }
 
-    /* Progress arc */
-    .progress-arc{
-      width:100%;
-      max-width:min(90vw,360px);
-      height:clamp(5px,0.8dvh,10px);
-      border-radius:999px;
-      background:rgba(255,255,255,0.08);
-      overflow:hidden;
-      flex-shrink:0;
-    }
-    .progress-arc-fill{
-      height:100%;
-      width:0%;
-      background:linear-gradient(90deg,var(--accent),var(--accent-2));
-      transition:width 300ms ease;
-      border-radius:999px;
+    .mobile-tabbar{
+      display:none;
     }
 
-    .toast{right:12px;bottom:12px;max-width:calc(100vw - 24px)}
+    @media (max-width:900px){
+      .control-topbar{display:none}
 
-    /* Landscape: gate vis + controls side by side */
-    @media (orientation:landscape) and (max-height:500px){
-      .ctrl-page{
-        flex-direction:row;
-        flex-wrap:wrap;
-        justify-content:center;
-        align-items:center;
-        gap:clamp(4px,1vw,12px);
-        padding:4px 12px;
+      .control-app-shell{
+        width:100%;
+        min-height:100dvh;
+        grid-template-columns:1fr;
+        gap:12px;
+        padding:calc(12px + var(--safe-top)) 12px calc(94px + var(--safe-bottom));
       }
-      .gate-vis{
-        width:40%;
-        max-width:280px;
-        height:clamp(60px,35dvh,180px);
+
+      .control-primary,
+      .control-secondary{
+        gap:12px;
       }
-      .ctrl-center{
-        display:flex;
-        flex-direction:column;
-        align-items:center;
-        gap:clamp(2px,0.8dvh,8px);
-        flex:1;
-        min-width:200px;
+
+      .control-card{
+        padding:16px;
+        border-radius:24px;
       }
-      .toggle-gate{--sz:clamp(60px,20dvh,100px)}
-      .metrics-row{max-width:260px}
-      .status-bar{order:10;width:100%}
+
+      .camera-card-head,
+      .status-card-head{
+        gap:12px;
+      }
+
+      .status-card-head{
+        align-items:flex-end;
+      }
+
+      .opening-panel{
+        min-width:110px;
+        padding:10px 12px;
+      }
+
+      .status-tiles,
+      .quick-metrics,
+      .details-grid{
+        gap:8px;
+      }
+
+      .hold-button{
+        min-height:98px;
+        padding:14px 16px;
+        gap:14px;
+      }
+
+      .hold-button-track{
+        --track-width:104px;
+        --track-height:56px;
+        --thumb-size:44px;
+      }
+
+      .details-grid{
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+      }
+
+      .mobile-tabbar{
+        position:fixed;
+        left:12px;
+        right:12px;
+        bottom:calc(12px + var(--safe-bottom));
+        display:grid;
+        grid-template-columns:repeat(3, 1fr);
+        gap:8px;
+        padding:8px;
+        border-radius:26px;
+        background:rgba(8,12,20,0.92);
+        border:1px solid rgba(255,255,255,0.1);
+        box-shadow:0 20px 44px rgba(0,0,0,0.34);
+        backdrop-filter:blur(18px);
+        z-index:55;
+      }
+
+      .mobile-tab{
+        min-height:62px;
+        padding:10px 8px;
+        border-radius:18px;
+        display:grid;
+        justify-items:center;
+        gap:6px;
+        color:var(--muted);
+        font-size:12px;
+        font-weight:700;
+        letter-spacing:0.02em;
+      }
+
+      .mobile-tab svg{
+        width:22px;
+        height:22px;
+      }
+
+      .mobile-tab.active{
+        color:var(--success);
+        background:linear-gradient(180deg, rgba(61,217,182,0.18), rgba(61,217,182,0.08));
+        border:1px solid rgba(61,217,182,0.18);
+      }
+
+      .mobile-tab:not(.active):active{
+        background:rgba(255,255,255,0.05);
+      }
+    }
+
+    @media (max-width:520px){
+      .camera-card h2,
+      .status-card h2{
+        font-size:18px;
+      }
+
+      .status-card-head{
+        align-items:flex-start;
+      }
+
+      .opening-panel{
+        min-width:96px;
+      }
+
+      .opening-value{
+        font-size:32px;
+      }
+
+      .status-tiles,
+      .quick-metrics{
+        grid-template-columns:repeat(3, minmax(0, 1fr));
+      }
+
+      .details-grid{
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+      }
+
+      .status-tile,
+      .metric-pill{
+        padding:12px 8px;
+      }
+
+      .status-tile strong,
+      .metric-pill strong{
+        font-size:16px;
+      }
+
+      .hold-title{
+        font-size:18px;
+      }
+
+      .hold-subtitle,
+      .opening-copy{
+        font-size:12px;
+      }
     }
   </style>
 </head>
-<body>
-  <header class="topbar">
+<body class="control-mobile">
+  <header class="topbar control-topbar">
     <div class="topbar-inner">
       <div class="brand" aria-label="GateOS">
         <div class="logo">G</div>
         <div>GateOS</div>
       </div>
-      <nav class="mini-nav" aria-label="Nawigacja">
+      <nav class="nav" aria-label="Nawigacja">
         <a href="/">Dashboard</a>
         <a class="active" href="/control.html">Sterowanie</a>
+        <a href="/remotes.html">Piloty</a>
         <a href="/settings.html">Ustawienia</a>
       </nav>
     </div>
   </header>
 
-  <main class="ctrl-page">
-    <!-- Gate visualization -->
-    <div class="gate-vis">
-      <svg viewBox="0 0 400 300" fill="none">
-        <defs>
-          <clipPath id="gateClip">
-            <rect x="40" y="80" width="320" height="195"/>
-          </clipPath>
-        </defs>
-        <!-- Ground -->
-        <rect x="0" y="270" width="400" height="30" rx="4" fill="rgba(255,255,255,0.04)"/>
-        <!-- Track/rail -->
-        <rect x="40" y="165" width="320" height="4" rx="2" fill="rgba(255,255,255,0.06)"/>
-        <!-- Gate panel (slides, clipped between pillars) -->
-        <g clip-path="url(#gateClip)">
-          <g id="gatePanel" transform="translate(0,0)">
-            <rect x="40" y="95" width="320" height="170" rx="4" fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
-            <!-- Panel slats -->
-            <line x1="40" y1="130" x2="360" y2="130" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-            <line x1="40" y1="165" x2="360" y2="165" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-            <line x1="40" y1="200" x2="360" y2="200" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-            <line x1="40" y1="235" x2="360" y2="235" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-            <!-- Handle -->
-            <rect x="185" y="170" width="30" height="6" rx="3" fill="rgba(255,255,255,0.2)"/>
-          </g>
-        </g>
-        <!-- Left pillar (drawn on top of gate) -->
-        <rect x="10" y="80" width="30" height="190" rx="6" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-        <rect x="15" y="85" width="20" height="8" rx="2" fill="var(--accent)" opacity="0.6"/>
-        <!-- Right pillar -->
-        <rect x="360" y="80" width="30" height="190" rx="6" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-        <!-- Motor icon on left pillar -->
-        <circle cx="25" cy="160" r="8" fill="none" stroke="var(--accent-2)" stroke-width="1.5" opacity="0.5"/>
-        <circle cx="25" cy="160" r="3" fill="var(--accent-2)" opacity="0.5"/>
-        <!-- Direction arrow -->
-        <g id="dirArrow" opacity="0">
-          <path d="M200 60 L220 50 L220 70 Z" fill="var(--accent)" id="arrowShape"/>
-        </g>
-      </svg>
+  <main class="control-app-shell">
+    <div class="control-primary">
+      <section class="control-card camera-card" id="cameraCard">
+        <div class="camera-card-head">
+          <div>
+            <p class="camera-kicker">Kamera opcjonalna</p>
+            <h2>Podglad kamery</h2>
+          </div>
+          <span class="status-pill neutral" id="cameraBadge">BRAK URL</span>
+        </div>
+
+        <div class="camera-frame" id="cameraFrame">
+          <img id="cameraImage" alt="Podglad kamery" loading="lazy" referrerpolicy="no-referrer">
+          <iframe id="cameraEmbed" title="Podglad kamery" loading="lazy" referrerpolicy="no-referrer" allow="fullscreen"></iframe>
+          <div class="camera-empty" id="cameraEmpty">
+            <strong id="cameraEmptyTitle">Dodaj lokalny URL snapshotu</strong>
+            <p id="cameraEmptyText">Wklej bezposredni adres JPG lub PNG. Ten adres jest zapisywany tylko lokalnie w tej przegladarce.</p>
+          </div>
+        </div>
+
+        <div class="camera-actions">
+          <a class="btn ghost is-disabled" id="cameraOpenLink" href="#" target="_blank" rel="noreferrer noopener">Otworz kamerę w nowej karcie</a>
+          <button class="btn ghost" id="cameraRefreshBtn" type="button">Odswiez</button>
+        </div>
+
+        <details class="advanced camera-config" id="cameraConfig">
+          <summary>Skonfiguruj lokalny URL snapshotu</summary>
+          <div class="field" style="margin-top:14px">
+            <label for="cameraUrlInput">URL snapshotu kamery (JPEG / PNG, localStorage only)</label>
+            <input id="cameraUrlInput" type="url" placeholder="np. http://kamera.local/shot.jpg">
+            <small class="field-note">Dla zwyklego snapshotu JPEG karta odswieza obraz lokalnie co kilka sekund. Jesli w URL jest login i haslo, beda widoczne lokalnie w tej przegladarce.</small>
+          </div>
+          <div class="section-actions">
+            <button class="btn primary" id="cameraSaveBtn" type="button">Zapisz i odswiez</button>
+            <button class="btn ghost" id="cameraClearBtn" type="button">Wyczysc</button>
+          </div>
+          <div class="info-row">ESP32 nie robi proxy obrazu. Ta karta laduje snapshot bezposrednio w przegladarce i odswieza go lokalnie.</div>
+        </details>
+      </section>
+
+      <section class="control-card status-card">
+        <div class="status-card-head">
+          <div>
+            <p class="eyebrow">Stan bramy</p>
+            <div class="state-label" id="stateLabel">--</div>
+          </div>
+          <div class="opening-panel">
+            <span class="opening-label">Otwarcie</span>
+            <span class="opening-value" id="posPct">--</span>
+          </div>
+        </div>
+
+        <div class="status-summary">
+          <span class="status-pill ok" id="safetyBadge">OK</span>
+          <span class="status-pill neutral" id="controlBadge">Sterowanie: dozwolone</span>
+        </div>
+
+        <div class="progress-arc" aria-label="Otwarcie bramy">
+          <div class="progress-arc-fill" id="progressFill"></div>
+        </div>
+
+        <div class="opening-copy">Otwarcie liczone jest jako 0% zamknieta, 100% otwarta.</div>
+
+        <div class="status-tiles">
+          <div class="status-tile">
+            <span>Otwarcie</span>
+            <strong id="limitOpenValue">--</strong>
+          </div>
+          <div class="status-tile">
+            <span>Zamkniecie</span>
+            <strong id="limitCloseValue">--</strong>
+          </div>
+          <div class="status-tile">
+            <span>Tryb</span>
+            <strong id="liveValue">--</strong>
+          </div>
+        </div>
+      </section>
     </div>
 
-    <!-- State label -->
-    <div class="state-label" id="stateLabel">--</div>
+    <div class="control-secondary">
+      <section class="control-card action-card">
+        <p class="hold-hint" id="holdHint">Przytrzymaj kciukiem, aby aktywowac</p>
 
-    <div class="status-summary">
-      <span class="status-pill ok" id="safetyBadge">OK</span>
-      <span class="status-pill neutral" id="controlBadge">Sterowanie: dozwolone</span>
-    </div>
+        <button class="hold-button" id="toggleBtn" aria-label="Otworz lub zamknij brame">
+          <span class="hold-button-track" aria-hidden="true">
+            <span class="hold-button-thumb">
+              <svg class="hold-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 46V20l10-8h16l10 8v26"/>
+                <path d="M24 46V22"/>
+                <path d="M32 46V22"/>
+                <path d="M40 46V22"/>
+                <path d="M48 46V22"/>
+                <path d="M14 30h36"/>
+              </svg>
+            </span>
+          </span>
+          <span class="hold-button-copy">
+            <span class="hold-title" id="toggleTitle">Otworz</span>
+            <span class="hold-subtitle" id="holdStateText">Po 0,5 s wysle TOGGLE</span>
+          </span>
+        </button>
+      </section>
 
-    <!-- Progress bar -->
-    <div class="progress-arc">
-      <div class="progress-arc-fill" id="progressFill"></div>
-    </div>
+      <details class="control-card details-card">
+        <summary>Wiecej danych na zywo</summary>
+        <div class="details-grid">
+          <div class="metric-pill">
+            <span>Bateria</span>
+            <strong id="mBat">--</strong>
+          </div>
+          <div class="metric-pill">
+            <span>Prad</span>
+            <strong id="mCurrent">--</strong>
+          </div>
+          <div class="metric-pill">
+            <span>RPM</span>
+            <strong id="mRpm">--</strong>
+          </div>
+          <div class="metric-pill">
+            <span>Dystans</span>
+            <strong id="mDist">--</strong>
+          </div>
+          <div class="metric-pill">
+            <span>ARM</span>
+            <strong id="mArmed">--</strong>
+          </div>
+          <div class="metric-pill">
+            <span>Fault</span>
+            <strong id="mFault">--</strong>
+          </div>
+        </div>
 
-    <!-- Position percentage -->
-    <div style="text-align:center">
-      <div class="pos-pct" id="posPct">--</div>
-      <div class="pos-sub">otwarcia</div>
-    </div>
-
-    <!-- Toggle button -->
-    <button class="toggle-gate" id="toggleBtn" aria-label="Toggle brama">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <polygon points="10,8 16,12 10,16"/>
-      </svg>
-    </button>
-
-    <!-- Compact metrics -->
-    <div class="metrics-row">
-      <div class="m-item">
-        <div class="m-val" id="mBat">--</div>
-        <div class="m-lbl">Bateria</div>
-      </div>
-      <div class="m-item">
-        <div class="m-val" id="mCurrent">--</div>
-        <div class="m-lbl">Prad</div>
-      </div>
-      <div class="m-item">
-        <div class="m-val" id="mRpm">--</div>
-        <div class="m-lbl">RPM</div>
-      </div>
-    </div>
-    <div class="metrics-row">
-      <div class="m-item">
-        <div class="m-val" id="mDist">--</div>
-        <div class="m-lbl">Dystans</div>
-      </div>
-      <div class="m-item">
-        <div class="m-val" id="mArmed">--</div>
-        <div class="m-lbl">ARM</div>
-      </div>
-      <div class="m-item">
-        <div class="m-val" id="mFault">--</div>
-        <div class="m-lbl">Fault</div>
-      </div>
-    </div>
-
-    <!-- Status chips -->
-    <div class="status-bar">
-      <span class="chip" id="cWifi">WiFi: --</span>
-      <span class="chip" id="cLimO">OPEN: --</span>
-      <span class="chip" id="cLimC">CLOSE: --</span>
+        <div class="status-bar">
+          <span class="chip" id="cWifi">WiFi: --</span>
+          <span class="chip" id="cLimO">OPEN: --</span>
+          <span class="chip" id="cLimC">CLOSE: --</span>
+        </div>
+      </details>
     </div>
   </main>
 
+  <nav class="mobile-tabbar" aria-label="Szybka nawigacja">
+    <a class="mobile-tab" href="/">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 10.5 12 3l9 7.5"/>
+        <path d="M5 9.5V21h14V9.5"/>
+        <path d="M9.5 21v-6h5v6"/>
+      </svg>
+      <span>Dashboard</span>
+    </a>
+    <a class="mobile-tab" href="/remotes.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="5" y="3" width="14" height="18" rx="4"/>
+        <path d="M9 8h6"/>
+        <path d="M9 12h6"/>
+        <path d="M9 16h6"/>
+      </svg>
+      <span>Piloty</span>
+    </a>
+    <a class="mobile-tab" href="/settings.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 1 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6Z"/>
+      </svg>
+      <span>Ustawienia</span>
+    </a>
+  </nav>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/control.js?v=20260417"></script>
+  <script src="/webui-core.js?v=20260515b"></script>
+  <script src="/control.js?v=20260515d"></script>
 </body>
 </html>

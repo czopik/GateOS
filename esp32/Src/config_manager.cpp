@@ -97,6 +97,40 @@ bool copyFile(const char* src, const char* dst) {
   return true;
 }
 
+String normalizeBaseUrl(const String& value) {
+  String normalized = value;
+  normalized.trim();
+  while (normalized.length() > 0 && normalized.endsWith("/")) {
+    normalized.remove(normalized.length() - 1);
+  }
+  return normalized;
+}
+
+bool hasUnsafeBaseUrlChar(const String& value) {
+  for (size_t i = 0; i < value.length(); ++i) {
+    const char ch = value[i];
+    if ((unsigned char)ch <= 0x20 || ch == '"' || ch == '\'' || ch == '<' || ch == '>' || ch == '\\' || ch == '`') {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isValidLocalBaseUrl(const String& rawValue) {
+  const String value = normalizeBaseUrl(rawValue);
+  if (value.length() == 0) return true;
+  if (value.length() > 128) return false;
+  if (!(value.startsWith("http://") || value.startsWith("https://"))) return false;
+  if (hasUnsafeBaseUrlChar(value)) return false;
+  if (value.indexOf('?') >= 0 || value.indexOf('#') >= 0) return false;
+  const int schemePos = value.indexOf("://");
+  if (schemePos < 0) return false;
+  const String authorityAndPath = value.substring(schemePos + 3);
+  if (authorityAndPath.length() == 0) return false;
+  if (authorityAndPath.indexOf('/') >= 0) return false;
+  return true;
+}
+
 String normalizeLabel(const String& value) {
   String tmp = value;
   tmp.toLowerCase();
@@ -244,6 +278,10 @@ bool ConfigManager::readConfigFileToDoc(DynamicJsonDocument& doc, String& error)
 }
 
 void ConfigManager::buildJson(JsonDocument& doc) const {
+  buildJson(doc, false);
+}
+
+void ConfigManager::buildJson(JsonDocument& doc, bool redactSecrets) const {
   doc.clear();
   doc["version"] = CONFIG_VERSION;
 
@@ -251,14 +289,19 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
   device["name"] = deviceConfig.name;
   device["hostname"] = deviceConfig.hostname;
   device["webPort"] = deviceConfig.webPort;
+  device["diagnosticsEnabled"] = deviceConfig.diagnosticsEnabled;
+  device["mode"] = deviceConfig.mode;
+  device["localBaseUrl"] = deviceConfig.localBaseUrl;
 
   JsonObject wifi = doc.createNestedObject("wifi");
   wifi["ssid"] = wifiConfig.ssid;
-  wifi["password"] = wifiConfig.password;
+  wifi["password"] = redactSecrets ? "" : wifiConfig.password;
+  wifi["passwordSet"] = wifiConfig.password.length() > 0;
 
   JsonObject ap = wifi.createNestedObject("apFallback");
   ap["ssid"] = wifiConfig.apFallback.ssid;
-  ap["password"] = wifiConfig.apFallback.password;
+  ap["password"] = redactSecrets ? "" : wifiConfig.apFallback.password;
+  ap["passwordSet"] = wifiConfig.apFallback.password.length() > 0;
   ap["timeoutMs"] = wifiConfig.apFallback.fallbackTimeoutMs;
 
   JsonObject ip = wifi.createNestedObject("staticIp");
@@ -274,7 +317,8 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
   mqtt["server"] = mqttConfig.server;
   mqtt["port"] = mqttConfig.port;
   mqtt["user"] = mqttConfig.user;
-  mqtt["password"] = mqttConfig.password;
+  mqtt["password"] = redactSecrets ? "" : mqttConfig.password;
+  mqtt["passwordSet"] = mqttConfig.password.length() > 0;
   mqtt["topicBase"] = mqttConfig.topicBase;
   mqtt["retain"] = mqttConfig.retain;
   mqtt["qos"] = mqttConfig.qos;
@@ -284,7 +328,8 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
   JsonObject ota = doc.createNestedObject("ota");
   ota["enabled"] = otaConfig.enabled;
   ota["port"] = otaConfig.port;
-  ota["password"] = otaConfig.password;
+  ota["password"] = redactSecrets ? "" : otaConfig.password;
+  ota["passwordSet"] = otaConfig.password.length() > 0;
 
   JsonObject gate = doc.createNestedObject("gate");
   float maxDistance = gateConfig.maxDistance > 0.0f ? gateConfig.maxDistance : gateConfig.totalDistance;
@@ -420,7 +465,8 @@ void ConfigManager::buildJson(JsonDocument& doc) const {
 
   JsonObject security = doc.createNestedObject("security");
   security["enabled"] = securityConfig.enabled;
-  security["apiToken"] = securityConfig.apiToken;
+  security["apiToken"] = redactSecrets ? "" : securityConfig.apiToken;
+  security["tokenSet"] = securityConfig.apiToken.length() > 0;
 
   JsonObject motion = doc.createNestedObject("motion");
   motion["profile"] = motionConfig.profile;
@@ -550,7 +596,7 @@ void ConfigManager::load() {
       t += hex[r & 0xF];
     }
     securityConfig.apiToken = t;
-    Serial.printf("[security] generated apiToken=%s\n", securityConfig.apiToken.c_str());
+    Serial.println("[security] generated apiToken");
     save(nullptr);
   }
 
@@ -717,8 +763,12 @@ bool ConfigManager::saveInternal(String* error, bool force) {
 }
 
 String ConfigManager::toJson() {
+  return toApiJson(false);
+}
+
+String ConfigManager::toApiJson(bool redactSecrets) {
   DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
-  buildJson(doc);
+  buildJson(doc, redactSecrets);
   attachDocumentChecksum(doc);
 
   String out;
@@ -743,6 +793,9 @@ bool ConfigManager::fromJsonVariant(JsonVariantConst root) {
       deviceConfig.name = String((const char*)(device["name"] | deviceConfig.name.c_str()));
       deviceConfig.hostname = String((const char*)(device["hostname"] | deviceConfig.hostname.c_str()));
       deviceConfig.webPort = device["webPort"] | deviceConfig.webPort;
+      deviceConfig.diagnosticsEnabled = device["diagnosticsEnabled"] | deviceConfig.diagnosticsEnabled;
+      deviceConfig.mode = String((const char*)(device["mode"] | deviceConfig.mode.c_str()));
+      deviceConfig.localBaseUrl = normalizeBaseUrl(String((const char*)(device["localBaseUrl"] | deviceConfig.localBaseUrl.c_str())));
     }
   }
 
@@ -1115,6 +1168,16 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
       int webPort = device["webPort"] | deviceConfig.webPort;
       if (webPort < 1 || webPort > 65535) {
         error = "device.webPort_out_of_range";
+        return false;
+      }
+      String mode = String((const char*)(device["mode"] | deviceConfig.mode.c_str()));
+      if (!(mode == "bench" || mode == "installed")) {
+        error = "device.mode_invalid";
+        return false;
+      }
+      String localBaseUrl = normalizeBaseUrl(String((const char*)(device["localBaseUrl"] | deviceConfig.localBaseUrl.c_str())));
+      if (!isValidLocalBaseUrl(localBaseUrl)) {
+        error = "device.localBaseUrl_invalid";
         return false;
       }
     }

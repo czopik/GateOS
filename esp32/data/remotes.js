@@ -1,4 +1,19 @@
 const tokenKey = 'apiToken';
+const core = window.GateOSWeb;
+const logger = core.createLogger('remotes');
+const apiClient = core.createApiClient({ tokenKey, logger: core.createLogger('remotes-api') });
+const scheduler = core.createScheduler();
+const wsManager = core.createWebSocketManager({
+  key: 'gateos-remotes-ws',
+  path: '/ws',
+  logger: core.createLogger('remotes-ws'),
+  baseDelayMs: 3000,
+  maxDelayMs: 30000,
+  cooldownMs: 30000,
+  maxRapidFailures: 3,
+  heartbeatIntervalMs: 15000,
+  staleTimeoutMs: 45000,
+});
 const ui = {
   learnToggle: document.getElementById('learnToggle'),
   learnStatus: document.getElementById('learnStatus'),
@@ -33,6 +48,13 @@ const state = {
   editSerial: null,
   pendingConfirm: null,
   listenUntil: 0,
+  lastRemoteInFlight: false,
+  lastRemotePollId: null,
+  remotesInFlight: false,
+  learnStatusInFlight: false,
+  wsConnected: false,
+  renderSignature: '',
+  importInFlight: false,
 };
 
 function getToken() {
@@ -40,24 +62,11 @@ function getToken() {
 }
 
 async function apiFetch(path, options = {}) {
-  const headers = options.headers || {};
-  const token = getToken();
-  if (token) headers['X-Api-Key'] = token;
-  if (options.body && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
-  }
-  const res = await fetch(path, { ...options, headers });
-  if (!res.ok) {
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { data = null; }
-    const err = new Error(`HTTP ${res.status}`);
-    err.status = res.status;
-    err.data = data;
-    err.text = text;
-    throw err;
-  }
-  return res;
+  const result = await apiClient.request(path, {
+    ...options,
+    responseType: 'raw'
+  });
+  return result.res;
 }
 
 function showToast(message) {
@@ -97,14 +106,19 @@ function closeConfirm() {
 }
 
 function renderRemotes() {
-  ui.remotesTable.innerHTML = '';
+  const signature = state.remotes.map((remote) => `${remote.serial}|${remote.name || ''}|${remote.enabled ? '1' : '0'}|${remote.lastCounter || ''}`).join('||');
+  if (state.renderSignature === signature) return;
+  state.renderSignature = signature;
+
+  const fragment = document.createDocumentFragment();
   if (!state.remotes.length) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
     cell.colSpan = 5;
     cell.textContent = 'Brak zapisanych pilotow';
     row.appendChild(cell);
-    ui.remotesTable.appendChild(row);
+    fragment.appendChild(row);
+    ui.remotesTable.replaceChildren(fragment);
     return;
   }
 
@@ -112,22 +126,30 @@ function renderRemotes() {
     const row = document.createElement('tr');
 
     const nameCell = document.createElement('td');
+    nameCell.dataset.label = 'Nazwa';
     nameCell.textContent = remote.name || 'Bez nazwy';
     row.appendChild(nameCell);
 
     const idCell = document.createElement('td');
+    idCell.dataset.label = 'ID';
     idCell.textContent = remote.serial;
     row.appendChild(idCell);
 
     const statusCell = document.createElement('td');
-    statusCell.innerHTML = `<span class="badge">${remote.enabled ? 'Aktywny' : 'Wylaczony'}</span>`;
+    statusCell.dataset.label = 'Status';
+  const badge = document.createElement('span');
+  badge.className = 'badge';
+  badge.textContent = remote.enabled ? 'Aktywny' : 'Wylaczony';
+  statusCell.appendChild(badge);
     row.appendChild(statusCell);
 
     const counterCell = document.createElement('td');
+    counterCell.dataset.label = 'Counter';
     counterCell.textContent = remote.lastCounter || '-';
     row.appendChild(counterCell);
 
     const actionsCell = document.createElement('td');
+    actionsCell.dataset.label = 'Akcje';
     const renameBtn = document.createElement('button');
     renameBtn.className = 'btn ghost';
     renameBtn.textContent = 'Edytuj';
@@ -150,8 +172,10 @@ function renderRemotes() {
     actionsCell.appendChild(deleteBtn);
     row.appendChild(actionsCell);
 
-    ui.remotesTable.appendChild(row);
+    fragment.appendChild(row);
   });
+
+  ui.remotesTable.replaceChildren(fragment);
 }
 
 function updateLastRemote(data) {
@@ -162,36 +186,71 @@ function updateLastRemote(data) {
 }
 
 async function loadRemotes() {
+  if (state.remotesInFlight) return;
+  state.remotesInFlight = true;
   try {
-    const res = await apiFetch('/api/remotes');
-    const data = await res.json();
+    const res = await apiClient.request('/api/remotes', {
+      requestKey: 'remotes-list',
+      timeoutMs: 3000,
+      responseType: 'raw'
+    });
+    const response = res.res;
+    const data = await response.json();
     state.remotes = data.items || [];
     renderRemotes();
   } catch {
     showToast('Brak dostepu do listy pilotow');
+  } finally {
+    state.remotesInFlight = false;
   }
 }
 
 async function loadLearnStatus() {
+  if (state.learnStatusInFlight) return;
+  state.learnStatusInFlight = true;
   try {
-    const res = await apiFetch('/api/learn');
-    const data = await res.json();
+    const res = await apiClient.request('/api/learn', {
+      requestKey: 'remotes-learn-status',
+      timeoutMs: 2000,
+      responseType: 'raw'
+    });
+    const response = res.res;
+    const data = await response.json();
     state.learnMode = Boolean(data.enabled);
     ui.learnToggle.checked = state.learnMode;
     ui.learnStatus.textContent = state.learnMode ? 'Aktywny' : 'Wylaczony';
   } catch {
     showToast('Brak dostepu do learn mode');
+  } finally {
+    state.learnStatusInFlight = false;
   }
 }
 
 async function loadLastRemote() {
+  if (state.lastRemoteInFlight) return;
+  state.lastRemoteInFlight = true;
   try {
     const res = await apiFetch('/api/test_remote');
     const data = await res.json();
     updateLastRemote(data);
   } catch {
     // ignore
+  } finally {
+    state.lastRemoteInFlight = false;
   }
+}
+
+function startLastRemotePolling() {
+  if (state.lastRemotePollId) return;
+  state.lastRemotePollId = scheduler.every(() => {
+    if (!document.hidden && !state.wsConnected) loadLastRemote();
+  }, 4000);
+}
+
+function stopLastRemotePolling() {
+  if (!state.lastRemotePollId) return;
+  state.lastRemotePollId();
+  state.lastRemotePollId = null;
 }
 
 async function updateRemote(serial, name, enabled) {
@@ -253,10 +312,13 @@ async function exportRemotes() {
 }
 
 async function importRemotes(file) {
+  if (state.importInFlight) return;
+  state.importInFlight = true;
   try {
     const text = await file.text();
     const data = JSON.parse(text);
     const items = data.items || data.remotes || [];
+    let processed = 0;
     for (const item of items) {
       const serial = item.serial || item;
       if (!serial) continue;
@@ -264,43 +326,95 @@ async function importRemotes(file) {
         method: 'POST',
         body: JSON.stringify({ action: 'update', serial, name: item.name || '', enabled: item.enabled !== false, upsert: true })
       });
+      processed += 1;
+      if (processed % 5 === 0) {
+        await new Promise((resolve) => scheduler.after(resolve, 0));
+      }
     }
     await loadRemotes();
-    showToast('Import OK');
+    showToast(`Import OK (${processed})`);
   } catch (err) {
     const detail = err && err.data && (err.data.detail || err.data.error) ? (err.data.detail || err.data.error) : '';
     showToast(detail ? `Import nieudany: ${detail}` : 'Import nieudany');
+  } finally {
+    state.importInFlight = false;
   }
 }
 
 function connectWs() {
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-  const ws = new WebSocket(url);
-  ws.onmessage = (evt) => {
-    try {
-      const msg = JSON.parse(evt.data);
-      if (msg.type === 'status' && msg.data) {
-        if (msg.data.remotes && msg.data.remotes.last) {
-          updateLastRemote(msg.data.remotes.last);
+  if (connectWs._done) return;
+  connectWs._done = true;
+
+  const unsubscribe = wsManager.subscribe({
+    open() {
+      state.wsConnected = true;
+      loadLastRemote();
+    },
+    close() {
+      state.wsConnected = false;
+    },
+    stale() {
+      state.wsConnected = false;
+      loadLastRemote();
+    },
+    message(evt) {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'status' && msg.data) {
+          if (msg.data.remotes && msg.data.remotes.last) {
+            updateLastRemote(msg.data.remotes.last);
+          }
+          if (typeof msg.data.remotes?.learnMode !== 'undefined') {
+            ui.learnToggle.checked = msg.data.remotes.learnMode;
+            ui.learnStatus.textContent = msg.data.remotes.learnMode ? 'Aktywny' : 'Wylaczony';
+          }
         }
-        if (typeof msg.data.remotes?.learnMode !== 'undefined') {
-          ui.learnToggle.checked = msg.data.remotes.learnMode;
-          ui.learnStatus.textContent = msg.data.remotes.learnMode ? 'Aktywny' : 'Wylaczony';
+        if (msg.type === 'learn') {
+          showToast(`Dodano pilota ${msg.serial}`);
+          loadRemotes();
         }
+        if (msg.type === 'test_remote') {
+          loadLastRemote();
+        }
+      } catch {
+        // ignore
       }
-      if (msg.type === 'learn') {
-        showToast(`Dodano pilota ${msg.serial}`);
-        loadRemotes();
-      }
-      if (msg.type === 'test_remote') {
-        loadLastRemote();
-      }
-    } catch {
-      // ignore
     }
-  };
-  ws.onclose = () => setTimeout(connectWs, 2000);
+  });
+
+  scheduler.addCleanup(unsubscribe);
+  wsManager.setVisibility(!document.hidden);
+  wsManager.setOnline(navigator.onLine !== false);
+  wsManager.connect();
 }
+
+core.bindPageLifecycle({
+  onHide() {
+    stopLastRemotePolling();
+    apiClient.abort('remotes-list', 'page_hidden');
+    apiClient.abort('remotes-learn-status', 'page_hidden');
+    wsManager.setVisibility(false);
+  },
+  onShow() {
+    wsManager.setVisibility(true);
+    loadLastRemote();
+    startLastRemotePolling();
+  },
+  onWake() {
+    wsManager.reconnect('wake');
+    loadLastRemote();
+    loadLearnStatus();
+  },
+  onOnline() {
+    wsManager.setOnline(true);
+    loadRemotes();
+    loadLastRemote();
+  },
+  onOffline() {
+    state.wsConnected = false;
+    wsManager.setOnline(false);
+  }
+});
 
 function setupListeners() {
   ui.learnToggle.addEventListener('change', async () => {
@@ -351,10 +465,13 @@ function setupListeners() {
   ui.confirmNo.addEventListener('click', closeConfirm);
 }
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  await core.ensurePreferredBaseUrlLoaded({ navigate: true, tokenKey });
+  if (core.isRedirectingToPreferredBase()) return;
   setupListeners();
   loadRemotes();
   loadLearnStatus();
   loadLastRemote();
+  startLastRemotePolling();
   connectWs();
 });

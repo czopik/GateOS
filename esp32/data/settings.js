@@ -1,5 +1,10 @@
 const tokenKey = 'apiToken';
+const core = window.GateOSWeb;
+const logger = core.createLogger('settings');
+const apiClient = core.createApiClient({ tokenKey, logger: core.createLogger('settings-api'), defaultTimeoutMs: 3000 });
+const scheduler = core.createScheduler();
 const inputs = Array.from(document.querySelectorAll('[data-path]'));
+const inputByPath = new Map(inputs.map((input) => [input.dataset.path, input]));
 const dirtyBar = document.getElementById('dirtyBar');
 const toast = document.getElementById('toast');
 const confirmModal = document.getElementById('confirmModal');
@@ -38,43 +43,55 @@ let ledStealth = false;
 let statusIntervalStarted = false;
 let statusInFlight = false;
 let statusAbort = null;
+let configCache = null;
+let configLoadPromise = null;
+let saveInFlight = false;
+let queuedSave = false;
+let suspendDirtyTracking = false;
+const dirtyFields = new Set();
+const clearableTextFields = new Set(['device.localBaseUrl']);
+const secretFields = {
+  'wifi.password': {
+    flagPath: 'wifi.passwordSet',
+    keptPlaceholder: 'Pozostaw puste, aby zachowac haslo Wi-Fi'
+  },
+  'wifi.apFallback.password': {
+    flagPath: 'wifi.apFallback.passwordSet',
+    keptPlaceholder: 'Pozostaw puste, aby zachowac haslo AP'
+  },
+  'mqtt.password': {
+    flagPath: 'mqtt.passwordSet',
+    keptPlaceholder: 'Pozostaw puste, aby zachowac haslo MQTT'
+  },
+  'ota.password': {
+    flagPath: 'ota.passwordSet',
+    keptPlaceholder: 'Pozostaw puste, aby zachowac haslo OTA'
+  },
+  'security.apiToken': {
+    flagPath: 'security.tokenSet',
+    keptPlaceholder: 'Pozostaw puste, aby zachowac token API'
+  }
+};
 
 function getToken() {
   return localStorage.getItem(tokenKey) || '';
 }
 
 async function apiRequest(path, options = {}) {
-  const headers = options.headers || {};
-  const token = getToken();
-  if (token) headers['X-Api-Key'] = token;
-  if (options.body && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
-  }
   const method = (options.method || 'GET').toUpperCase();
   const body = options.body || null;
-  console.debug('[api request]', method, path, body);
-  const res = await fetch(path, { ...options, headers });
-  const text = await res.text();
-  let data = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = null;
-  }
-  console.debug('[api response]', method, path, res.status, data || text);
-  if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`);
-    err.status = res.status;
-    err.data = data;
-    err.text = text;
-    throw err;
-  }
-  return { res, data, text };
+  logger.debug('request', method, path, body);
+  const result = await apiClient.request(path, {
+    ...options,
+    responseType: options.responseType || 'json'
+  });
+  logger.debug('response', method, path, result.res.status);
+  return result;
 }
 
 function normalizePayload(obj) {
   const type = typeof obj;
-  console.debug('[cfg typeof]', type);
+  logger.debug('payload typeof', type);
   if (type === 'string') {
     const parsed = JSON.parse(obj);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -90,7 +107,7 @@ function normalizePayload(obj) {
 
 async function postJson(path, obj) {
   const payload = normalizePayload(obj);
-  console.debug('[postJson payload]', path, payload);
+  logger.debug('postJson payload', path, payload);
   return apiRequest(path, {
     method: 'POST',
     body: JSON.stringify(payload)
@@ -122,6 +139,12 @@ function setLedStealthState(value) {
 function setDirty(value) {
   dirty = value;
   dirtyBar.classList.toggle('hidden', !dirty);
+}
+
+function markDirty(path) {
+  if (suspendDirtyTracking) return;
+  if (path) dirtyFields.add(path);
+  setDirty(true);
 }
 
 function toggleMotionAdvanced() {
@@ -157,15 +180,14 @@ function fmtUptime(ms) {
 }
 
 function setInputValue(path, value) {
-  const input = inputs.find(i => i.dataset.path === path);
+  const input = inputByPath.get(path);
   if (!input) return;
+  const nextValue = value ?? '';
   if (input.type === 'checkbox') {
-    input.checked = Boolean(value);
-  } else if (input.type === 'number') {
-    input.value = value ?? '';
-  } else {
-    input.value = value ?? '';
+    if (input.checked !== Boolean(value)) input.checked = Boolean(value);
+    return;
   }
+  if (`${input.value}` !== `${nextValue}`) input.value = nextValue;
 }
 
 function updateSensorStatus(data) {
@@ -226,18 +248,15 @@ function updateSensorStatus(data) {
 async function loadStatus() {
   if (document.hidden || statusInFlight) return;
   statusInFlight = true;
-  const controller = new AbortController();
-  statusAbort = controller;
-  const timeout = setTimeout(() => controller.abort(), 2000);
+  statusAbort = true;
   try {
-    const result = await apiRequest('/api/status', { signal: controller.signal, cache: 'no-store' });
+    const result = await apiRequest('/api/status', { requestKey: 'settings-status', timeoutMs: 2000, cache: 'no-store' });
     const data = result.data || (result.text ? JSON.parse(result.text) : {});
     updateSensorStatus(data);
   } catch {
     updateSensorStatus({});
   } finally {
-    clearTimeout(timeout);
-    if (statusAbort === controller) statusAbort = null;
+    statusAbort = null;
     statusInFlight = false;
   }
 }
@@ -245,15 +264,24 @@ async function loadStatus() {
 function startStatusPollingOnce() {
   if (statusIntervalStarted) return;
   statusIntervalStarted = true;
-  setInterval(loadStatus, 5000);
+  scheduler.every(loadStatus, 10000);
 }
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (statusAbort) statusAbort.abort();
-    return;
+core.bindPageLifecycle({
+  onHide() {
+    apiClient.abort('settings-status', 'page_hidden');
+    apiClient.abort('settings-config', 'page_hidden');
+  },
+  onShow() {
+    loadStatus();
+    if (!configCache) loadConfig();
+  },
+  onWake() {
+    loadStatus();
+  },
+  onOnline() {
+    loadStatus();
   }
-  loadStatus();
 });
 
 async function runMotionTest(action) {
@@ -307,6 +335,18 @@ function setByPath(obj, path, value) {
   cur[parts[parts.length - 1]] = value;
 }
 
+function deleteByPath(obj, path) {
+  const parts = path.split('.');
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    cur = cur ? cur[parts[i]] : undefined;
+    if (!cur || typeof cur !== 'object') return;
+  }
+  if (cur && typeof cur === 'object') {
+    delete cur[parts[parts.length - 1]];
+  }
+}
+
 function readValue(input) {
   if (input.type === 'checkbox') return input.checked;
   const castType = input.dataset.type;
@@ -322,22 +362,31 @@ function readValue(input) {
   return input.value;
 }
 
+function syncSecretFieldHint(input, cfg) {
+  const meta = secretFields[input.dataset.path];
+  if (!meta) return;
+  if (!input.dataset.defaultPlaceholder) {
+    input.dataset.defaultPlaceholder = input.getAttribute('placeholder') || '';
+  }
+  const isSet = Boolean(getByPath(cfg, meta.flagPath));
+  input.placeholder = isSet ? meta.keptPlaceholder : input.dataset.defaultPlaceholder;
+}
+
 function bindConfig(cfg) {
+  suspendDirtyTracking = true;
   inputs.forEach(input => {
-    let val = getByPath(cfg, input.dataset.path);
+    const path = input.dataset.path;
+    if (dirtyFields.has(path)) return;
+    let val = getByPath(cfg, path);
     if ((val === undefined || val === null) && input.dataset.path === 'gate.maxDistance') {
       val = cfg?.gate?.totalDistance;
     }
-    if (input.type === 'checkbox') {
-      input.checked = Boolean(val);
-    } else if (input.type === 'number') {
-      input.value = val ?? '';
-    } else {
-      input.value = val ?? '';
-    }
+    setInputValue(path, val);
+    syncSecretFieldHint(input, cfg);
   });
   if (ledSegmentsInput) {
-    ledSegmentsInput.value = formatSegments(cfg?.led?.segments);
+    const nextSegments = formatSegments(cfg?.led?.segments);
+    if (!dirtyFields.has('led.segments') && ledSegmentsInput.value !== nextSegments) ledSegmentsInput.value = nextSegments;
   }
   if (motionExpertCheckbox && motionAdvancedPanel) {
     motionAdvancedPanel.classList.toggle('hidden', !motionExpertCheckbox.checked);
@@ -347,6 +396,7 @@ function bindConfig(cfg) {
   if (tokenInput && tokenInput.value) {
     localStorage.setItem(tokenKey, tokenInput.value);
   }
+  suspendDirtyTracking = false;
 }
 
 function clone(obj) {
@@ -356,9 +406,25 @@ function clone(obj) {
 function collectConfig() {
   const cfg = clone(originalConfig || {});
   inputs.forEach(input => {
+    const path = input.dataset.path;
+    const meta = secretFields[path];
+    if (meta && input.value === '') {
+      if (dirtyFields.has(path)) {
+        setByPath(cfg, path, '');
+      } else {
+        deleteByPath(cfg, path);
+      }
+      return;
+    }
+    if (clearableTextFields.has(path) && input.value === '') {
+      if (dirtyFields.has(path)) {
+        setByPath(cfg, path, '');
+      }
+      return;
+    }
     const val = readValue(input);
     if (val === null) return;
-    setByPath(cfg, input.dataset.path, val);
+    setByPath(cfg, path, val);
   });
   if (ledSegmentsInput) {
     const parsed = parseSegments(ledSegmentsInput.value);
@@ -373,7 +439,7 @@ function collectConfig() {
 }
 
 function setError(path, msg) {
-  const field = inputs.find(i => i.dataset.path === path);
+  const field = inputByPath.get(path);
   if (!field) return;
   const wrapper = field.closest('.field');
   const msgEl = wrapper ? wrapper.querySelector('.error-msg') : null;
@@ -455,6 +521,11 @@ function validateLocal(cfg) {
     setError('device.webPort', 'Port WWW 1-65535');
     ok = false;
   }
+  const rawLocalBaseUrl = typeof cfg.device?.localBaseUrl === 'string' ? cfg.device.localBaseUrl.trim() : '';
+  if (rawLocalBaseUrl && !core.normalizeBaseUrl(rawLocalBaseUrl)) {
+    setError('device.localBaseUrl', 'Uzyj http://host[:port] lub https://host');
+    ok = false;
+  }
   const segParsed = ledSegmentsInput ? parseSegments(ledSegmentsInput.value) : [];
   if (segParsed === null) {
     showToast('Segmenty LED: format start:len, start:len');
@@ -523,26 +594,47 @@ function validateLocal(cfg) {
 }
 
 async function loadConfig() {
+  if (configLoadPromise) return configLoadPromise;
+  if (configCache && originalConfig) {
+    bindConfig(configCache);
+    return configCache;
+  }
+
+  configLoadPromise = (async () => {
   try {
-    const result = await apiRequest('/api/config');
+    const result = await apiRequest('/api/config', { requestKey: 'settings-config', timeoutMs: 4000 });
     const cfg = result.data || (result.text ? JSON.parse(result.text) : {});
-    originalConfig = cfg;
+    configCache = cfg;
+    originalConfig = clone(cfg);
     bindConfig(cfg);
+    core.applyConfigBaseUrl(cfg, { navigate: true });
+    if (core.isRedirectingToPreferredBase()) return cfg;
     setLedStealthState(cfg && cfg.led && (cfg.led.mode === 'stealth' || cfg.led.defaultMode === 'stealth'));
+    dirtyFields.clear();
     setDirty(false);
+    return cfg;
   } catch (err) {
     if (err && err.status === 401) {
       showToast('Brak uprawnien. Podaj token API.');
-      return;
+      return null;
     }
     showToast('Nie mozna pobrac konfiguracji');
+    return null;
   }
+  })().finally(() => {
+    configLoadPromise = null;
+  });
+
+  return configLoadPromise;
 }
 
-async function saveConfig() {
+async function performSaveConfig() {
   const cfg = collectConfig();
-  console.debug('[save] typeof cfg', typeof cfg);
+  logger.debug('save typeof', typeof cfg);
   if (!validateLocal(cfg)) return;
+  if (cfg.device && typeof cfg.device.localBaseUrl === 'string') {
+    cfg.device.localBaseUrl = core.normalizeBaseUrl(cfg.device.localBaseUrl);
+  }
   try {
     await postJson('/api/config/validate', cfg);
   } catch (err) {
@@ -573,6 +665,12 @@ async function saveConfig() {
       return;
     }
     showToast('Zapisano');
+    configCache = clone(cfg);
+    originalConfig = clone(cfg);
+    dirtyFields.clear();
+    setDirty(false);
+    core.applyConfigBaseUrl(cfg, { navigate: true });
+    if (core.isRedirectingToPreferredBase()) return;
     await loadConfig();
   } catch (err) {
     if (err && (err.message === 'invalid_payload_type' || err.name === 'SyntaxError')) {
@@ -593,6 +691,24 @@ async function saveConfig() {
   }
 }
 
+async function saveConfig() {
+  if (saveInFlight) {
+    queuedSave = true;
+    showToast('Zapis juz trwa, kolejkuje nastepny');
+    return;
+  }
+
+  saveInFlight = true;
+  try {
+    do {
+      queuedSave = false;
+      await performSaveConfig();
+    } while (queuedSave);
+  } finally {
+    saveInFlight = false;
+  }
+}
+
 function openConfirm(message, onConfirm) {
   confirmText.textContent = message;
   confirmModal.classList.add('open');
@@ -608,8 +724,10 @@ function closeConfirm() {
 
 async function exportConfig() {
   try {
-    const result = await apiRequest('/api/config');
-    const text = result.text || JSON.stringify(result.data || {});
+    const source = (!dirty && configCache)
+      ? { data: configCache, text: JSON.stringify(configCache, null, 2) }
+      : await apiRequest('/api/config', { requestKey: 'settings-config-export', timeoutMs: 4000, responseType: 'text' });
+    const text = source.text || JSON.stringify(source.data || {});
     const blob = new Blob([text], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -628,6 +746,7 @@ async function importConfig(file) {
     const cfg = JSON.parse(text);
     await postJson('/api/config/validate', cfg);
     await postJson('/api/config', cfg);
+    configCache = null;
     await loadConfig();
     showToast('Import OK');
   } catch {
@@ -644,20 +763,31 @@ function setupAccordion() {
   });
 }
 
+function revealSectionFromHash() {
+  const hash = (window.location.hash || '').replace('#', '');
+  if (!hash) return;
+  const target = document.getElementById(hash);
+  if (!target) return;
+  const item = target.classList.contains('accordion-item') ? target : target.closest('.accordion-item');
+  if (item) item.classList.add('open');
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function setupListeners() {
   inputs.forEach(input => {
-    input.addEventListener('input', () => setDirty(true));
-    input.addEventListener('change', () => setDirty(true));
+    const path = input.dataset.path;
+    input.addEventListener('input', () => markDirty(path));
+    input.addEventListener('change', () => markDirty(path));
   });
   if (ledSegmentsInput) {
-    ledSegmentsInput.addEventListener('input', () => setDirty(true));
-    ledSegmentsInput.addEventListener('change', () => setDirty(true));
+    ledSegmentsInput.addEventListener('input', () => markDirty('led.segments'));
+    ledSegmentsInput.addEventListener('change', () => markDirty('led.segments'));
   }
 
   if (motionExpertCheckbox) {
     motionExpertCheckbox.addEventListener('change', () => {
       toggleMotionAdvanced();
-      setDirty(true);
+      markDirty('motion.expert');
     });
   }
 
@@ -680,6 +810,7 @@ function setupListeners() {
 
   document.getElementById('saveBtn').addEventListener('click', saveConfig);
   document.getElementById('discardBtn').addEventListener('click', () => {
+    dirtyFields.clear();
     bindConfig(originalConfig || {});
     setDirty(false);
   });
@@ -743,6 +874,7 @@ function setupListeners() {
       try {
         await postJson('/api/gate/calibrate', { set: 'zero' });
         showToast('Pozycja ustawiona na 0');
+        configCache = null;
         await loadConfig();
       } catch (err) {
         if (err && err.status === 401) {
@@ -760,6 +892,7 @@ function setupListeners() {
       try {
         await postJson('/api/gate/calibrate', { set: 'max' });
         showToast('Pozycja ustawiona na MAX');
+        configCache = null;
         await loadConfig();
       } catch (err) {
         if (err && err.status === 401) {
@@ -836,8 +969,9 @@ function setupListeners() {
     });
 
     xhr.addEventListener('load', () => {
-      let ok = false;
-      try { ok = JSON.parse(xhr.responseText)?.ok === true; } catch {}
+      let body = null;
+      try { body = JSON.parse(xhr.responseText); } catch {}
+      const ok = xhr.status >= 200 && xhr.status < 300 && body?.ok === true;
       if (ok) {
         otaUploadBar.style.width = '100%';
         otaUploadBar.style.background = '#4caf50';
@@ -845,8 +979,9 @@ function setupListeners() {
         showToast('Firmware wgrane — restart urządzenia');
       } else {
         otaUploadBar.style.background = '#f44336';
-        let errMsg = '-';
-        try { errMsg = JSON.parse(xhr.responseText)?.error || xhr.responseText; } catch {}
+        let errMsg = body?.error || body?.status || xhr.responseText || `HTTP ${xhr.status}`;
+        if (xhr.status === 401) errMsg = 'Brak uprawnien';
+        if (xhr.status === 423 && body?.error === 'ota_disabled') errMsg = 'OTA wylaczone';
         otaUploadStatus.textContent = `Błąd: ${errMsg}`;
         showToast('Błąd wgrywania firmware');
         otaUploadBtn.disabled = false;
@@ -860,7 +995,7 @@ function setupListeners() {
       otaUploadBtn.disabled = false;
     });
 
-    xhr.open('POST', '/api/ota/upload');
+    xhr.open('POST', core.resolveApiUrl('/api/ota/upload'));
     if (token) xhr.setRequestHeader('X-Api-Key', token);
     xhr.send(formData);
   }
@@ -872,10 +1007,14 @@ function setupListeners() {
   confirmNo.addEventListener('click', closeConfirm);
 }
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  await core.ensurePreferredBaseUrlLoaded({ navigate: true, tokenKey });
+  if (core.isRedirectingToPreferredBase()) return;
   setupAccordion();
+  window.addEventListener('hashchange', revealSectionFromHash);
   setupListeners();
   loadConfig();
   loadStatus();
   startStatusPollingOnce();
+  revealSectionFromHash();
 });

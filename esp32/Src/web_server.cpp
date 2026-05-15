@@ -155,6 +155,14 @@ void sendJson(AsyncWebServerRequest* request, JsonDocument& doc, int code = 200)
   request->send(response);
 }
 
+template <typename TDoc>
+String serializeJsonString(const TDoc& doc) {
+  String payload;
+  payload.reserve(measureJson(doc) + 1);
+  serializeJson(doc, payload);
+  return payload;
+}
+
 void sendSchemaError(AsyncWebServerRequest* request, const String& detail) {
   DynamicJsonDocument doc(256);
   doc["status"] = "invalid";
@@ -229,9 +237,6 @@ bool WebServerManager::isAuthorized(AsyncWebServerRequest* request) const {
   if (token.length() == 0 && request->hasHeader("X-API-Token")) {
     token = request->getHeader("X-API-Token")->value();
   }
-  if (token.length() == 0 && request->hasParam("token")) {
-    token = request->getParam("token")->value();
-  }
   bool ok = token.length() > 0 && token == cfg->securityConfig.apiToken;
   if (!ok) {
     IPAddress ip;
@@ -249,6 +254,7 @@ void WebServerManager::sendUnauthorized(AsyncWebServerRequest* request) const {
 
 void WebServerManager::setupRoutes() {
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
     const uint32_t t0Us = micros();
     stats.apiReqCount++;
     stats.statusReqCount++;
@@ -279,6 +285,7 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/status-lite", HTTP_GET, [this](AsyncWebServerRequest *request){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
     stats.apiReqCount++;
     stats.statusLiteReqCount++;
     stats.lastApiReqMs = millis();
@@ -307,7 +314,7 @@ void WebServerManager::setupRoutes() {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"config_missing\"}");
       return;
     }
-    request->send(200, "application/json", cfg->toJson());
+    request->send(200, "application/json", cfg->toApiJson(true));
   });
 
   server.on("/api/config", HTTP_POST, [this](AsyncWebServerRequest *request){
@@ -805,8 +812,7 @@ void WebServerManager::setupRoutes() {
     ev["encript"] = encript;
     ev["btnToggle"] = btnT;
     ev["btnGreen"] = btnG;
-    char payload[256];
-    serializeJson(ev, payload, sizeof(payload));
+    String payload = serializeJsonString(ev);
     ws.textAll(payload);
 
     if (testCb) testCb(serial, encript, btnT, btnG, false);
@@ -814,6 +820,7 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/fs_status", HTTP_GET, [this](AsyncWebServerRequest *request){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
     StaticJsonDocument<512> doc;
     bool exists = LittleFS.exists(CONFIG_PATH);
     size_t size = 0;
@@ -862,7 +869,8 @@ void WebServerManager::setupRoutes() {
     sendJson(request, doc);
   });
 
-  server.on("/api/fslist", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/api/fslist", HTTP_GET, [this](AsyncWebServerRequest *request){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
     StaticJsonDocument<512> doc;
     JsonArray arr = doc.createNestedArray("files");
     File root = LittleFS.open("/");
@@ -898,7 +906,12 @@ void WebServerManager::setupRoutes() {
   // HTTP OTA upload — prześlij skompilowany .bin przez przeglądarkę.
   // Autoryzacja jak pozostałe endpointy API.
   server.on("/api/ota/upload", HTTP_POST,
-    [](AsyncWebServerRequest *request) {
+    [this](AsyncWebServerRequest *request) {
+      if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+      if (!cfg || !cfg->otaConfig.enabled) {
+        request->send(423, "application/json", "{\"ok\":false,\"error\":\"ota_disabled\"}");
+        return;
+      }
       // Odpowiedź wysyłana po zakończeniu przesyłania pliku.
       bool ok = !Update.hasError();
       String resp = ok
@@ -916,6 +929,10 @@ void WebServerManager::setupRoutes() {
       // Sprawdź autoryzację przy pierwszym chunку.
       if (index == 0 && !isAuthorized(request)) {
         // Nie możemy wysłać 401 z handlera upload — przerywamy przez błąd.
+        Update.abort();
+        return;
+      }
+      if (index == 0 && (!cfg || !cfg->otaConfig.enabled)) {
         Update.abort();
         return;
       }
@@ -1144,8 +1161,7 @@ void WebServerManager::setupRoutes() {
       doc["type"] = "status";
       JsonObject dataObj = doc.createNestedObject("data");
       statusCb(dataObj);
-      char payload[2048];
-      serializeJson(doc, payload, sizeof(payload));
+      String payload = serializeJsonString(doc);
       client->text(payload);
       return;
     }
@@ -1233,8 +1249,7 @@ void WebServerManager::broadcastStatus() {
     unsigned long uptime = data["uptimeMs"] | 0UL;
     data["uptimeMs"] = (uptime / 1000UL) * 1000UL;
   }
-  char payload[2048];
-  serializeJson(doc, payload, sizeof(payload));
+  String payload = serializeJsonString(doc);
   ws.textAll(payload);
 }
 
@@ -1244,8 +1259,7 @@ void WebServerManager::broadcastEvent(const char* level, const char* message) {
   doc["type"] = "event";
   doc["level"] = level;
   doc["message"] = message;
-  char payload[256];
-  serializeJson(doc, payload, sizeof(payload));
+  String payload = serializeJsonString(doc);
   ws.textAll(payload);
 }
 

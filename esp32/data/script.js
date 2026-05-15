@@ -1,5 +1,29 @@
 const qs = (id) => document.getElementById(id);
 const tokenKey = 'apiToken';
+const core = window.GateOSWeb;
+const logger = core.createLogger('dashboard');
+const apiClient = core.createApiClient({ tokenKey, logger: core.createLogger('dashboard-api') });
+const scheduler = core.createScheduler();
+const wsManager = core.createWebSocketManager({
+  key: 'gateos-dashboard-ws',
+  path: '/ws',
+  logger: core.createLogger('dashboard-ws'),
+  baseDelayMs: 3000,
+  maxDelayMs: 30000,
+  cooldownMs: 30000,
+  maxRapidFailures: 3,
+  heartbeatIntervalMs: 15000,
+  staleTimeoutMs: 45000,
+});
+const scheduleLiteRender = core.createRafBatcher((data) => updateStatusLite(data));
+const scheduleFullRender = core.createRafBatcher((data) => {
+  updateStatus(data);
+  if (data && data.events && Array.isArray(data.events)) {
+    const nextEvents = data.events.slice().reverse();
+    state.events = nextEvents;
+    renderEvents();
+  }
+});
 
 const ui = {
   gateState: qs('gateState'),
@@ -59,6 +83,10 @@ const state = {
   statusFullInFlight: false,
   statusAbort: null,
   fullAbort: null,
+  eventListSignature: '',
+  wsConnected: false,
+  lastFullAppliedAt: 0,
+  lastLiteAppliedAt: 0,
 };
 
 function getToken() {
@@ -66,15 +94,11 @@ function getToken() {
 }
 
 async function apiFetch(path, options = {}) {
-  const headers = options.headers || {};
-  const token = getToken();
-  if (token) headers['X-Api-Key'] = token;
-  if (options.body && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
-  }
-  const res = await fetch(path, { ...options, headers });
-  if (!res.ok) throw new Error(`${res.status}`);
-  return res;
+  const result = await apiClient.request(path, {
+    ...options,
+    responseType: 'raw'
+  });
+  return result.res;
 }
 
 function showToast(message, type = 'info') {
@@ -250,13 +274,18 @@ function addEvent(ev) {
 }
 
 function renderEvents() {
-  ui.eventList.innerHTML = '';
   const list = state.events.filter(e => state.filter === 'all' || e.level === state.filter);
+  const signature = `${state.filter}|${list.map((ev) => `${ev.level || 'info'}|${ev.message || ''}|${ev.ts || 0}`).join('||')}`;
+  if (state.eventListSignature === signature) return;
+  state.eventListSignature = signature;
+
+  const fragment = document.createDocumentFragment();
   if (list.length === 0) {
     const li = document.createElement('li');
     li.className = 'event info';
     li.textContent = 'Brak zdarzen';
-    ui.eventList.appendChild(li);
+    fragment.appendChild(li);
+    ui.eventList.replaceChildren(fragment);
     return;
   }
   list.forEach(ev => {
@@ -269,8 +298,9 @@ function renderEvents() {
     right.textContent = ev.ts ? `${Math.floor(ev.ts / 1000)}s` : '--';
     li.appendChild(left);
     li.appendChild(right);
-    ui.eventList.appendChild(li);
+    fragment.appendChild(li);
   });
+  ui.eventList.replaceChildren(fragment);
 }
 
 function updateStatus(data) {
@@ -426,26 +456,28 @@ function updateStatusLite(data) {
 }
 
 async function fetchJsonWithTimeout(path, timeoutMs, abortRefKey) {
-  const controller = new AbortController();
-  state[abortRefKey] = controller;
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(path, { signal: controller.signal, cache: 'no-store' });
-    if (!res.ok) return null;
-    return await res.json();
+    const requestKey = abortRefKey === 'statusAbort' ? 'dashboard-status-lite' : 'dashboard-status-full';
+    const result = await apiClient.request(path, {
+      requestKey,
+      timeoutMs,
+      responseType: 'json'
+    });
+    return result.data;
   } finally {
-    clearTimeout(timeout);
-    if (state[abortRefKey] === controller) state[abortRefKey] = null;
+    state[abortRefKey] = null;
   }
 }
 
 async function fetchStatusLite() {
-  if (document.hidden || state.statusLiteInFlight) return;
+  if (document.hidden || state.statusLiteInFlight || state.wsConnected) return;
   state.statusLiteInFlight = true;
+  state.statusAbort = true;
   try {
     const data = await fetchJsonWithTimeout('/api/status-lite', 2000, 'statusAbort');
     if (!data) return;
-    updateStatusLite(data);
+    state.lastLiteAppliedAt = core.nowMs();
+    scheduleLiteRender(data);
   } catch {
     // ignore
   } finally {
@@ -456,14 +488,12 @@ async function fetchStatusLite() {
 async function fetchStatusFull() {
   if (document.hidden || state.statusFullInFlight) return;
   state.statusFullInFlight = true;
+  state.fullAbort = true;
   try {
     const data = await fetchJsonWithTimeout('/api/status', 2000, 'fullAbort');
     if (!data) return;
-    updateStatus(data);
-    if (data.events && Array.isArray(data.events)) {
-      state.events = data.events.slice().reverse();
-      renderEvents();
-    }
+    state.lastFullAppliedAt = core.nowMs();
+    scheduleFullRender(data);
   } catch {
     // ignore
   } finally {
@@ -516,50 +546,81 @@ function setupEvents() {
 }
 
 function connectWs() {
-  if (connectWs._active) return;
-  connectWs._active = true;
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-  const ws = new WebSocket(url);
-  ws.onmessage = (evt) => {
-    try {
-      const msg = JSON.parse(evt.data);
-      if (msg.type === 'status') {
-        updateStatus(msg.data);
-      } else if (msg.type === 'event') {
-        addEvent({ level: msg.level, message: msg.message, ts: Date.now() });
-      } else if (msg.type === 'learn') {
-        showToast(`Dodano pilota ${msg.serial}`, 'info');
-      } else if (msg.type === 'test_remote') {
-        showToast('Test pilota odebrany', 'info');
+  if (connectWs._done) return;
+  connectWs._done = true;
+
+  const unsubscribe = wsManager.subscribe({
+    open() {
+      state.wsConnected = true;
+      fetchStatusFull();
+    },
+    close() {
+      state.wsConnected = false;
+    },
+    stale() {
+      state.wsConnected = false;
+      fetchStatusFull();
+    },
+    message(evt) {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'status' && msg.data) {
+          state.lastFullAppliedAt = core.nowMs();
+          scheduleFullRender(msg.data);
+        } else if (msg.type === 'event') {
+          addEvent({ level: msg.level, message: msg.message, ts: Date.now() });
+        } else if (msg.type === 'learn') {
+          showToast(`Dodano pilota ${msg.serial}`, 'info');
+        } else if (msg.type === 'test_remote') {
+          showToast('Test pilota odebrany', 'info');
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
-  };
-  ws.onclose = () => {
-    connectWs._active = false;
-    setTimeout(connectWs, 2000);
-  };
+  });
+
+  scheduler.addCleanup(unsubscribe);
+  wsManager.setVisibility(!document.hidden);
+  wsManager.setOnline(navigator.onLine !== false);
+  wsManager.connect();
 }
 
 function startPollingOnce() {
   if (state.intervalsStarted) return;
   state.intervalsStarted = true;
-  setInterval(fetchStatusLite, 1000);  // v2.2: 1s instead of 500ms — halves HTTP/LwIP load when idle
-  setInterval(fetchStatusFull, 10000);
+  scheduler.every(fetchStatusLite, 1500);
+  scheduler.every(fetchStatusFull, 30000);
 }
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (state.statusAbort) state.statusAbort.abort();
-    if (state.fullAbort) state.fullAbort.abort();
-    return;
+core.bindPageLifecycle({
+  onHide() {
+    apiClient.abort('dashboard-status-lite', 'page_hidden');
+    apiClient.abort('dashboard-status-full', 'page_hidden');
+    wsManager.setVisibility(false);
+  },
+  onShow() {
+    wsManager.setVisibility(true);
+    fetchStatusLite();
+    fetchStatusFull();
+  },
+  onWake() {
+    wsManager.reconnect('wake');
+    fetchStatusFull();
+  },
+  onOnline() {
+    wsManager.setOnline(true);
+    fetchStatusFull();
+  },
+  onOffline() {
+    state.wsConnected = false;
+    wsManager.setOnline(false);
   }
-  fetchStatusLite();
-  fetchStatusFull();
 });
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  await core.ensurePreferredBaseUrlLoaded({ navigate: true, tokenKey });
+  if (core.isRedirectingToPreferredBase()) return;
   setupControls();
   setupEvents();
   fetchStatusFull();
