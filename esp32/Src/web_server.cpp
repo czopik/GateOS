@@ -921,8 +921,9 @@ void WebServerManager::setupRoutes() {
     request->send(200, "application/json", out);
   });
 
-  server.on("/api/wifi", HTTP_POST, [](AsyncWebServerRequest *request){
-    request->send(200, "text/plain", "OK");
+  server.on("/api/wifi", HTTP_POST, [this](AsyncWebServerRequest *request){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    request->send(501, "application/json", "{\"status\":\"not_implemented\"}");
   });
 
   server.on("/api/reboot", HTTP_POST, [this](AsyncWebServerRequest *request){
