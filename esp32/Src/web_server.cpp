@@ -368,6 +368,17 @@ void WebServerManager::setupRoutes() {
       root = wrapped;
     }
 
+    const String requestUrl = request ? request->url() : "";
+    if (requestUrl == "/api/config/validate") {
+      String err;
+      if (!cfg->validate(root, err)) {
+        sendSchemaError(request, err);
+        return;
+      }
+      request->send(200, "application/json", "{\"status\":\"ok\"}");
+      return;
+    }
+
     int requestedBrakingForce = -1;
     if (root.is<JsonObjectConst>()) {
       JsonObjectConst rootObj = root.as<JsonObjectConst>();
