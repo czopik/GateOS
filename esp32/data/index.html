@@ -30,10 +30,14 @@
       <section class="card" style="--delay:0s">
         <h2>Stan bramy</h2>
         <div class="status-big" id="gateState">LADOWANIE</div>
-        <div class="progress-track" aria-label="Postep">
+        <div class="status-summary">
+          <span class="status-pill ok" id="safetyBadge">OK</span>
+          <span class="status-pill neutral" id="controlBadge">Sterowanie: dozwolone</span>
+        </div>
+        <div class="progress-track" aria-label="Otwarcie bramy">
           <div class="progress-bar" id="gateProgress"></div>
         </div>
-        <div class="progress-label"><span id="gatePercent">--</span>%</div>
+        <div class="progress-label"><span class="progress-label-title">Otwarcie</span><span id="gatePercent">--</span>%</div>
         <div class="chips">
           <span class="chip" id="wifiChip">WiFi: --</span>
           <span class="chip" id="mqttChip">MQTT: --</span>
@@ -42,6 +46,22 @@
           <span class="chip" id="limitCloseChip">CLOSE: --</span>
           <span class="chip" id="photocellChip">Fotokomorka: --</span>
           <span class="chip" id="uptimeChip">Uptime: --</span>
+        </div>
+        <div class="diagnostic-panel">
+          <div class="diagnostic-panel-header">
+            <h3>Diagnostyka bezpieczenstwa</h3>
+            <div class="info-row">Podstawowe pola faultow i runtime dla bezpiecznej decyzji operatorskiej.</div>
+          </div>
+          <div class="status-grid compact-grid">
+            <div class="status-line"><span>faultSeverity</span><span id="faultSeverityValue">-</span></div>
+            <div class="status-line"><span>faultCode</span><span id="faultCodeValue">-</span></div>
+            <div class="status-line"><span>faultReason</span><span id="faultReasonValue">-</span></div>
+            <div class="status-line"><span>warningCount</span><span id="warningCountValue">-</span></div>
+            <div class="status-line"><span>softFaultCount</span><span id="softFaultCountValue">-</span></div>
+            <div class="status-line"><span>stopReason</span><span id="stopReasonValue">-</span></div>
+            <div class="status-line"><span>Uptime</span><span id="diagUptimeValue">-</span></div>
+            <div class="status-line"><span>Reset reason</span><span id="resetReasonValue">-</span></div>
+          </div>
         </div>
         <div class="metric-list">
           <div class="metric">

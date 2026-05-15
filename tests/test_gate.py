@@ -25,11 +25,25 @@ TEST_ITERATIONS = 10
 POSITION_TOLERANCE_MM = 50  # 5cm tolerance
 
 class GateTester:
-    def __init__(self, base_url):
+    def __init__(self, base_url, token=None):
         self.base_url = base_url.rstrip('/')
+        self.token = token or ''
         self.ws = None
         self.results = []
         self.position_history = []
+
+    def _headers(self):
+        return {"X-Api-Key": self.token} if self.token else {}
+
+    @staticmethod
+    def gate_get(status, key, default=None):
+        gate = status.get('gate', {}) if isinstance(status, dict) else {}
+        return gate.get(key, default) if isinstance(gate, dict) else default
+
+    @staticmethod
+    def diag_hover_get(diag, key, default=None):
+        hover = diag.get('hoverUart', {}) if isinstance(diag, dict) else {}
+        return hover.get(key, default) if isinstance(hover, dict) else default
         
     def connect(self):
         """Establish WebSocket connection"""
@@ -50,7 +64,7 @@ class GateTester:
         """Send gate command via REST API"""
         try:
             resp = requests.post(f"{self.base_url}/api/control", 
-                               json={"action": cmd}, timeout=5)
+                               json={"action": cmd}, headers=self._headers(), timeout=5)
             return resp.status_code == 200
         except Exception as e:
             print(f"[ERROR] Command failed: {e}")
@@ -59,7 +73,17 @@ class GateTester:
     def get_status(self):
         """Get current gate status"""
         try:
-            resp = requests.get(f"{self.base_url}/api/status", timeout=5)
+            resp = requests.get(f"{self.base_url}/api/status", headers=self._headers(), timeout=5)
+            if resp.status_code == 200:
+                return resp.json()
+        except:
+            pass
+        return None
+
+    def get_diagnostics(self):
+        """Get current diagnostics payload"""
+        try:
+            resp = requests.get(f"{self.base_url}/api/diagnostics", headers=self._headers(), timeout=5)
             if resp.status_code == 200:
                 return resp.json()
         except:
@@ -68,10 +92,11 @@ class GateTester:
     
     def wait_for_state(self, target_state, timeout_s=30):
         """Wait for gate to reach target state"""
+        target = target_state.lower()
         start = time.time()
         while time.time() - start < timeout_s:
             status = self.get_status()
-            if status and status.get('state') == target_state:
+            if status and self.gate_get(status, 'state') == target:
                 return True
             time.sleep(0.1)
         return False
@@ -81,7 +106,7 @@ class GateTester:
         start = time.time()
         while time.time() - start < timeout_s:
             status = self.get_status()
-            if status and not status.get('moving', True):
+            if status and not self.gate_get(status, 'moving', True):
                 return status
             time.sleep(0.1)
         return None
@@ -97,7 +122,7 @@ class GateTester:
         # Open
         t0 = time.time()
         self.send_command("open")
-        if not self.wait_for_state("OPENING", timeout_s=2):
+        if not self.wait_for_state("opening", timeout_s=2):
             print("[FAIL] Gate did not start opening")
             return False
         
@@ -108,13 +133,14 @@ class GateTester:
             print("[FAIL] Opening timeout")
             return False
         
-        open_pos = status.get('position', 0)
-        print(f"[OK] Opened in {open_time:.2f}s, position={open_pos:.3f}m")
+        open_pos = self.gate_get(status, 'position', 0.0)
+        fault_severity = self.gate_get(status, 'faultSeverity', 'none')
+        print(f"[OK] Opened in {open_time:.2f}s, position={open_pos:.3f}m, faultSeverity={fault_severity}")
         
         # Close
         t0 = time.time()
         self.send_command("close")
-        if not self.wait_for_state("CLOSING", timeout_s=2):
+        if not self.wait_for_state("closing", timeout_s=2):
             print("[FAIL] Gate did not start closing")
             return False
         
@@ -125,8 +151,9 @@ class GateTester:
             print("[FAIL] Closing timeout")
             return False
         
-        close_pos = status.get('position', 999)
-        print(f"[OK] Closed in {close_time:.2f}s, position={close_pos:.3f}m")
+        close_pos = self.gate_get(status, 'position', 999.0)
+        fault_severity = self.gate_get(status, 'faultSeverity', 'none')
+        print(f"[OK] Closed in {close_time:.2f}s, position={close_pos:.3f}m, faultSeverity={fault_severity}")
         
         # Verify positions
         if close_pos > 0.1:  # Should be near zero
@@ -150,7 +177,7 @@ class GateTester:
                 print(f"[FAIL] Cycle {i+1}: Opening timeout")
                 return False
             
-            open_pos = status.get('position', 0)
+            open_pos = self.gate_get(status, 'position', 0.0)
             positions.append(open_pos)
             print(f"  Open position: {open_pos:.3f}m")
             
@@ -188,23 +215,23 @@ class GateTester:
         return True
     
     def test_uart_stress(self, num_commands=100):
-        """Stress test UART communication"""
+        """Stress test diagnostics and hover telemetry counters"""
         print(f"\n=== Test: UART Stress ({num_commands} commands) ===")
         
-        status = self.get_status()
-        if not status:
-            print("[FAIL] Cannot get initial status")
+        diag = self.get_diagnostics()
+        if not diag:
+            print("[FAIL] Cannot get initial diagnostics")
             return False
         
-        initial_rx = status.get('uartRxLines', 0)
-        initial_bad = status.get('uartBadLines', 0)
+        initial_rx = self.diag_hover_get(diag, 'rxLines', 0)
+        initial_bad = self.diag_hover_get(diag, 'rxBadLines', 0)
         
         t0 = time.time()
         success = 0
         failures = 0
         
         for i in range(num_commands):
-            if self.send_command("get"):
+            if self.get_diagnostics():
                 success += 1
             else:
                 failures += 1
@@ -215,10 +242,10 @@ class GateTester:
         duration = time.time() - t0
         
         # Check final stats
-        status = self.get_status()
-        if status:
-            final_rx = status.get('uartRxLines', 0)
-            final_bad = status.get('uartBadLines', 0)
+        diag = self.get_diagnostics()
+        if diag:
+            final_rx = self.diag_hover_get(diag, 'rxLines', 0)
+            final_bad = self.diag_hover_get(diag, 'rxBadLines', 0)
             
             rx_delta = final_rx - initial_rx
             bad_delta = final_bad - initial_bad
@@ -226,7 +253,7 @@ class GateTester:
             
             print(f"\n=== Results ===")
             print(f"Duration:        {duration:.2f}s")
-            print(f"Commands sent:   {success + failures}")
+            print(f"Samples polled:  {success + failures}")
             print(f"Success rate:    {success/(success+failures)*100:.1f}%")
             print(f"RX lines delta:  {rx_delta}")
             print(f"Bad lines delta: {bad_delta}")
@@ -280,9 +307,9 @@ class GateTester:
         print("[MANUAL TEST REQUIRED]")
         print("1. Place obstacle in gate path")
         print("2. Send 'close' command")
-        print("3. Verify gate stops and reverses")
-        print("4. Remove obstacle")
-        print("5. Verify normal operation resumes")
+        print("3. Verify gate stops immediately")
+        print("4. Verify /api/status reports gate.faultSeverity='soft_fault'")
+        print("5. Remove obstacle and verify normal operation resumes after a new command")
         
         response = input("Did obstacle detection work correctly? (y/n): ")
         return response.lower() == 'y'
@@ -341,6 +368,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='GateOS Test Suite')
     parser.add_argument('--url', default=BASE_URL, help=f'Base URL (default: {BASE_URL})')
+    parser.add_argument('--token', default='', help='Optional API token sent as X-Api-Key')
     parser.add_argument('--iterations', type=int, default=TEST_ITERATIONS, 
                        help='Number of test iterations')
     parser.add_argument('--test', choices=['all', 'cycle', 'repeatability', 'uart', 'latency'],
@@ -348,7 +376,7 @@ def main():
     
     args = parser.parse_args()
     
-    tester = GateTester(args.url)
+    tester = GateTester(args.url, args.token)
     global TEST_ITERATIONS
     TEST_ITERATIONS = args.iterations
     

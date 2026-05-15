@@ -3,6 +3,8 @@ const tokenKey = 'apiToken';
 
 const ui = {
   stateLabel: qs('stateLabel'),
+  safetyBadge: qs('safetyBadge'),
+  controlBadge: qs('controlBadge'),
   posPct: qs('posPct'),
   progressFill: qs('progressFill'),
   gatePanel: qs('gatePanel'),
@@ -25,6 +27,7 @@ const state = {
   liteInFlight: false,
   fullInFlight: false,
   currentState: '',
+  currentFaultSeverity: 'none',
   posPercent: 0,
 };
 
@@ -108,6 +111,75 @@ function isMoving(s) {
   return s === 'opening' || s === 'closing';
 }
 
+function normalizeFaultSeverity(severity, gateState = '') {
+  const value = typeof severity === 'string' ? severity.toLowerCase() : '';
+  if (value === 'warning' || value === 'soft_fault' || value === 'fatal_fault') return value;
+  return gateState === 'error' ? 'fatal_fault' : 'none';
+}
+
+function faultSeverityLabel(severity) {
+  switch (normalizeFaultSeverity(severity)) {
+    case 'warning':
+      return 'WARNING';
+    case 'soft_fault':
+      return 'SOFT_FAULT';
+    case 'fatal_fault':
+      return 'FATAL_FAULT';
+    default:
+      return '';
+  }
+}
+
+function safetyBadgeLabel(severity) {
+  const normalized = normalizeFaultSeverity(severity);
+  return normalized === 'none' ? 'OK' : faultSeverityLabel(normalized);
+}
+
+function safetyBadgeClass(severity) {
+  switch (normalizeFaultSeverity(severity)) {
+    case 'warning':
+      return 'warn';
+    case 'soft_fault':
+      return 'soft';
+    case 'fatal_fault':
+      return 'fatal';
+    case 'none':
+    default:
+      return 'ok';
+  }
+}
+
+function updateSafetyBadge(severity) {
+  if (!ui.safetyBadge) return;
+  ui.safetyBadge.textContent = safetyBadgeLabel(severity);
+  ui.safetyBadge.className = `status-pill ${safetyBadgeClass(severity)}`;
+}
+
+function updateControlBadge() {
+  if (!ui.controlBadge) return;
+  const blocked = isFatalFault(state.currentFaultSeverity);
+  ui.controlBadge.textContent = `Sterowanie: ${blocked ? 'zablokowane' : 'dozwolone'}`;
+  ui.controlBadge.className = `status-pill ${blocked ? 'fatal' : 'neutral'}`;
+}
+
+function formatStateLabel(stateLabel, severity) {
+  const faultLabel = faultSeverityLabel(severity);
+  return faultLabel ? `${stateLabel} / ${faultLabel}` : stateLabel;
+}
+
+function isFatalFault(severity) {
+  return normalizeFaultSeverity(severity) === 'fatal_fault';
+}
+
+function applyToggleAvailability(severity, gateState) {
+  const normalized = normalizeFaultSeverity(severity, gateState);
+  state.currentFaultSeverity = normalized;
+  const fatalFault = isFatalFault(normalized);
+  ui.toggleBtn.disabled = fatalFault;
+  ui.toggleBtn.classList.toggle('error', fatalFault);
+  updateControlBadge();
+}
+
 function updateUI(data) {
   if (!data) return;
   const gate = data.gate || {};
@@ -116,10 +188,12 @@ function updateUI(data) {
   const inputs = data.inputs || {};
 
   const gateState = (gate.state || 'unknown').toLowerCase();
+  const faultSeverity = normalizeFaultSeverity(gate.faultSeverity, gateState);
   state.currentState = gateState;
+  updateSafetyBadge(faultSeverity);
 
   // State label
-  const label = gateState.toUpperCase();
+  const label = formatStateLabel(gateState.toUpperCase(), faultSeverity);
   if (ui.stateLabel.textContent !== label) ui.stateLabel.textContent = label;
   ui.stateLabel.className = 'state-label ' + gateState;
 
@@ -134,7 +208,7 @@ function updateUI(data) {
 
   // Toggle button state
   ui.toggleBtn.classList.toggle('moving', isMoving(gateState));
-  ui.toggleBtn.classList.toggle('error', gateState === 'error');
+  applyToggleAvailability(faultSeverity, gateState);
 
   // Metrics
   const telOk = hb.lastTelMs && hb.lastTelMs > 0;
@@ -171,9 +245,11 @@ function updateLite(data) {
   if (!data) return;
   const gateState = (data.state || '').toLowerCase();
   if (!gateState) return;
+  const faultSeverity = normalizeFaultSeverity(data.faultSeverity, gateState);
   state.currentState = gateState;
+  updateSafetyBadge(faultSeverity);
 
-  const label = gateState.toUpperCase();
+  const label = formatStateLabel(gateState.toUpperCase(), faultSeverity);
   if (ui.stateLabel.textContent !== label) ui.stateLabel.textContent = label;
   ui.stateLabel.className = 'state-label ' + gateState;
 
@@ -186,7 +262,7 @@ function updateLite(data) {
   updateDirectionArrow(gateState);
 
   ui.toggleBtn.classList.toggle('moving', isMoving(gateState));
-  ui.toggleBtn.classList.toggle('error', gateState === 'error');
+  applyToggleAvailability(faultSeverity, gateState);
 
   if (typeof data.rpm === 'number') ui.mRpm.textContent = `${data.rpm}`;
   if (typeof data.iA === 'number' && data.iA >= 0) ui.mCurrent.textContent = `${data.iA.toFixed(1)}A`;
@@ -232,6 +308,10 @@ async function fetchFull() {
 }
 
 async function sendControl(action) {
+  if (isFatalFault(state.currentFaultSeverity) && action !== 'stop') {
+    showToast('Ruch zablokowany: FATAL_FAULT', 'error');
+    return;
+  }
   try {
     await apiFetch('/api/control', { method: 'POST', body: JSON.stringify({ action }) });
   } catch {

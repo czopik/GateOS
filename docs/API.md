@@ -72,14 +72,14 @@ Move to specific position.
 
 ---
 
-### POST /api/calibrate
+### POST /api/gate/calibrate
 
 Calibration commands.
 
 **Request:**
 ```json
 {
-  "mode": "zero|max|reset"
+  "set": "zero|max|reset"
 }
 ```
 
@@ -91,9 +91,7 @@ Calibration commands.
 **Response:**
 ```json
 {
-  "success": true,
-  "mode": "zero",
-  "position": 0.0
+  "status": "ok"
 }
 ```
 
@@ -108,51 +106,96 @@ Get complete gate status.
 **Response:**
 ```json
 {
-  "state": "STOPPED",
-  "moving": false,
-  "position": 2.45,
-  "positionPercent": 49,
-  "maxDistance": 5.0,
-  "targetPosition": 2.45,
-  "obstacle": false,
-  "wifiConnected": true,
-  "mqttConnected": false,
-  "apMode": false,
-  "lastStateChangeMs": 1699123456789,
-  "error": null,
-  "stopReason": "NONE"
+  "uptimeMs": 123456,
+  "runtime": {
+    "freeHeap": 201344,
+    "wsClients": 1
+  },
+  "gate": {
+    "state": "stopped",
+    "moving": false,
+    "position": 2.45,
+    "positionPercent": 49,
+    "targetPosition": 2.45,
+    "maxDistance": 5.0,
+    "errorCode": 0,
+    "stopReason": 8,
+    "faultSeverityCode": 2,
+    "faultSeverity": "soft_fault",
+    "faultCode": 4,
+    "faultReason": 8,
+    "warningCount": 1,
+    "softFaultCount": 3,
+    "obstacle": false,
+    "lastStateChangeMs": 123400,
+    "lastMoveMs": 123420
+  },
+  "wifi": {
+    "connected": true,
+    "mode": "STA",
+    "ip": "192.168.1.44"
+  },
+  "mqtt": {
+    "connected": false
+  },
+  "hb": {
+    "enabled": true,
+    "rpm": 0,
+    "iA": 0.0,
+    "fault": 0,
+    "telAgeMs": 42
+  },
+  "inputs": {
+    "limitOpen": false,
+    "limitClose": false,
+    "obstacle": false
+  }
 }
 ```
 
-**States:**
-- `STOPPED` - Gate is stationary
-- `OPENING` - Moving toward open limit
-- `CLOSING` - Moving toward close limit
-- `ERROR` - Fault state
+**Important note:** operational gate state now lives under `gate.*`. Top-level status is a nested snapshot of runtime, gate, telemetry and IO.
 
-**Error Codes:**
-- `null` - No error
-- `"TIMEOUT"` - Telemetry timeout
-- `"OBSTACLE"` - Obstacle detected
-- `"HOVER_FAULT"` - Motor controller fault
-- `"LIMITS_INVALID"` - Both limits triggered
-- `"OVER_CURRENT"` - Motor over-current
+**Gate fields:**
+- `gate.state` - `stopped`, `opening`, `closing`, `error`
+- `gate.moving` - boolean movement flag
+- `gate.errorCode` - legacy error code; fatal faults still drive `state="error"`
+- `gate.stopReason` - numeric `GateStopReason`
+- `gate.faultSeverity` - `none`, `warning`, `soft_fault`, `fatal_fault`
+- `gate.faultCode` - numeric `GateErrorCode` associated with the active fault/warning
+- `gate.faultReason` - numeric `GateStopReason` associated with the active fault/warning
+- `gate.warningCount` - accumulated warning count since boot
+- `gate.softFaultCount` - accumulated soft-fault count since boot
 
----
+**Fault severity semantics:**
+- `warning` - non-fatal condition; UI/automation may continue issuing movement commands
+- `soft_fault` - gate stopped because of a recoverable runtime condition; UI/automation may continue issuing a new movement command
+- `fatal_fault` - movement should remain blocked until the fatal condition is cleared
 
-### GET /api/position
+### GET /api/status-lite
 
-Get current position only.
+Get lightweight status for fast polling.
 
 **Response:**
 ```json
 {
-  "position": 2.45,
-  "maxDistance": 5.0,
-  "percent": 49,
-  "unit": "meters"
+  "state": "stopped",
+  "moving": false,
+  "positionMm": 2450,
+  "positionPercent": 49,
+  "errorCode": 0,
+  "faultSeverity": "soft_fault",
+  "faultCode": 4,
+  "faultReason": 8,
+  "warningCount": 1,
+  "softFaultCount": 3,
+  "limitOpen": false,
+  "limitClose": false,
+  "rpm": 0,
+  "iA": 0.0
 }
 ```
+
+`/api/status-lite` mirrors the ETAP 1 fault model from full status and is the recommended polling endpoint for dashboards that only need live state plus fault severity.
 
 ---
 
@@ -186,25 +229,6 @@ Get system diagnostics.
     "hallAttached": true
   },
   "resetReason": "POWER_ON"
-}
-```
-
----
-
-### GET /api/safety
-
-Get safety system status.
-
-**Response:**
-```json
-{
-  "safeToMove": true,
-  "fault": null,
-  "obstacleActive": false,
-  "limitsValid": true,
-  "watchdogOk": true,
-  "overCurrentLast": 0.0,
-  "faultCount": 0
 }
 ```
 

@@ -264,6 +264,7 @@
               <button class="btn ghost" id="gateZeroBtn" type="button">Ustaw aktualna pozycje jako 0</button>
               <button class="btn ghost" id="gateMaxBtn" type="button">Ustaw aktualna pozycje jako MAX</button>
             </div>
+            <div class="section-note warning-note">Kalibracja 0/MAX zmienia zapisane odniesienie pozycji. Uzywaj tylko przy fizycznie potwierdzonej pozycji bramy i zatrzymanym napedzie.</div>
             <small>Po restarcie pozycja jest ustalana tylko przez homing albo limity.</small>
           </div>
         </div>
@@ -559,43 +560,53 @@
                 <input type="number" step="1" data-type="int" data-path="gate.overCurrentCooldownMs">
               </div>
               <div class="field">
-                <label>Over-current: auto-rearm</label>
-                <label class="switch">
-                  <input type="checkbox" data-path="gate.overCurrentAutoRearm">
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="field">
-                <label>Over-current: max prob</label>
-                <input type="number" step="1" data-type="int" data-path="gate.overCurrentMaxAutoRearm">
-
-              </div>
-              <div class="field">
-                <label>Akcja przy przekroczeniu pradu</label>
-                <select data-path="gate.overCurrentAction">
-                  <option value="stop">Stop</option>
-                  <option value="reverse">Cofnij</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>Fotokomórka przy zamykaniu</label>
-                <select data-path="safety.obstacleAction">
-                  <option value="open">Stop + otwieranie</option>
-                </select>
-                <p>Fotokomórka działa tylko podczas zamykania. Przy naruszeniu zatrzymuje bramę i od razu otwiera.</p>
-              </div>
-              <div class="field">
-                <label>Cofniecie (cm)</label>
-                <input type="number" data-type="int" data-path="safety.obstacleReverseCm">
-              </div>
-              <div class="field">
                 <label>Watchdog</label>
                 <label class="switch">
                   <input type="checkbox" data-path="safety.watchdogEnabled">
                   <span class="slider"></span>
                 </label>
+                <small class="field-note">Zabezpieczenie na wypadek zawieszenia taskow. Zmiane wprowadzaj tylko swiadomie i obserwuj potem resetReason w statusie.</small>
               </div>
             </div>
+            <details class="advanced compatibility-block">
+              <summary>Opcje zgodnosci: deprecated / compatibility-only</summary>
+              <div class="info-row">Te pola pozostaja w UI tylko dla zgodnosci konfiguracji. Aktualny runtime ETAPU 1/2 nie uzywa ich jako glownej logiki sterowania ruchem.</div>
+              <div class="form-grid">
+                <div class="field">
+                  <label>Over-current: auto-rearm (compatibility-only)</label>
+                  <label class="switch">
+                    <input type="checkbox" data-path="gate.overCurrentAutoRearm">
+                    <span class="slider"></span>
+                  </label>
+                  <small class="field-note">Pole zachowane dla zgodnosci zapisanej konfiguracji.</small>
+                </div>
+                <div class="field">
+                  <label>Over-current: max prob (compatibility-only)</label>
+                  <input type="number" step="1" data-type="int" data-path="gate.overCurrentMaxAutoRearm">
+                  <small class="field-note">Obecny runtime nie korzysta z tego pola jako aktywnego limitu decyzyjnego.</small>
+                </div>
+                <div class="field">
+                  <label>Akcja przy przekroczeniu pradu (deprecated)</label>
+                  <select data-path="gate.overCurrentAction">
+                    <option value="stop">Stop</option>
+                    <option value="reverse">Cofnij</option>
+                  </select>
+                  <small class="field-note">Historyczne pole konfiguracyjne, pozostawione dla kompatybilnosci.</small>
+                </div>
+                <div class="field">
+                  <label>Fotokomorka przy zamykaniu (compatibility-only)</label>
+                  <select data-path="safety.obstacleAction">
+                    <option value="open">Stop + otwieranie</option>
+                  </select>
+                  <small class="field-note">Opis historyczny. Aktualny runtime ma wlasna logike bezpieczenstwa dla przeszkody.</small>
+                </div>
+                <div class="field">
+                  <label>Cofniecie (cm) (compatibility-only)</label>
+                  <input type="number" data-type="int" data-path="safety.obstacleReverseCm">
+                  <small class="field-note">Pole zachowane dla zgodnosci starych konfiguracji, nie jako glowny runtime control.</small>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       </section>
@@ -857,6 +868,7 @@
               <div class="field">
                 <label>Port WWW</label>
                 <input type="number" data-type="int" data-path="device.webPort" placeholder="80">
+                <small class="field-note">Zmiana portu moze wymusic restart uslugi WWW i ponowne polaczenie z nowym adresem.</small>
               </div>
               <div class="field">
                 <label>Haslo OTA</label>
@@ -905,9 +917,10 @@
               <button class="btn ghost" id="exportBtn" type="button">Eksport config.json</button>
               <button class="btn ghost" id="importBtn" type="button">Import config.json</button>
               <button class="btn warn" id="rebootBtn" type="button">Restart urzadzenia</button>
-              <button class="btn danger" id="factoryBtn" type="button">Factory reset</button>
+              <button class="btn danger" id="factoryBtn" type="button">Reset fabryczny</button>
               <input type="file" id="importFile" accept="application/json" style="display:none">
             </div>
+            <div class="section-note warning-note">Restart przerywa dostep do UI na kilka sekund. Reset fabryczny usuwa konfiguracje i wymaga ponownego ustawienia urzadzenia.</div>
           </div>
         </div>
       </section>

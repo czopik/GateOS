@@ -1040,12 +1040,22 @@ void mqttPublishEvent(const char* level, const char* message) {
 void mqttPublishStatus() {
   const char* topic = mqtt.topicState();
   if (!mqtt.connected() || !topic || topic[0] == '\0') return;
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<384> doc;
   doc["state"] = effectiveGateStateString();
   doc["moving"] = effectiveGateMoving();
   doc["uptimeMs"] = millis();
   doc["wifiRssi"] = WiFiManager.isConnected() ? WiFi.RSSI() : 0;
-  char payload[256];
+  if (gate) {
+    const GateStatus& st = gate->getStatus();
+    doc["faultSeverity"] = gateFaultSeverityToString(st.faultSeverity);
+    doc["faultCode"] = static_cast<int>(st.faultCode);
+    doc["faultReason"] = static_cast<int>(st.faultReason);
+  } else {
+    doc["faultSeverity"] = "none";
+    doc["faultCode"] = 0;
+    doc["faultReason"] = 0;
+  }
+  char payload[384];
   serializeJson(doc, payload, sizeof(payload));
   mqtt.publish(topic, payload, config.mqttConfig.retain);
 }
@@ -1897,6 +1907,11 @@ void fillStatusLite(JsonObject& out) {
       out["positionPercent"] = st.positionPercent;
     }
     out["errorCode"] = static_cast<int>(st.error);
+    out["faultSeverity"] = gateFaultSeverityToString(st.faultSeverity);
+    out["faultCode"] = static_cast<int>(st.faultCode);
+    out["faultReason"] = static_cast<int>(st.faultReason);
+    out["warningCount"] = st.warningCount;
+    out["softFaultCount"] = st.softFaultCount;
     out["limitOpen"] = inputManager.limitOpenActive(config);
     out["limitClose"] = inputManager.limitCloseActive(config);
   } else {
@@ -1905,6 +1920,11 @@ void fillStatusLite(JsonObject& out) {
     out["positionMm"] = (long)lroundf(positionMeters * 1000.0f);
     out["positionPercent"] = positionPercent;
     out["errorCode"] = 0;
+    out["faultSeverity"] = "none";
+    out["faultCode"] = 0;
+    out["faultReason"] = 0;
+    out["warningCount"] = 0;
+    out["softFaultCount"] = 0;
     out["limitOpen"] = false;
     out["limitClose"] = false;
   }

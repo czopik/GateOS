@@ -19,6 +19,8 @@ GateOS includes comprehensive automated testing for:
 pip install requests websocket-client
 ```
 
+If API security is enabled, pass `--token <API_TOKEN>` to the test script.
+
 ### Network Access
 
 - Gate controller must be accessible on the network
@@ -45,22 +47,22 @@ Or using the build script:
 
 **Open/Close Cycle:**
 ```bash
-python3 test_gate.py --test cycle --url http://gate.local
+python3 test_gate.py --test cycle --url http://gate.local --token YOUR_API_TOKEN
 ```
 
 **Position Repeatability (10 cycles):**
 ```bash
-python3 test_gate.py --test repeatability --iterations 10 --url http://gate.local
+python3 test_gate.py --test repeatability --iterations 10 --url http://gate.local --token YOUR_API_TOKEN
 ```
 
 **UART Stress Test:**
 ```bash
-python3 test_gate.py --test uart --url http://gate.local
+python3 test_gate.py --test uart --url http://gate.local --token YOUR_API_TOKEN
 ```
 
 **API Latency:**
 ```bash
-python3 test_gate.py --test latency --url http://gate.local
+python3 test_gate.py --test latency --url http://gate.local --token YOUR_API_TOKEN
 ```
 
 ---
@@ -70,6 +72,13 @@ python3 test_gate.py --test latency --url http://gate.local
 ### 1. Open/Close Cycle Test
 
 **Purpose:** Verify basic gate operation
+
+**API contract used by this test:**
+- `GET /api/status`
+- movement state is read from `status["gate"]["state"]`
+- motion flag is read from `status["gate"]["moving"]`
+- position is read from `status["gate"]["position"]`
+- ETAP 1 fault model is read from `status["gate"]["faultSeverity"]`
 
 **Procedure:**
 1. Send OPEN command
@@ -85,6 +94,7 @@ python3 test_gate.py --test latency --url http://gate.local
 - Opening time < 60 seconds
 - Closing time < 60 seconds
 - Final position within 10cm of zero
+- Final `gate.faultSeverity` is not `fatal_fault`
 
 ---
 
@@ -101,6 +111,7 @@ python3 test_gate.py --test latency --url http://gate.local
 - Standard deviation < 50mm
 - Range (max-min) < 100mm
 - No timeouts or errors
+- No `fatal_fault` reported in `status.gate.faultSeverity`
 
 **Output Example:**
 ```
@@ -117,12 +128,12 @@ Range:           40.0mm
 
 ### 3. UART Stress Test
 
-**Purpose:** Verify reliable communication under load
+**Purpose:** Verify reliable hover telemetry / diagnostics counters under load
 
 **Procedure:**
-1. Send 100 rapid commands
+1. Poll `GET /api/diagnostics` rapidly
 2. Track success/failure rate
-3. Monitor UART error counters
+3. Monitor `diagnostics.hoverUart.rxLines` and `diagnostics.hoverUart.rxBadLines`
 4. Calculate error rate
 
 **Pass Criteria:**
@@ -152,6 +163,8 @@ Error rate:      0.20%
 2. Measure response time for each
 3. Calculate mean, P95, max latency
 
+This test reads the nested response from `GET /api/status` but only measures transport latency.
+
 **Pass Criteria:**
 - Mean latency < 100ms
 - P95 latency < 200ms
@@ -175,14 +188,23 @@ Max latency:     89.1ms
 1. Place obstacle in gate path
 2. Initiate close command
 3. Verify gate stops immediately
-4. Verify gate reverses (if configured)
+4. Verify `GET /api/status` reports `gate.faultSeverity = soft_fault`
 5. Remove obstacle
-6. Verify normal operation resumes
+6. Verify normal operation resumes after a new command
 
 **Pass Criteria:**
 - Gate stops within 100mm of obstacle
+- `gate.faultSeverity` becomes `soft_fault` rather than `fatal_fault`
 - No damage or unsafe behavior
 - Normal operation resumes after obstacle removal
+
+## Fault Severity Reference
+
+ETAP 1 introduced a three-level runtime fault model used by full status, status-lite and UI:
+
+- `warning` - condition noted, movement commands remain allowed
+- `soft_fault` - recoverable stop, movement commands remain allowed
+- `fatal_fault` - movement should remain blocked until the fatal condition is cleared
 
 ---
 
@@ -202,7 +224,7 @@ Max latency:     89.1ms
 | Failure | Possible Cause | Solution |
 |---------|---------------|----------|
 | WebSocket connection failed | Wrong URL, gate offline | Check network, IP address |
-| Opening timeout | Motor fault, obstruction | Check motor, remove obstacles |
+| Opening timeout | Fatal fault, obstruction, telemetry loss | Check `gate.faultSeverity`, remove obstacles, inspect diagnostics |
 | Position variance high | Wheel slip, loose coupling | Check mechanical linkage |
 | UART error rate high | Wiring, baud rate mismatch | Check connections, config |
 | API latency high | WiFi interference, load | Check signal strength |

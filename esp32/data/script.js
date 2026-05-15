@@ -5,6 +5,8 @@ const ui = {
   gateState: qs('gateState'),
   gateProgress: qs('gateProgress'),
   gatePercent: qs('gatePercent'),
+  safetyBadge: qs('safetyBadge'),
+  controlBadge: qs('controlBadge'),
   wifiChip: qs('wifiChip'),
   mqttChip: qs('mqttChip'),
   limitsChip: qs('limitsChip'),
@@ -27,6 +29,14 @@ const ui = {
   maxDistanceValue: qs('maxDistanceValue'),
   targetPositionValue: qs('targetPositionValue'),
   gateStopReasonValue: qs('gateStopReasonValue'),
+  faultSeverityValue: qs('faultSeverityValue'),
+  faultCodeValue: qs('faultCodeValue'),
+  faultReasonValue: qs('faultReasonValue'),
+  warningCountValue: qs('warningCountValue'),
+  softFaultCountValue: qs('softFaultCountValue'),
+  stopReasonValue: qs('stopReasonValue'),
+  diagUptimeValue: qs('diagUptimeValue'),
+  resetReasonValue: qs('resetReasonValue'),
   eventList: qs('eventList'),
   eventFilter: qs('eventFilter'),
   toast: qs('toast'),
@@ -43,6 +53,7 @@ const state = {
   events: [],
   filter: 'all',
   toggleMode: false,
+  currentFaultSeverity: 'none',
   intervalsStarted: false,
   statusLiteInFlight: false,
   statusFullInFlight: false,
@@ -111,6 +122,111 @@ function stopReasonLabel(code) {
   return map[code] || 'unknown';
 }
 
+function normalizeFaultSeverity(severity, gateState = '') {
+  const value = typeof severity === 'string' ? severity.toLowerCase() : '';
+  if (value === 'warning' || value === 'soft_fault' || value === 'fatal_fault') return value;
+  return gateState === 'error' ? 'fatal_fault' : 'none';
+}
+
+function faultSeverityLabel(severity) {
+  switch (normalizeFaultSeverity(severity)) {
+    case 'warning':
+      return 'WARNING';
+    case 'soft_fault':
+      return 'SOFT_FAULT';
+    case 'fatal_fault':
+      return 'FATAL_FAULT';
+    default:
+      return '';
+  }
+}
+
+function safetyBadgeLabel(severity) {
+  const normalized = normalizeFaultSeverity(severity);
+  return normalized === 'none' ? 'OK' : faultSeverityLabel(normalized);
+}
+
+function safetyBadgeClass(severity) {
+  switch (normalizeFaultSeverity(severity)) {
+    case 'warning':
+      return 'warn';
+    case 'soft_fault':
+      return 'soft';
+    case 'fatal_fault':
+      return 'fatal';
+    case 'none':
+    default:
+      return 'ok';
+  }
+}
+
+function setText(el, value) {
+  if (!el) return;
+  const next = value === undefined || value === null || value === '' ? '-' : `${value}`;
+  if (el.textContent !== next) el.textContent = next;
+}
+
+function updateSafetyBadge(severity) {
+  if (!ui.safetyBadge) return;
+  ui.safetyBadge.textContent = safetyBadgeLabel(severity);
+  ui.safetyBadge.className = `status-pill ${safetyBadgeClass(severity)}`;
+}
+
+function updateControlBadge() {
+  if (!ui.controlBadge) return;
+  const blocked = isFatalFault(state.currentFaultSeverity);
+  ui.controlBadge.textContent = `Sterowanie: ${blocked ? 'zablokowane' : 'dozwolone'}`;
+  ui.controlBadge.className = `status-pill ${blocked ? 'fatal' : 'neutral'}`;
+}
+
+function updateSafetyDiagnostics(details = {}) {
+  if (details.faultSeverity !== undefined) setText(ui.faultSeverityValue, safetyBadgeLabel(details.faultSeverity));
+  if (details.faultCode !== undefined) setText(ui.faultCodeValue, details.faultCode);
+  if (details.faultReason !== undefined) setText(ui.faultReasonValue, stopReasonLabel(details.faultReason));
+  if (details.warningCount !== undefined) setText(ui.warningCountValue, details.warningCount);
+  if (details.softFaultCount !== undefined) setText(ui.softFaultCountValue, details.softFaultCount);
+  if (details.stopReason !== undefined) setText(ui.stopReasonValue, stopReasonLabel(details.stopReason));
+  if (details.uptimeMs !== undefined) setText(ui.diagUptimeValue, formatUptime(details.uptimeMs));
+  if (details.resetReason !== undefined) setText(ui.resetReasonValue, details.resetReason || 'unknown');
+}
+
+function formatGateStateLabel(stateLabel, severity) {
+  const faultLabel = faultSeverityLabel(severity);
+  return faultLabel ? `${stateLabel} / ${faultLabel}` : stateLabel;
+}
+
+function isFatalFault(severity) {
+  return normalizeFaultSeverity(severity) === 'fatal_fault';
+}
+
+function applyDashboardControlState() {
+  const fatalFault = isFatalFault(state.currentFaultSeverity);
+  ui.openBtn.disabled = fatalFault || state.toggleMode;
+  ui.closeBtn.disabled = fatalFault || state.toggleMode;
+  ui.toggleBtn.disabled = fatalFault;
+  updateControlBadge();
+}
+
+function updateSafetyAlert(severity, faultReason, faultCode, warningCount, softFaultCount) {
+  const normalized = normalizeFaultSeverity(severity);
+  if (normalized === 'none') {
+    if (ui.safetyAlert.style.display !== 'none') ui.safetyAlert.style.display = 'none';
+    return;
+  }
+
+  const parts = [faultSeverityLabel(normalized)];
+  const reason = stopReasonLabel(typeof faultReason === 'number' ? faultReason : 0);
+  if (reason !== 'none') parts.push(`reason=${reason}`);
+  if (typeof faultCode === 'number') parts.push(`code=${faultCode}`);
+  if (normalized === 'warning' && typeof warningCount === 'number') parts.push(`warnings=${warningCount}`);
+  if (normalized === 'soft_fault' && typeof softFaultCount === 'number') parts.push(`soft_faults=${softFaultCount}`);
+  parts.push(normalized === 'fatal_fault' ? 'Sterowanie ruchem zablokowane.' : 'Sterowanie pozostaje aktywne.');
+
+  const nextText = parts.join(' | ');
+  if (ui.safetyAlert.textContent !== nextText) ui.safetyAlert.textContent = nextText;
+  if (ui.safetyAlert.style.display !== 'block') ui.safetyAlert.style.display = 'block';
+}
+
 function setChip(el, text, state) {
   if (!el) return;
   if (el.textContent !== text) el.textContent = text;
@@ -120,12 +236,10 @@ function setChip(el, text, state) {
 
 function setGatePercent(percent) {
   const p = Math.max(0, Math.min(100, percent));
-  // The dashboard bar shows the "closed" portion of the travel:
-  // 0% when fully open, 100% when fully closed.
-  const shown = 100 - p;
-  const width = `${shown}%`;
+  // Firmware exposes positionPercent as gate opening percentage: 0% closed, 100% open.
+  const width = `${p}%`;
   if (ui.gateProgress.style.width !== width) ui.gateProgress.style.width = width;
-  if (ui.gatePercent.textContent !== `${shown}`) ui.gatePercent.textContent = `${shown}`;
+  if (ui.gatePercent.textContent !== `${p}`) ui.gatePercent.textContent = `${p}`;
 }
 
 function addEvent(ev) {
@@ -170,8 +284,12 @@ function updateStatus(data) {
   const hbEnabled = hb.enabled !== false;
   const last = (data.remotes && data.remotes.last) || {};
 
-  const gateState = (gate.state || 'unknown').toUpperCase();
+  const gateStateRaw = (gate.state || 'unknown').toString().toLowerCase();
+  const faultSeverity = normalizeFaultSeverity(gate.faultSeverity, gateStateRaw);
+  state.currentFaultSeverity = faultSeverity;
+  const gateState = formatGateStateLabel(gateStateRaw.toUpperCase(), faultSeverity);
   if (ui.gateState.textContent !== gateState) ui.gateState.textContent = gateState;
+  updateSafetyBadge(faultSeverity);
   setGatePercent(gate.positionPercent >= 0 ? gate.positionPercent : 0);
 
   setChip(ui.wifiChip, `WiFi: ${wifi.connected ? (wifi.ssid || 'OK') : 'OFF'}`, wifi.connected ? 'success' : 'warn');
@@ -252,20 +370,31 @@ function updateStatus(data) {
     if (ui.gateStopReasonValue.textContent !== reason) ui.gateStopReasonValue.textContent = reason;
   }
 
-  const safetyDisplay = gate.state === 'error' ? 'block' : 'none';
-  if (ui.safetyAlert.style.display !== safetyDisplay) ui.safetyAlert.style.display = safetyDisplay;
-  const disableActions = gate.state === 'error';
-  ui.openBtn.disabled = disableActions || state.toggleMode;
-  ui.closeBtn.disabled = disableActions || state.toggleMode;
-  ui.toggleBtn.disabled = disableActions;
+  updateSafetyDiagnostics({
+    faultSeverity,
+    faultCode: gate.faultCode,
+    faultReason: gate.faultReason,
+    warningCount: gate.warningCount,
+    softFaultCount: gate.softFaultCount,
+    stopReason: gate.stopReason,
+    uptimeMs: data.uptimeMs,
+    resetReason: data.runtime && data.runtime.resetReason,
+  });
+
+  updateSafetyAlert(faultSeverity, gate.faultReason, gate.faultCode, gate.warningCount, gate.softFaultCount);
+  applyDashboardControlState();
 }
 
 function updateStatusLite(data) {
   if (!data) return;
   const rawState = (data.state || '').toString();
   if (!rawState) return;
-  const gateState = rawState.toUpperCase();
+  const gateStateRaw = rawState.toLowerCase();
+  const faultSeverity = normalizeFaultSeverity(data.faultSeverity, gateStateRaw);
+  state.currentFaultSeverity = faultSeverity;
+  const gateState = formatGateStateLabel(rawState.toUpperCase(), faultSeverity);
   if (ui.gateState.textContent !== gateState) ui.gateState.textContent = gateState;
+  updateSafetyBadge(faultSeverity);
 
   const pct = typeof data.positionPercent === 'number' ? data.positionPercent : 0;
   setGatePercent(pct >= 0 ? pct : 0);
@@ -284,8 +413,16 @@ function updateStatusLite(data) {
     if (ui.hbIAValue.textContent !== iA) ui.hbIAValue.textContent = iA;
   }
 
-  const safetyDisplay = gateState === 'ERROR' ? 'block' : 'none';
-  if (ui.safetyAlert.style.display !== safetyDisplay) ui.safetyAlert.style.display = safetyDisplay;
+  updateSafetyDiagnostics({
+    faultSeverity,
+    faultCode: data.faultCode,
+    faultReason: data.faultReason,
+    warningCount: data.warningCount,
+    softFaultCount: data.softFaultCount,
+  });
+
+  updateSafetyAlert(faultSeverity, data.faultReason, data.faultCode, data.warningCount, data.softFaultCount);
+  applyDashboardControlState();
 }
 
 async function fetchJsonWithTimeout(path, timeoutMs, abortRefKey) {
@@ -335,6 +472,10 @@ async function fetchStatusFull() {
 }
 
 async function sendControl(action) {
+  if (isFatalFault(state.currentFaultSeverity) && action !== 'stop') {
+    showToast('Ruch zablokowany: FATAL_FAULT', 'error');
+    return;
+  }
   try {
     await apiFetch('/api/control', { method: 'POST', body: JSON.stringify({ action }) });
   } catch {
@@ -361,8 +502,7 @@ function setupControls() {
   if (ui.zeroBtn) ui.zeroBtn.addEventListener('click', () => sendZero());
   ui.toggleMode.addEventListener('change', () => {
     state.toggleMode = ui.toggleMode.checked;
-    ui.openBtn.disabled = state.toggleMode;
-    ui.closeBtn.disabled = state.toggleMode;
+    applyDashboardControlState();
   });
 }
 
