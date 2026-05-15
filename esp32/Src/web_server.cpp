@@ -948,9 +948,8 @@ void WebServerManager::setupRoutes() {
         : String("{\"ok\":false,\"error\":\"") + Update.errorString() + "\"}";
       request->send(200, "application/json", resp);
       if (ok) {
-        // Restart z lekkim opóźnieniem, żeby odpowiedź dotarła do klienta.
-        delay(300);
-        ESP.restart();
+        // Restart planowany poza callbackiem HTTP, żeby odpowiedź zdążyła wrócić do klienta.
+        scheduleRestart(300);
       }
     },
     [this](AsyncWebServerRequest *request, const String &filename,
