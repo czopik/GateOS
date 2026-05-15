@@ -239,11 +239,24 @@
     return joinUrl(preferred, pathOrUrl);
   }
 
-  function resolveWebSocketUrl(path = '/ws') {
-    if (isAbsoluteUrl(path)) return path;
+  function appendTokenToWebSocketUrl(url, tokenKey = 'apiToken') {
+    const token = getToken(tokenKey);
+    if (!token || !url) return url;
+    try {
+      const parsed = new URL(url, getCurrentOrigin());
+      parsed.searchParams.set('token', token);
+      return parsed.toString();
+    } catch {
+      const separator = url.includes('?') ? '&' : '?';
+      return `${url}${separator}token=${encodeURIComponent(token)}`;
+    }
+  }
+
+  function resolveWebSocketUrl(path = '/ws', tokenKey = 'apiToken') {
+    if (isAbsoluteUrl(path)) return appendTokenToWebSocketUrl(path, tokenKey);
     const wsBaseUrl = getWsBaseUrl();
-    if (wsBaseUrl) return joinUrl(wsBaseUrl, path);
-    return `${global.location.protocol === 'https:' ? 'wss' : 'ws'}://${global.location.host}${path}`;
+    if (wsBaseUrl) return appendTokenToWebSocketUrl(joinUrl(wsBaseUrl, path), tokenKey);
+    return appendTokenToWebSocketUrl(`${global.location.protocol === 'https:' ? 'wss' : 'ws'}://${global.location.host}${path}`, tokenKey);
   }
 
   function isRedirectingToPreferredBase() {
@@ -510,6 +523,7 @@
     if (registry.has(key)) return registry.get(key);
 
     const logger = options.logger || createLogger(`ws:${path}`);
+    const tokenKey = options.tokenKey || 'apiToken';
     const baseDelayMs = Number.isFinite(options.baseDelayMs) ? options.baseDelayMs : 2000;
     const maxDelayMs = Number.isFinite(options.maxDelayMs) ? options.maxDelayMs : 30000;
     const cooldownMs = Number.isFinite(options.cooldownMs) ? options.cooldownMs : 30000;
@@ -616,13 +630,13 @@
       state.connecting = true;
       emit('connecting', { reason });
 
-      ensurePreferredBaseUrlLoaded({ navigate: false }).then(() => {
+      ensurePreferredBaseUrlLoaded({ navigate: false, tokenKey }).then(() => {
         if (!state.desired || !state.visible || !state.online) {
           state.connecting = false;
           return;
         }
 
-        const url = resolveWebSocketUrl(path);
+        const url = resolveWebSocketUrl(path, tokenKey);
         const socket = new WebSocket(url);
         state.socket = socket;
 

@@ -248,6 +248,34 @@ bool WebServerManager::isAuthorized(AsyncWebServerRequest* request) const {
   return ok;
 }
 
+bool WebServerManager::isWebSocketAuthorized(AsyncWebServerRequest* request) const {
+  if (!cfg) return true;
+  if (!cfg->securityConfig.enabled) return true;
+  if (!request) return false;
+  if (cfg->securityConfig.apiToken.length() == 0) return false;
+
+  String token;
+  if (request->hasParam("token")) {
+    token = request->getParam("token")->value();
+  }
+  if (token.length() == 0 && request->hasHeader("X-Api-Key")) {
+    token = request->getHeader("X-Api-Key")->value();
+  }
+  if (token.length() == 0 && request->hasHeader("X-API-Token")) {
+    token = request->getHeader("X-API-Token")->value();
+  }
+
+  bool ok = token.length() > 0 && token == cfg->securityConfig.apiToken;
+  if (!ok) {
+    IPAddress ip;
+    if (request->client()) ip = request->client()->remoteIP();
+    Serial.printf("WS AUTH FAIL %s from %s\n",
+                  request->url().c_str(),
+                  ip.toString().c_str());
+  }
+  return ok;
+}
+
 void WebServerManager::sendUnauthorized(AsyncWebServerRequest* request) const {
   request->send(401, "application/json", "{\"status\":\"unauthorized\"}");
 }
@@ -1151,10 +1179,14 @@ void WebServerManager::setupRoutes() {
 
   ws.onEvent([this](AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
     (void)server;
-    (void)arg;
     (void)data;
     (void)len;
     if (type == WS_EVT_CONNECT) {
+      AsyncWebServerRequest* request = reinterpret_cast<AsyncWebServerRequest*>(arg);
+      if (!isWebSocketAuthorized(request)) {
+        client->close();
+        return;
+      }
       stats.lastWsConnectMs = millis();
       if (!statusCb) return;
       StaticJsonDocument<2048> doc;

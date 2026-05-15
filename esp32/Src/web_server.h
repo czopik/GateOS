@@ -82,6 +82,7 @@ private:
 
   void setupRoutes();
   bool isAuthorized(AsyncWebServerRequest* request) const;
+  bool isWebSocketAuthorized(AsyncWebServerRequest* request) const;
   void sendUnauthorized(AsyncWebServerRequest* request) const;
 
   LearnCb learnCb = nullptr;

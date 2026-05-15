@@ -7,6 +7,7 @@ const scheduler = core.createScheduler();
 const wsManager = core.createWebSocketManager({
   key: 'gateos-dashboard-ws',
   path: '/ws',
+  tokenKey,
   logger: core.createLogger('dashboard-ws'),
   baseDelayMs: 3000,
   maxDelayMs: 30000,

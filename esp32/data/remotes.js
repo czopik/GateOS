@@ -6,6 +6,7 @@ const scheduler = core.createScheduler();
 const wsManager = core.createWebSocketManager({
   key: 'gateos-remotes-ws',
   path: '/ws',
+  tokenKey,
   logger: core.createLogger('remotes-ws'),
   baseDelayMs: 3000,
   maxDelayMs: 30000,
