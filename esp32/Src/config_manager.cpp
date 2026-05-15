@@ -600,6 +600,15 @@ void ConfigManager::load() {
     save(nullptr);
   }
 
+  if (deviceConfig.mode == "gate" || deviceConfig.mode == "production") {
+    DynamicJsonDocument validateDoc(CONFIG_JSON_CAPACITY);
+    buildJson(validateDoc);
+    String validationError;
+    if (!validate(validateDoc.as<JsonVariantConst>(), validationError)) {
+      Serial.printf("[CFG_WARN] unsafe production config: %s\n", validationError.c_str());
+    }
+  }
+
 }
 
 bool ConfigManager::save(String* error) {
@@ -1149,8 +1158,16 @@ static bool isForbiddenPin(int pin) {
   return false;
 }
 
-static bool isInstalledLikeMode(const String& mode) {
-  return mode == "installed";
+static bool isBenchMode(const String& mode) {
+  return mode == "bench";
+}
+
+static bool isProductionLikeMode(const String& mode) {
+  return mode == "gate" || mode == "production";
+}
+
+static bool isKnownDeviceMode(const String& mode) {
+  return isBenchMode(mode) || mode == "installed" || isProductionLikeMode(mode);
 }
 
 bool ConfigManager::validate(JsonVariantConst root, String& error) {
@@ -1184,6 +1201,58 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
     }
   }
 
+  String apFallbackPassword = wifiConfig.apFallback.password;
+  if (obj.containsKey("wifi")) {
+    JsonObjectConst wifi = obj["wifi"];
+    if (!wifi.isNull()) {
+      JsonObjectConst ap = wifi["apFallback"];
+      if (!ap.isNull()) {
+        apFallbackPassword = String((const char*)(ap["password"] | apFallbackPassword.c_str()));
+      }
+    }
+  }
+
+  bool otaEnabled = otaConfig.enabled;
+  String otaPassword = otaConfig.password;
+  if (obj.containsKey("ota")) {
+    JsonObjectConst ota = obj["ota"];
+    if (!ota.isNull()) {
+      otaEnabled = ota["enabled"] | otaEnabled;
+      otaPassword = String((const char*)(ota["password"] | otaPassword.c_str()));
+    }
+  }
+
+  bool allowMoveWithoutLimits = gateConfig.allowMoveWithoutLimits;
+  if (obj.containsKey("gate")) {
+    JsonObjectConst gate = obj["gate"];
+    if (!gate.isNull()) {
+      allowMoveWithoutLimits = gate["allowMoveWithoutLimits"] | allowMoveWithoutLimits;
+    }
+  }
+
+  bool limitsEnabled = limitsConfig.enabled;
+  bool openLimitEnabled = limitsConfig.open.enabled;
+  bool closeLimitEnabled = limitsConfig.close.enabled;
+  if (obj.containsKey("limits")) {
+    JsonVariantConst limVar = obj["limits"];
+    JsonObjectConst lim = limVar.as<JsonObjectConst>();
+    if (!lim.isNull()) {
+      limitsEnabled = lim["enabled"] | limitsEnabled;
+      JsonObjectConst open = lim["open"];
+      if (!open.isNull()) openLimitEnabled = open["enabled"] | openLimitEnabled;
+      JsonObjectConst close = lim["close"];
+      if (!close.isNull()) closeLimitEnabled = close["enabled"] | closeLimitEnabled;
+    }
+  }
+
+  bool watchdogEnabled = safetyConfig.watchdogEnabled;
+  if (obj.containsKey("safety")) {
+    JsonObjectConst safety = obj["safety"];
+    if (!safety.isNull()) {
+      watchdogEnabled = safety["watchdogEnabled"] | watchdogEnabled;
+    }
+  }
+
   if (obj.containsKey("device")) {
     JsonObjectConst device = obj["device"];
     if (!device.isNull()) {
@@ -1193,7 +1262,7 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
         return false;
       }
       String mode = validatedMode;
-      if (!(mode == "bench" || mode == "installed")) {
+      if (!isKnownDeviceMode(mode)) {
         error = "device.mode_invalid";
         return false;
       }
@@ -1205,9 +1274,45 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
     }
   }
 
-  if (securityEnabled && isInstalledLikeMode(validatedMode) && apiToken.length() == 0) {
-    error = "security.apiToken_required_in_installed_mode";
+  if (securityEnabled && !isBenchMode(validatedMode) && apiToken.length() == 0) {
+    error = "security.apiToken_required_outside_bench";
     return false;
+  }
+
+  if (!isBenchMode(validatedMode) && apFallbackPassword.length() < 8) {
+    error = "wifi.apFallback.password_too_short";
+    return false;
+  }
+
+  if (isProductionLikeMode(validatedMode)) {
+    if (!securityEnabled) {
+      error = "security.enabled_required_in_production";
+      return false;
+    }
+    if (!watchdogEnabled) {
+      error = "safety.watchdogEnabled_required_in_production";
+      return false;
+    }
+    if (!limitsEnabled) {
+      error = "limits.enabled_required_in_production";
+      return false;
+    }
+    if (!openLimitEnabled) {
+      error = "limits.open.enabled_required_in_production";
+      return false;
+    }
+    if (!closeLimitEnabled) {
+      error = "limits.close.enabled_required_in_production";
+      return false;
+    }
+    if (allowMoveWithoutLimits) {
+      error = "gate.allowMoveWithoutLimits_forbidden_in_production";
+      return false;
+    }
+    if (otaEnabled && otaPassword.length() == 0) {
+      error = "ota.password_required_in_production";
+      return false;
+    }
   }
 
   if (obj.containsKey("gate")) {
