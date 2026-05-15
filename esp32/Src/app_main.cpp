@@ -955,6 +955,17 @@ const char* resetReasonToString(esp_reset_reason_t reason) {
   }
 }
 
+const char* gateFaultSeverityToString(GateFaultSeverity severity) {
+  switch (severity) {
+    case GATE_FAULT_WARNING: return "warning";
+    case GATE_FAULT_SOFT: return "soft_fault";
+    case GATE_FAULT_FATAL: return "fatal_fault";
+    case GATE_FAULT_NONE:
+    default:
+      return "none";
+  }
+}
+
 void syncLegacyPositionState() {
   positionMeters = positionTracker.positionMeters();
   positionMetersRaw = positionTracker.positionMetersRaw();
@@ -1569,8 +1580,23 @@ void fillDiagnostics(JsonObject& out) {
   positionObj["maxDistanceMeters"] = maxDistanceMeters;
   JsonObject gateDiag = out.createNestedObject("gate");
   if (gate) {
+    const GateStatus& st = gate->getStatus();
     gateDiag["stopReason"] = static_cast<int>(gate->getLastStopReason());
     gateDiag["stopReasonLabel"] = gate->getStopReasonString(gate->getLastStopReason());
+    gateDiag["faultSeverityCode"] = static_cast<int>(st.faultSeverity);
+    gateDiag["faultSeverity"] = gateFaultSeverityToString(st.faultSeverity);
+    gateDiag["faultCode"] = static_cast<int>(st.faultCode);
+    gateDiag["faultReason"] = static_cast<int>(st.faultReason);
+    gateDiag["faultReasonLabel"] = gate->getStopReasonString(st.faultReason);
+    gateDiag["lastFaultMs"] = st.lastFaultMs;
+    gateDiag["warningCount"] = st.warningCount;
+    gateDiag["softFaultCount"] = st.softFaultCount;
+    gateDiag["lastWarningCode"] = static_cast<int>(st.lastWarningCode);
+    gateDiag["lastWarningMs"] = st.lastWarningMs;
+    gateDiag["lastSoftFaultCode"] = static_cast<int>(st.lastSoftFaultCode);
+    gateDiag["lastSoftFaultMs"] = st.lastSoftFaultMs;
+    gateDiag["lastFatalFaultCode"] = static_cast<int>(st.lastFatalFaultCode);
+    gateDiag["lastFatalFaultMs"] = st.lastFatalFaultMs;
     gateDiag["lastOverCurrentA"] = gate->getLastOverCurrentA();
     gateDiag["lastOverCurrentMs"] = gate->getLastOverCurrentMs();
     gateDiag["overCurrentCooldownUntilMs"] = gate->getOverCurrentCooldownUntilMs();
@@ -1661,6 +1687,13 @@ void fillStatus(JsonObject& out) {
     gateObj["lastDirection"] = gate->getLastDirection();
     gateObj["errorCode"] = static_cast<int>(st.error);
     gateObj["stopReason"] = static_cast<int>(st.lastStopReason);
+    gateObj["faultSeverityCode"] = static_cast<int>(st.faultSeverity);
+    gateObj["faultSeverity"] = gateFaultSeverityToString(st.faultSeverity);
+    gateObj["faultCode"] = static_cast<int>(st.faultCode);
+    gateObj["faultReason"] = static_cast<int>(st.faultReason);
+    gateObj["softFaultCount"] = st.softFaultCount;
+    gateObj["warningCount"] = st.warningCount;
+    gateObj["lastFaultMs"] = st.lastFaultMs;
     gateObj["obstacle"] = st.obstacle;
     gateObj["lastMoveMs"] = st.lastMoveMs;
     gateObj["lastStateChangeMs"] = st.lastStateChangeMs;
@@ -1685,6 +1718,13 @@ void fillStatus(JsonObject& out) {
     gateObj["lastDirection"] = 0;
     gateObj["errorCode"] = 0;
     gateObj["stopReason"] = 0;
+    gateObj["faultSeverityCode"] = 0;
+    gateObj["faultSeverity"] = "none";
+    gateObj["faultCode"] = 0;
+    gateObj["faultReason"] = 0;
+    gateObj["softFaultCount"] = 0;
+    gateObj["warningCount"] = 0;
+    gateObj["lastFaultMs"] = 0;
     gateObj["obstacle"] = false;
     gateObj["lastMoveMs"] = 0;
     gateObj["lastStateChangeMs"] = 0;

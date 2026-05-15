@@ -21,6 +21,9 @@ GateController::GateController(MotorController* motor_, ConfigManager* cfg_) : m
   status.state = state;
   status.error = errorCode;
   status.lastStopReason = GATE_STOP_NONE;
+  status.faultSeverity = GATE_FAULT_NONE;
+  status.faultCode = GATE_ERR_NONE;
+  status.faultReason = GATE_STOP_NONE;
 }
 
 GateDecisionContext GateController::decisionContext() const {
@@ -75,6 +78,76 @@ void GateController::begin() {
   setPosition(0.0f, cfg->gateConfig.maxDistance);
 }
 
+void GateController::clearCurrentFaultState() {
+  status.faultSeverity = GATE_FAULT_NONE;
+  status.faultCode = GATE_ERR_NONE;
+  status.faultReason = GATE_STOP_NONE;
+}
+
+void GateController::recordFault(GateFaultSeverity severity, GateErrorCode code, GateStopReason reason) {
+  const uint32_t nowMs = millis();
+  status.faultSeverity = severity;
+  status.faultCode = code;
+  status.faultReason = reason;
+  status.lastFaultMs = nowMs;
+  switch (severity) {
+    case GATE_FAULT_WARNING:
+      status.warningCount++;
+      status.lastWarningCode = code;
+      status.lastWarningMs = nowMs;
+      break;
+    case GATE_FAULT_SOFT:
+      status.softFaultCount++;
+      status.lastSoftFaultCode = code;
+      status.lastSoftFaultMs = nowMs;
+      break;
+    case GATE_FAULT_FATAL:
+      status.lastFatalFaultCode = code;
+      status.lastFatalFaultMs = nowMs;
+      break;
+    case GATE_FAULT_NONE:
+    default:
+      break;
+  }
+}
+
+void GateController::recordWarning(GateErrorCode code, GateStopReason reason) {
+  recordFault(GATE_FAULT_WARNING, code, reason);
+  publishStatusIfChanged();
+}
+
+void GateController::recordSoftFault(GateErrorCode code, GateStopReason reason) {
+  recordFault(GATE_FAULT_SOFT, code, reason);
+  publishStatusIfChanged();
+}
+
+bool GateController::resolveSafeTerminalStop(GateStopReason* stopReason) const {
+  if (!stopReason) return false;
+  const GateDecisionContext ctx = decisionContext();
+  const float posEpsM = 0.03f;
+  const bool nearOpenRaw = status.maxDistance > 0.0f && controlPosition >= (status.maxDistance - posEpsM);
+  const bool nearCloseRaw = controlPosition <= posEpsM;
+  if (state == GATE_OPENING &&
+      (limitOpenActive || ctx.terminalState == GateTerminalState::FullyOpen || gateNearOpen(ctx, posEpsM) || nearOpenRaw)) {
+    *stopReason = limitOpenActive ? GATE_STOP_LIMIT_OPEN : GATE_STOP_SOFT_LIMIT;
+    return true;
+  }
+  if (state == GATE_CLOSING &&
+      (limitCloseActive || ctx.terminalState == GateTerminalState::FullyClosed || gateNearClosed(ctx, posEpsM) || nearCloseRaw)) {
+    *stopReason = limitCloseActive ? GATE_STOP_LIMIT_CLOSE : GATE_STOP_SOFT_LIMIT;
+    return true;
+  }
+  return false;
+}
+
+bool GateController::recoverTerminalTimeoutAsWarning(GateErrorCode code, GateStopReason faultReason) {
+  GateStopReason resolvedStop = GATE_STOP_NONE;
+  if (!resolveSafeTerminalStop(&resolvedStop)) return false;
+  stop(resolvedStop);
+  recordWarning(code, faultReason);
+  return true;
+}
+
 void GateController::loop() {
   (void)onObstacle(lastObstacle);
 
@@ -87,25 +160,10 @@ void GateController::loop() {
     }
     userStopBoostUntilMs = 0;
   }
-  // auto-clear over-current error after cooldown
-  if (state == GATE_ERROR && errorCode == GATE_ERR_OVER_CURRENT && overCurrentCooldownUntilMs != 0 && millis() >= overCurrentCooldownUntilMs) {
+  // Same-direction over-current cooldown expires automatically without controller reset.
+  if (overCurrentCooldownUntilMs != 0 && millis() >= overCurrentCooldownUntilMs) {
     overCurrentCooldownUntilMs = 0;
-    errorCode = GATE_ERR_NONE;
-    status.error = errorCode;
-    moving = false;
-    pendingStop = false;
-    setState(GATE_STOPPED);
-    if (cfg && cfg->gateConfig.overCurrentAutoRearm) {
-      const int maxTries = cfg->gateConfig.overCurrentMaxAutoRearm;
-      if (maxTries <= 0 || overCurrentAutoRearmCount < maxTries) {
-        if (motor && motor->isHoverUart()) {
-          motor->hoverArm();
-          overCurrentAutoRearmCount++;
-        }
-      }
-    }
-    status.lastMoveMs = millis();
-    publishStatusIfChanged();
+    overCurrentBlockedDirection_ = 0;
   }
 
   // === FIX #1: Level-based limit safety check ===
@@ -199,8 +257,11 @@ void GateController::loop() {
       const unsigned long timeoutMs = (unsigned long)(cfg->gateConfig.stallTimeoutMs > 0 ? cfg->gateConfig.stallTimeoutMs : cfg->gateConfig.movementTimeout);
       const unsigned long graceMs   = (unsigned long)(cfg->gateConfig.telemetryGraceMs > 0 ? cfg->gateConfig.telemetryGraceMs : 0);
       if (timeoutMs > 0 && (millis() - moveStart) > graceMs && (millis() - lastProgressMs) > timeoutMs) {
-        setError(GATE_ERR_TIMEOUT);
+        if (recoverTerminalTimeoutAsWarning(GATE_ERR_TIMEOUT, GATE_STOP_TELEMETRY_STALL)) {
+          return;
+        }
         stop(GATE_STOP_TELEMETRY_STALL);
+        recordSoftFault(GATE_ERR_TIMEOUT, GATE_STOP_TELEMETRY_STALL);
         return;
       }
     }
@@ -263,42 +324,14 @@ void GateController::loop() {
 #if defined(GATE_DEBUG_UART)
             Serial.printf("[GATE] OVER_CURRENT %.2fA > %.2fA -> stopHard\n", currentA, limitA);
 #endif
-            const String action = cfg->gateConfig.overCurrentAction;
             lastOverCurrentMs = millis();
             lastOverCurrentA = currentA;
             const uint32_t cdMs = (cfg ? cfg->gateConfig.overCurrentCooldownMs : 4000);
             overCurrentCooldownUntilMs = (cdMs > 0 ? (millis() + cdMs) : 0);
-            motor->stopHard();
-            if (motor && motor->isHoverUart()) motor->hoverDisarm();
+            overCurrentBlockedDirection_ = lastDirection;
             overCurrentSinceMs = 0;
-            if (action == "reverse") {
-              status.lastStopReason = GATE_STOP_OVER_CURRENT;
-              status.lastMoveMs = millis();
-              publishStatusIfChanged();
-              float reverseM = 0.5f;
-              if (cfg) {
-                reverseM = (float)cfg->safetyConfig.obstacleReverseCm / 100.0f;
-              }
-              float target = status.position;
-              const float maxDistance = configuredMaxDistance();
-              bool reverseStarted = false;
-              if (lastDirection >= 0) {
-                target = status.position - reverseM;
-                if (target < 0.0f) target = 0.0f;
-                // FIX B-03: bypassOCCooldown=true only bypasses OC cooldown,
-                //           not the general canMove() safety checks.
-                reverseStarted = startMoveTo(target, false, GATE_CLOSING, /*bypassOCCooldown=*/true);
-              } else {
-                target = status.position + reverseM;
-                if (maxDistance > 0.0f && target > maxDistance) target = maxDistance;
-                reverseStarted = startMoveTo(target, true, GATE_OPENING, /*bypassOCCooldown=*/true);
-              }
-              if (!reverseStarted) {
-                setError(GATE_ERR_OVER_CURRENT, GATE_STOP_OVER_CURRENT);
-              }
-            } else {
-              setError(GATE_ERR_OVER_CURRENT, GATE_STOP_OVER_CURRENT);
-            }
+            stop(GATE_STOP_OVER_CURRENT);
+            recordSoftFault(GATE_ERR_OVER_CURRENT, GATE_STOP_OVER_CURRENT);
             return;
           }
         } else {
@@ -322,6 +355,9 @@ void GateController::loop() {
 #if defined(GATE_DEBUG_UART)
       Serial.printf("[GATE] HOVER TEL missing after start (%lums) -> stopHard + TEL_TIMEOUT\n", (unsigned long)(millis() - moveStart));
 #endif
+      if (recoverTerminalTimeoutAsWarning(GATE_ERR_HOVER_TEL_TIMEOUT, GATE_STOP_TELEMETRY_TIMEOUT)) {
+        return;
+      }
       motor->stopHard();
       lastHoverLossMs = millis();
       setError(GATE_ERR_HOVER_TEL_TIMEOUT);
@@ -337,6 +373,9 @@ void GateController::loop() {
                       (unsigned long)kHoverTelGraceMs,
                       (unsigned long)kHoverTelTimeoutMs);
 #endif
+        if (recoverTerminalTimeoutAsWarning(GATE_ERR_HOVER_TEL_TIMEOUT, GATE_STOP_TELEMETRY_TIMEOUT)) {
+          return;
+        }
         motor->stopHard();
         lastHoverLossMs = millis();
         setError(GATE_ERR_HOVER_TEL_TIMEOUT);
@@ -358,6 +397,7 @@ void GateController::loop() {
       status.lastStopReason = GATE_STOP_TELEMETRY_TIMEOUT;
       status.targetPosition = status.position;
       status.lastMoveMs = millis();
+      recordSoftFault(GATE_ERR_HOVER_TEL_TIMEOUT, GATE_STOP_TELEMETRY_TIMEOUT);
       publishStatusIfChanged();
       return;
     }
@@ -467,6 +507,16 @@ bool GateController::startMove(GateMoveDirection dir, float target, GateState ne
 #endif
     return false;
   }
+  const bool forward = dir == GateMoveDirection::Open;
+  if (!bypassOCCooldown && overCurrentCooldownUntilMs != 0 && millis() < overCurrentCooldownUntilMs) {
+    const int requestedDir = forward ? 1 : -1;
+    if (requestedDir == overCurrentBlockedDirection_) {
+#if defined(GATE_DEBUG_UI)
+      Serial.printf("[GATE] startMove blocked: over_current_cooldown dir=%d target=%.3fm\n", requestedDir, target);
+#endif
+      return false;
+    }
+  }
   if (!canMove(bypassOCCooldown)) {
 #if defined(GATE_DEBUG_UI)
     Serial.printf("[GATE] startMove blocked: canMove=false target=%.3fm\n", target);
@@ -479,11 +529,11 @@ bool GateController::startMove(GateMoveDirection dir, float target, GateState ne
 #endif
     return false;
   }
-  const bool forward = dir == GateMoveDirection::Open;
   moving = true;
   pendingStop = false;
   // Clear the user-stop flag — a new movement is starting.
   userStoppedDuringMove_ = false;
+  clearCurrentFaultState();
   setState(nextState);
   lastDirection = forward ? 1 : -1;
   setTerminalState(GateTerminalState::Unknown);
@@ -745,6 +795,7 @@ void GateController::setError(GateErrorCode code) {
   setState(GATE_ERROR);
   errorCode = code;
   status.error = errorCode;
+  recordFault(GATE_FAULT_FATAL, code, GATE_STOP_ERROR);
   if (code == GATE_ERR_HOVER_TEL_TIMEOUT || code == GATE_ERR_HOVER_OFFLINE) {
     lastHoverLossMs = millis();
   }
@@ -798,6 +849,7 @@ void GateController::setError(GateErrorCode code, GateStopReason reason) {
   setState(GATE_ERROR);
   errorCode = code;
   status.error = errorCode;
+  recordFault(GATE_FAULT_FATAL, code, reason);
   if (code == GATE_ERR_HOVER_TEL_TIMEOUT || code == GATE_ERR_HOVER_OFFLINE) {
     lastHoverLossMs = millis();
   }
@@ -817,6 +869,17 @@ const char* GateController::getStateString() const {
     case GATE_STOPPED:
     default:
       return "stopped";
+  }
+}
+
+const char* GateController::getFaultSeverityString(GateFaultSeverity severity) const {
+  switch (severity) {
+    case GATE_FAULT_WARNING: return "warning";
+    case GATE_FAULT_SOFT:    return "soft_fault";
+    case GATE_FAULT_FATAL:   return "fatal_fault";
+    case GATE_FAULT_NONE:
+    default:
+      return "none";
   }
 }
 
@@ -972,12 +1035,12 @@ float GateController::configuredMaxDistance() const {
   return maxDistance;
 }
 
-// FIX B-03: bypassOCCooldown only skips OC cooldown — does NOT skip hover/fault checks.
+// Movement blocking is reserved for fatal states and hard prerequisites.
+// Same-direction over-current cooldown is enforced in startMove().
 bool GateController::canMove(bool bypassOCCooldown) const {
+  (void)bypassOCCooldown;
   if (state == GATE_ERROR || errorCode != GATE_ERR_NONE) return false;
   if (status.otaInProgress) return false;
-  // Only skip OC cooldown, not everything else.
-  if (!bypassOCCooldown && overCurrentCooldownUntilMs != 0 && millis() < overCurrentCooldownUntilMs) return false;
   if (motor && motor->isHoverUart()) {
     if (!motor->hoverEnabled()) return false;
     const HoverTelemetry& tel = motor->hoverTelemetry();
@@ -995,15 +1058,17 @@ bool GateController::canMove(bool bypassOCCooldown) const {
 
 bool GateController::clearError() {
   if (moving) return false;
-  if (state != GATE_ERROR && errorCode == GATE_ERR_NONE) return true;
+  if (state != GATE_ERROR && errorCode == GATE_ERR_NONE && status.faultSeverity == GATE_FAULT_NONE) return true;
   errorCode = GATE_ERR_NONE;
   status.error = errorCode;
   status.lastStopReason = GATE_STOP_NONE;
   status.targetPosition = status.position;
   overCurrentSinceMs = 0;
   overCurrentCooldownUntilMs = 0;
+  overCurrentBlockedDirection_ = 0;
   hoverRecoveryActive = false;
   hoverRecoverySinceMs = 0;
+  clearCurrentFaultState();
   setState(GATE_STOPPED);
   status.lastMoveMs = millis();
   publishStatusIfChanged();
@@ -1042,6 +1107,8 @@ void GateController::onLimitClose() {
 }
 
 GateCommandResponse GateController::handleObstacleTrip(const char* actionOverride, bool immediateFollowUp) {
+  (void)actionOverride;
+  (void)immediateFollowUp;
   GateCommandResponse resp;
   resp.cmd    = GATE_CMD_STOP;
   resp.result = GATE_CMD_OK;
@@ -1052,23 +1119,8 @@ GateCommandResponse GateController::handleObstacleTrip(const char* actionOverrid
   }
 
   stop(GATE_STOP_OBSTACLE);
+  recordSoftFault(GATE_ERR_OBSTACLE, GATE_STOP_OBSTACLE);
   resp.applied = true;
-
-  String action = actionOverride ? String(actionOverride)
-                                 : (cfg ? cfg->safetyConfig.obstacleAction : String("open"));
-  action.toLowerCase();
-  if (!immediateFollowUp || action != "open") {
-    return resp;
-  }
-
-  resp.followUpCmd = GATE_CMD_OPEN;
-  const bool ok = open();
-  if (ok) {
-    resp.cmd = GATE_CMD_OPEN;
-  } else {
-    resp.followUpBlocked = true;
-    Serial.println("[GATE] obstacle follow-up reopen blocked after successful stop");
-  }
   return resp;
 }
 

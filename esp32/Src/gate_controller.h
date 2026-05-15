@@ -24,6 +24,13 @@ enum GateErrorCode {
   GATE_ERR_UNKNOWN = 99
 };
 
+enum GateFaultSeverity {
+  GATE_FAULT_NONE = 0,
+  GATE_FAULT_WARNING = 1,
+  GATE_FAULT_SOFT = 2,
+  GATE_FAULT_FATAL = 3
+};
+
 enum GateStopReason {
   GATE_STOP_NONE = 0,
   GATE_STOP_USER = 1,
@@ -42,6 +49,9 @@ struct GateStatus {
   GateState state = GATE_STOPPED;
   GateErrorCode error = GATE_ERR_NONE;
   GateStopReason lastStopReason = GATE_STOP_NONE;
+  GateFaultSeverity faultSeverity = GATE_FAULT_NONE;
+  GateErrorCode faultCode = GATE_ERR_NONE;
+  GateStopReason faultReason = GATE_STOP_NONE;
   float position = 0.0f;
   float maxDistance = 0.0f;
   float targetPosition = 0.0f;
@@ -51,6 +61,15 @@ struct GateStatus {
   bool mqttConnected = false;
   bool apMode = false;
   bool otaInProgress = false;
+  uint32_t lastFaultMs = 0;
+  GateErrorCode lastWarningCode = GATE_ERR_NONE;
+  uint32_t lastWarningMs = 0;
+  GateErrorCode lastSoftFaultCode = GATE_ERR_NONE;
+  uint32_t lastSoftFaultMs = 0;
+  GateErrorCode lastFatalFaultCode = GATE_ERR_NONE;
+  uint32_t lastFatalFaultMs = 0;
+  uint32_t warningCount = 0;
+  uint32_t softFaultCount = 0;
   uint32_t lastMoveMs = 0;
   uint32_t lastStateChangeMs = 0;
 
@@ -62,6 +81,9 @@ struct GateStatus {
     return state == other.state &&
            error == other.error &&
            lastStopReason == other.lastStopReason &&
+           faultSeverity == other.faultSeverity &&
+           faultCode == other.faultCode &&
+           faultReason == other.faultReason &&
            approxEqual(position, other.position) &&
            approxEqual(maxDistance, other.maxDistance) &&
            approxEqual(targetPosition, other.targetPosition) &&
@@ -71,6 +93,15 @@ struct GateStatus {
            mqttConnected == other.mqttConnected &&
            apMode == other.apMode &&
            otaInProgress == other.otaInProgress &&
+           lastFaultMs == other.lastFaultMs &&
+           lastWarningCode == other.lastWarningCode &&
+           lastWarningMs == other.lastWarningMs &&
+           lastSoftFaultCode == other.lastSoftFaultCode &&
+           lastSoftFaultMs == other.lastSoftFaultMs &&
+           lastFatalFaultCode == other.lastFatalFaultCode &&
+           lastFatalFaultMs == other.lastFatalFaultMs &&
+           warningCount == other.warningCount &&
+           softFaultCount == other.softFaultCount &&
            lastMoveMs == other.lastMoveMs &&
            lastStateChangeMs == other.lastStateChangeMs;
   }
@@ -117,6 +148,7 @@ public:
   void setError(GateErrorCode code = GATE_ERR_UNKNOWN);
   void setError(GateErrorCode code, GateStopReason reason);
   bool clearError();
+  const char* getFaultSeverityString(GateFaultSeverity severity) const;
   const char* getStopReasonString(GateStopReason reason) const;
 
   GateState getState() const { return state; }
@@ -125,6 +157,9 @@ public:
   int getLastDirection() const { return lastDirection; }
   GateErrorCode getErrorCode() const { return errorCode; }
   GateStopReason getLastStopReason() const { return status.lastStopReason; }
+  GateFaultSeverity getFaultSeverity() const { return status.faultSeverity; }
+  GateErrorCode getFaultCode() const { return status.faultCode; }
+  GateStopReason getFaultReason() const { return status.faultReason; }
   const GateStatus& getStatus() const { return status; }
   int getLastFinalErrorMm() const { return lastFinalErrorMm; }
   float getControlPosition() const { return controlPosition; }
@@ -162,7 +197,7 @@ public:
   void onLimitClose();
   // Photocell logic:
   // - active only while closing
-  // - when triggered during closing: hard stop + immediate open
+  // - when triggered during closing: hard stop only, recorded as soft fault
   GateCommandResponse onObstacle(bool active);
   GateCommandResponse handleObstacleTrip(const char* actionOverride = nullptr, bool immediateFollowUp = true);
   void onStopInput();
@@ -181,6 +216,12 @@ private:
   GateDecisionContext decisionContext() const;
   void setTerminalState(GateTerminalState next);
   void refreshTerminalStateFromPosition();
+  void clearCurrentFaultState();
+  void recordFault(GateFaultSeverity severity, GateErrorCode code, GateStopReason reason);
+  void recordWarning(GateErrorCode code, GateStopReason reason);
+  void recordSoftFault(GateErrorCode code, GateStopReason reason);
+  bool resolveSafeTerminalStop(GateStopReason* stopReason) const;
+  bool recoverTerminalTimeoutAsWarning(GateErrorCode code, GateStopReason faultReason);
 
   MotorController* motor;
   ConfigManager* cfg;
@@ -207,6 +248,7 @@ private:
   int lastFinalErrorMm = 0;
   uint32_t overCurrentSinceMs = 0;
   uint32_t overCurrentCooldownUntilMs = 0;
+  int overCurrentBlockedDirection_ = 0;
   int overCurrentAutoRearmCount = 0;
   uint32_t lastOverCurrentMs = 0;
   float lastOverCurrentA = 0.0f;
