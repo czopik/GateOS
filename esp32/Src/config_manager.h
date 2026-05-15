@@ -244,7 +244,7 @@ struct MotionConfig {
 };
 
 struct SecurityConfig {
-  bool enabled = false;
+  bool enabled = true;
   String apiToken = "";
 };
 

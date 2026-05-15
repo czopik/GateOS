@@ -1149,6 +1149,10 @@ static bool isForbiddenPin(int pin) {
   return false;
 }
 
+static bool isInstalledLikeMode(const String& mode) {
+  return mode == "installed";
+}
+
 bool ConfigManager::validate(JsonVariantConst root, String& error) {
   if (!root.is<JsonObjectConst>()) {
     error = "root_not_object";
@@ -1162,6 +1166,24 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
     return false;
   }
 
+  String validatedMode = deviceConfig.mode;
+  if (obj.containsKey("device")) {
+    JsonObjectConst device = obj["device"];
+    if (!device.isNull()) {
+      validatedMode = String((const char*)(device["mode"] | deviceConfig.mode.c_str()));
+    }
+  }
+
+  bool securityEnabled = securityConfig.enabled;
+  String apiToken = securityConfig.apiToken;
+  if (obj.containsKey("security")) {
+    JsonObjectConst sec = obj["security"];
+    if (!sec.isNull()) {
+      securityEnabled = sec["enabled"] | securityEnabled;
+      apiToken = String((const char*)(sec["apiToken"] | sec["api_token"] | apiToken.c_str()));
+    }
+  }
+
   if (obj.containsKey("device")) {
     JsonObjectConst device = obj["device"];
     if (!device.isNull()) {
@@ -1170,7 +1192,7 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
         error = "device.webPort_out_of_range";
         return false;
       }
-      String mode = String((const char*)(device["mode"] | deviceConfig.mode.c_str()));
+      String mode = validatedMode;
       if (!(mode == "bench" || mode == "installed")) {
         error = "device.mode_invalid";
         return false;
@@ -1181,6 +1203,11 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
         return false;
       }
     }
+  }
+
+  if (securityEnabled && isInstalledLikeMode(validatedMode) && apiToken.length() == 0) {
+    error = "security.apiToken_required_in_installed_mode";
+    return false;
   }
 
   if (obj.containsKey("gate")) {
