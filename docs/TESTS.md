@@ -65,6 +65,17 @@ python3 test_gate.py --test uart --url http://gate.local --token YOUR_API_TOKEN
 python3 test_gate.py --test latency --url http://gate.local --token YOUR_API_TOKEN
 ```
 
+### Static Hardening Checks
+
+For source-level validation of the staged security/stability rules:
+
+```bash
+cd esp32
+python3 scripts/hardening_checks.py
+```
+
+This check is intentionally static. It verifies that the source still contains the expected hardening rules even when no real ESP32 is connected.
+
 ---
 
 ## Test Descriptions
@@ -305,6 +316,45 @@ echo "All CI tests passed!"
 2. Limit switch alignment
 3. Hall sensor gap
 4. Configuration parameters
+
+---
+
+## Hardening Manual Checks
+
+Use these checks on a real ESP32 after flashing a hardening branch build.
+
+### 1. Security Default Enabled
+
+1. Reset to a clean config or boot with no existing `config.json`.
+2. Open `GET /api/config` with a valid token after the first boot.
+3. Confirm `security.enabled` is `true`.
+4. Confirm `security.tokenSet` becomes `true` after boot-time token generation.
+
+### 2. AP Password Policy
+
+1. POST `/api/config/validate` with `device.mode = "bench"` and an empty `wifi.apFallback.password`.
+2. Confirm validation passes.
+3. POST `/api/config/validate` with `device.mode = "gate"` or `"production"` and an empty or short AP password.
+4. Confirm validation returns `wifi.apFallback.password_too_short`.
+
+### 3. OTA Password Policy In Production
+
+1. POST `/api/config/validate` with `device.mode = "production"`, `ota.enabled = true`, and empty `ota.password`.
+2. Confirm validation returns `ota.password_required_in_production`.
+
+### 4. `/api/wifi` Placeholder Guard
+
+1. POST `/api/wifi` without `X-Api-Key`.
+2. Confirm HTTP `401`.
+3. POST `/api/wifi` with a valid token.
+4. Confirm HTTP `501` with JSON `{ "status": "not_implemented" }`.
+
+### 5. WebSocket Requires Token
+
+1. Connect to `ws://<device>/ws` without `?token=...` while `security.enabled=true`.
+2. Confirm the socket is closed before the first `status` frame arrives.
+3. Connect again with `ws://<device>/ws?token=<API_TOKEN>`.
+4. Confirm the initial `status` frame arrives normally.
 
 ---
 
