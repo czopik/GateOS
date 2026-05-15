@@ -40,6 +40,10 @@ struct JsonParseDiag {
 static JsonParseDiag g_jsonParseDiag;
 static std::map<AsyncWebServerRequest*, BodyBuffer*> g_bodyBuffers;
 
+static bool isProtectedStaticPath(const String& url) {
+  return url == CONFIG_PATH || url == CONFIG_BAK_PATH || url == CONFIG_TMP_PATH;
+}
+
 static void copyPrintable(char* dst, size_t dstSize, const char* src, size_t srcLen) {
   if (!dst || dstSize == 0) return;
   size_t out = 0;
@@ -1156,7 +1160,7 @@ void WebServerManager::setupRoutes() {
 
   server.onNotFound([](AsyncWebServerRequest *request){
     String url = request->url();
-    if (url.startsWith("/api") || url.startsWith("/ws")) {
+    if (url.startsWith("/api") || url.startsWith("/ws") || isProtectedStaticPath(url)) {
       request->send(404, "text/plain", "Not found");
       return;
     }
@@ -1209,7 +1213,7 @@ void WebServerManager::setupRoutes() {
     .setCacheControl("max-age=300, public")
     .setFilter([](AsyncWebServerRequest* request) {
       String url = request->url();
-      return !url.startsWith("/api") && !url.startsWith("/ws");
+      return !url.startsWith("/api") && !url.startsWith("/ws") && !isProtectedStaticPath(url);
     });
 }
 
