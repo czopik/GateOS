@@ -18,8 +18,11 @@ namespace {
 enum class BodyAppendResult {
   Ok = 0,
   BadOffset,
-  BadSize
+  BadSize,
+  TooLarge
 };
+
+static constexpr size_t kMaxJsonBodyBytes = CONFIG_JSON_CAPACITY + 2048;
 
 struct BodyBuffer {
   String body;
@@ -39,6 +42,12 @@ struct JsonParseDiag {
 
 static JsonParseDiag g_jsonParseDiag;
 static std::map<AsyncWebServerRequest*, BodyBuffer*> g_bodyBuffers;
+static uint32_t g_wsSendOk = 0;
+static uint32_t g_wsSendSkippedLowHeap = 0;
+static uint32_t g_wsSendSkippedNoClient = 0;
+static unsigned long g_lastWsSkipLogMs = 0;
+static unsigned long g_lastAuthFailLogMs = 0;
+static uint32_t g_authFailSuppressed = 0;
 
 static bool isProtectedStaticPath(const String& url) {
   return url == CONFIG_PATH || url == CONFIG_BAK_PATH || url == CONFIG_TMP_PATH;
@@ -87,6 +96,7 @@ BodyBuffer* getBodyBuffer(AsyncWebServerRequest* request, size_t total) {
 
 BodyAppendResult appendBody(BodyBuffer* buf, const uint8_t* data, size_t len, size_t index, size_t total) {
   if (!buf) return BodyAppendResult::BadSize;
+  if (total > kMaxJsonBodyBytes) return BodyAppendResult::TooLarge;
   if (index == 0) {
     buf->body = "";
     buf->badOffset = false;
@@ -98,6 +108,7 @@ BodyAppendResult appendBody(BodyBuffer* buf, const uint8_t* data, size_t len, si
     return BodyAppendResult::BadOffset;
   }
   if (total > 0 && index + len > total) return BodyAppendResult::BadSize;
+  if (buf->body.length() + len > kMaxJsonBodyBytes) return BodyAppendResult::TooLarge;
   // Avoid String::concat(pointer, len) overload ambiguity across cores; append byte-by-byte.
   buf->body.reserve(buf->body.length() + len + 1);
   for (size_t i = 0; i < len; ++i) {
@@ -107,10 +118,17 @@ BodyAppendResult appendBody(BodyBuffer* buf, const uint8_t* data, size_t len, si
 }
 
 BodyBuffer* appendBodyChunk(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+  if (total > kMaxJsonBodyBytes) {
+    request->send(413, "application/json", "{\"status\":\"payload_too_large\"}");
+    releaseBody(request);
+    return nullptr;
+  }
   BodyBuffer* buf = getBodyBuffer(request, total);
   BodyAppendResult res = appendBody(buf, data, len, index, total);
   if (res != BodyAppendResult::Ok) {
-    if (res == BodyAppendResult::BadOffset) {
+    if (res == BodyAppendResult::TooLarge) {
+      request->send(413, "application/json", "{\"status\":\"payload_too_large\"}");
+    } else if (res == BodyAppendResult::BadOffset) {
       request->send(400, "application/json", "{\"status\":\"bad_body_offset\"}");
     } else {
       request->send(400, "application/json", "{\"status\":\"bad_body\"}");
@@ -165,6 +183,99 @@ String serializeJsonString(const TDoc& doc) {
   payload.reserve(measureJson(doc) + 1);
   serializeJson(doc, payload);
   return payload;
+}
+
+bool hasWsHeapForPayload(size_t payloadLen) {
+  uint32_t needed = (uint32_t)payloadLen + 2048U;
+  if (needed < 4096U) needed = 4096U;
+  return ESP.getMaxAllocHeap() >= needed && ESP.getFreeHeap() >= (needed + 2048U);
+}
+
+void logWsSkipLowHeap(const char* tag, size_t payloadLen) {
+  const unsigned long now = millis();
+  if (now - g_lastWsSkipLogMs < 5000UL) return;
+  g_lastWsSkipLogMs = now;
+  Serial.printf("[WS] skip low_heap tag=%s len=%u ok=%lu skipLowHeap=%lu skipNoClient=%lu heap=%u maxAlloc=%u\n",
+                tag ? tag : "unknown",
+                (unsigned)payloadLen,
+                (unsigned long)g_wsSendOk,
+                (unsigned long)g_wsSendSkippedLowHeap,
+                (unsigned long)g_wsSendSkippedNoClient,
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
+}
+
+bool safeWsTextAll(AsyncWebSocket& socket, const char* payload, size_t payloadLen, const char* tag) {
+  if (!payload || payloadLen == 0) return false;
+  if (socket.count() == 0) {
+    g_wsSendSkippedNoClient++;
+    return true;
+  }
+  if (!hasWsHeapForPayload(payloadLen)) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payloadLen);
+    return false;
+  }
+  try {
+    socket.textAll(payload, payloadLen);
+    g_wsSendOk++;
+    return true;
+  } catch (const std::bad_alloc&) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payloadLen);
+  } catch (...) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payloadLen);
+  }
+  return false;
+}
+
+bool safeWsTextAll(AsyncWebSocket& socket, const String& payload, const char* tag) {
+  return safeWsTextAll(socket, payload.c_str(), payload.length(), tag);
+}
+
+bool safeWsClientText(AsyncWebSocketClient* client, const String& payload, const char* tag) {
+  const size_t payloadLen = payload.length();
+  if (!client || payloadLen == 0) return false;
+  if (!hasWsHeapForPayload(payloadLen)) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payloadLen);
+    return false;
+  }
+  try {
+    client->text(payload.c_str(), payloadLen);
+    g_wsSendOk++;
+    return true;
+  } catch (const std::bad_alloc&) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payloadLen);
+  } catch (...) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payloadLen);
+  }
+  return false;
+}
+
+void logAuthFailRateLimited(const String& url, IPAddress ip) {
+  const unsigned long now = millis();
+  if (g_lastAuthFailLogMs != 0 && now - g_lastAuthFailLogMs < 5000UL) {
+    g_authFailSuppressed++;
+    return;
+  }
+
+  const uint32_t suppressed = g_authFailSuppressed;
+  g_authFailSuppressed = 0;
+  g_lastAuthFailLogMs = now;
+  if (suppressed > 0) {
+    Serial.printf("AUTH FAIL %s from %s (suppressed %lu)\n",
+                  url.c_str(),
+                  ip.toString().c_str(),
+                  (unsigned long)suppressed);
+  } else {
+    Serial.printf("AUTH FAIL %s from %s\n",
+                  url.c_str(),
+                  ip.toString().c_str());
+  }
 }
 
 void sendSchemaError(AsyncWebServerRequest* request, const String& detail) {
@@ -245,9 +356,7 @@ bool WebServerManager::isAuthorized(AsyncWebServerRequest* request) const {
   if (!ok) {
     IPAddress ip;
     if (request->client()) ip = request->client()->remoteIP();
-    Serial.printf("AUTH FAIL %s from %s\n",
-                  request->url().c_str(),
-                  ip.toString().c_str());
+    logAuthFailRateLimited(request->url(), ip);
   }
   return ok;
 }
@@ -1209,7 +1318,7 @@ void WebServerManager::setupRoutes() {
       JsonObject dataObj = doc.createNestedObject("data");
       statusCb(dataObj);
       String payload = serializeJsonString(doc);
-      client->text(payload);
+      safeWsClientText(client, payload, "connect_status");
       return;
     }
     if (type == WS_EVT_DISCONNECT) {
@@ -1277,12 +1386,12 @@ void WebServerManager::setLearnState(bool enabled) {
 }
 
 void WebServerManager::broadcastJson(const String &json) {
-  ws.textAll(json);
+  safeWsTextAll(ws, json, "json");
 }
 
 void WebServerManager::broadcastJson(const char* json) {
   if (!json) return;
-  ws.textAll(json);
+  safeWsTextAll(ws, json, strlen(json), "json");
 }
 
 void WebServerManager::broadcastStatus() {
@@ -1297,7 +1406,7 @@ void WebServerManager::broadcastStatus() {
     data["uptimeMs"] = (uptime / 1000UL) * 1000UL;
   }
   String payload = serializeJsonString(doc);
-  ws.textAll(payload);
+  safeWsTextAll(ws, payload, "status");
 }
 
 void WebServerManager::broadcastEvent(const char* level, const char* message) {
@@ -1307,7 +1416,7 @@ void WebServerManager::broadcastEvent(const char* level, const char* message) {
   doc["level"] = level;
   doc["message"] = message;
   String payload = serializeJsonString(doc);
-  ws.textAll(payload);
+  safeWsTextAll(ws, payload, "event");
 }
 
 void WebServerManager::maintenance() {
