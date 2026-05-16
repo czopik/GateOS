@@ -23,6 +23,9 @@ enum class BodyAppendResult {
 };
 
 static constexpr size_t kMaxJsonBodyBytes = CONFIG_JSON_CAPACITY + 2048;
+static constexpr size_t kMaxAuthTokenBytes = 128;
+static constexpr size_t kMaxFsListEntries = 32;
+static constexpr uint32_t kMaxFsListScanUs = 20000U;
 
 struct BodyBuffer {
   String body;
@@ -46,11 +49,125 @@ static uint32_t g_wsSendOk = 0;
 static uint32_t g_wsSendSkippedLowHeap = 0;
 static uint32_t g_wsSendSkippedNoClient = 0;
 static unsigned long g_lastWsSkipLogMs = 0;
+static unsigned long g_lastWsBuildSkipLogMs = 0;
 static unsigned long g_lastAuthFailLogMs = 0;
+static unsigned long g_lastStatusUsageLogMs = 0;
 static uint32_t g_authFailSuppressed = 0;
+static uint32_t g_authFailTotal = 0;
+static uint32_t g_otaAbortCount = 0;
+static portMUX_TYPE g_wsPeersMux = portMUX_INITIALIZER_UNLOCKED;
+
+struct WsPeerInfo {
+  uint32_t clientId = 0;
+  uint32_t ipKey = 0;
+  uint32_t connectedAtMs = 0;
+};
+
+static std::map<uint32_t, WsPeerInfo> g_wsActivePeers;
+static std::map<uint32_t, uint16_t> g_wsPeerCountByIp;
+static uint32_t g_lastWsConnectIpKey = 0;
+static uint32_t g_lastWsDisconnectIpKey = 0;
+static uint32_t g_lastWsConnectClientId = 0;
+static uint32_t g_lastWsDisconnectClientId = 0;
 
 static bool isProtectedStaticPath(const String& url) {
   return url == CONFIG_PATH || url == CONFIG_BAK_PATH || url == CONFIG_TMP_PATH;
+}
+
+uint32_t ipAddressToKey(const IPAddress& ip) {
+  return ((uint32_t)ip[0] << 24) |
+         ((uint32_t)ip[1] << 16) |
+         ((uint32_t)ip[2] << 8)  |
+         ((uint32_t)ip[3]);
+}
+
+String ipKeyToString(uint32_t ipKey) {
+  IPAddress ip((uint8_t)(ipKey >> 24),
+               (uint8_t)(ipKey >> 16),
+               (uint8_t)(ipKey >> 8),
+               (uint8_t)ipKey);
+  return ip.toString();
+}
+
+void noteWsConnect(AsyncWebSocketClient* client) {
+  if (!client) return;
+  const uint32_t clientId = client->id();
+  const uint32_t ipKey = ipAddressToKey(client->remoteIP());
+  const uint32_t nowMs = millis();
+  uint16_t ipCount = 0;
+  uint16_t totalClients = 0;
+  portENTER_CRITICAL(&g_wsPeersMux);
+  WsPeerInfo& peer = g_wsActivePeers[clientId];
+  peer.clientId = clientId;
+  peer.ipKey = ipKey;
+  peer.connectedAtMs = nowMs;
+  uint16_t& count = g_wsPeerCountByIp[ipKey];
+  count++;
+  ipCount = count;
+  g_lastWsConnectIpKey = ipKey;
+  g_lastWsConnectClientId = clientId;
+  totalClients = (uint16_t)g_wsActivePeers.size();
+  portEXIT_CRITICAL(&g_wsPeersMux);
+  Serial.printf("[WS] connect id=%lu ip=%s clients=%u ipCount=%u\n",
+                (unsigned long)clientId,
+                ipKeyToString(ipKey).c_str(),
+                (unsigned)totalClients,
+                (unsigned)ipCount);
+}
+
+void noteWsDisconnect(AsyncWebSocketClient* client) {
+  if (!client) return;
+  const uint32_t clientId = client->id();
+  uint32_t ipKey = ipAddressToKey(client->remoteIP());
+  uint16_t ipCount = 0;
+  uint16_t totalClients = 0;
+  portENTER_CRITICAL(&g_wsPeersMux);
+  auto peerIt = g_wsActivePeers.find(clientId);
+  if (peerIt != g_wsActivePeers.end()) {
+    ipKey = peerIt->second.ipKey;
+    g_wsActivePeers.erase(peerIt);
+  }
+  auto countIt = g_wsPeerCountByIp.find(ipKey);
+  if (countIt != g_wsPeerCountByIp.end()) {
+    if (countIt->second > 0) countIt->second--;
+    ipCount = countIt->second;
+    if (countIt->second == 0) g_wsPeerCountByIp.erase(countIt);
+  }
+  g_lastWsDisconnectIpKey = ipKey;
+  g_lastWsDisconnectClientId = clientId;
+  totalClients = (uint16_t)g_wsActivePeers.size();
+  portEXIT_CRITICAL(&g_wsPeersMux);
+  Serial.printf("[WS] disconnect id=%lu ip=%s clients=%u ipCount=%u\n",
+                (unsigned long)clientId,
+                ipKeyToString(ipKey).c_str(),
+                (unsigned)totalClients,
+                (unsigned)ipCount);
+}
+
+bool tryReadTokenValue(const String& candidate, String& out, bool& tooLong) {
+  if (candidate.length() == 0) return false;
+  if (candidate.length() > kMaxAuthTokenBytes) {
+    tooLong = true;
+    return false;
+  }
+  out = candidate;
+  return true;
+}
+
+bool extractAuthToken(AsyncWebServerRequest* request, bool allowQueryToken, String& token, bool& tooLong) {
+  token = "";
+  tooLong = false;
+  if (!request) return false;
+  if (allowQueryToken && request->hasParam("token")) {
+    if (tryReadTokenValue(request->getParam("token")->value(), token, tooLong) || tooLong) return token.length() > 0;
+  }
+  if (request->hasHeader("X-Api-Key")) {
+    if (tryReadTokenValue(request->getHeader("X-Api-Key")->value(), token, tooLong) || tooLong) return token.length() > 0;
+  }
+  if (request->hasHeader("X-API-Token")) {
+    if (tryReadTokenValue(request->getHeader("X-API-Token")->value(), token, tooLong) || tooLong) return token.length() > 0;
+  }
+  return token.length() > 0;
 }
 
 static void copyPrintable(char* dst, size_t dstSize, const char* src, size_t srcLen) {
@@ -185,6 +302,18 @@ String serializeJsonString(const TDoc& doc) {
   return payload;
 }
 
+void logWsBuildSkip(const char* tag, const char* reason, size_t payloadLen) {
+  const unsigned long now = millis();
+  if (now - g_lastWsBuildSkipLogMs < 5000UL) return;
+  g_lastWsBuildSkipLogMs = now;
+  Serial.printf("[WS] skip build tag=%s reason=%s len=%u heap=%u maxAlloc=%u\n",
+                tag ? tag : "unknown",
+                reason ? reason : "unknown",
+                (unsigned)payloadLen,
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
+}
+
 bool hasWsHeapForPayload(size_t payloadLen) {
   uint32_t needed = (uint32_t)payloadLen + 2048U;
   if (needed < 4096U) needed = 4096U;
@@ -207,11 +336,15 @@ void logWsSkipLowHeap(const char* tag, size_t payloadLen) {
 
 bool safeWsTextAll(AsyncWebSocket& socket, const char* payload, size_t payloadLen, const char* tag) {
   if (!payload || payloadLen == 0) return false;
-  if (socket.count() == 0) {
+  const size_t clients = socket.count();
+  if (clients == 0) {
     g_wsSendSkippedNoClient++;
     return true;
   }
-  if (!hasWsHeapForPayload(payloadLen)) {
+  // textAll() uses a shared buffer (one allocation), but each client needs a
+  // queue slot + TCP send buffer. Guard with extra headroom per connected client.
+  const uint32_t clientHeadroom = (uint32_t)clients * 512U;
+  if (!hasWsHeapForPayload(payloadLen + clientHeadroom)) {
     g_wsSendSkippedLowHeap++;
     logWsSkipLowHeap(tag, payloadLen);
     return false;
@@ -256,7 +389,75 @@ bool safeWsClientText(AsyncWebSocketClient* client, const String& payload, const
   return false;
 }
 
+template <typename TDoc>
+bool buildWsPayloadIfSafe(const TDoc& doc, size_t clientCount, const char* tag, String& payload) {
+  if (doc.overflowed()) {
+    logWsBuildSkip(tag, "json_overflow", measureJson(doc));
+    return false;
+  }
+  const size_t payloadLen = measureJson(doc);
+  if (payloadLen == 0) return false;
+  const uint32_t clientHeadroom = clientCount > 0 ? (uint32_t)clientCount * 512U : 0U;
+  if (!hasWsHeapForPayload(payloadLen + clientHeadroom)) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payloadLen);
+    return false;
+  }
+  payload = "";
+  if (!payload.reserve(payloadLen + 1)) {
+    g_wsSendSkippedLowHeap++;
+    logWsBuildSkip(tag, "reserve_failed", payloadLen);
+    return false;
+  }
+  serializeJson(doc, payload);
+  if (payload.length() == 0) return false;
+  return true;
+}
+
+template <typename TDoc>
+bool safeWsTextAllDoc(AsyncWebSocket& socket, const TDoc& doc, const char* tag) {
+  const size_t clients = socket.count();
+  if (clients == 0) {
+    g_wsSendSkippedNoClient++;
+    return true;
+  }
+  String payload;
+  if (!buildWsPayloadIfSafe(doc, clients, tag, payload)) return false;
+  try {
+    socket.textAll(payload.c_str(), payload.length());
+    g_wsSendOk++;
+    return true;
+  } catch (const std::bad_alloc&) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payload.length());
+  } catch (...) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payload.length());
+  }
+  return false;
+}
+
+template <typename TDoc>
+bool safeWsClientTextDoc(AsyncWebSocketClient* client, const TDoc& doc, const char* tag) {
+  if (!client) return false;
+  String payload;
+  if (!buildWsPayloadIfSafe(doc, 1, tag, payload)) return false;
+  try {
+    client->text(payload.c_str(), payload.length());
+    g_wsSendOk++;
+    return true;
+  } catch (const std::bad_alloc&) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payload.length());
+  } catch (...) {
+    g_wsSendSkippedLowHeap++;
+    logWsSkipLowHeap(tag, payload.length());
+  }
+  return false;
+}
+
 void logAuthFailRateLimited(const String& url, IPAddress ip) {
+  g_authFailTotal++;
   const unsigned long now = millis();
   if (g_lastAuthFailLogMs != 0 && now - g_lastAuthFailLogMs < 5000UL) {
     g_authFailSuppressed++;
@@ -276,6 +477,16 @@ void logAuthFailRateLimited(const String& url, IPAddress ip) {
                   url.c_str(),
                   ip.toString().c_str());
   }
+}
+
+void logStatusUsageRateLimited(uint32_t liteCount, uint32_t fullCount, uint16_t wsClients) {
+  const unsigned long now = millis();
+  if (g_lastStatusUsageLogMs != 0 && now - g_lastStatusUsageLogMs < 10000UL) return;
+  g_lastStatusUsageLogMs = now;
+  Serial.printf("[STATUS] lite/full usage lite=%lu full=%lu ws=%u\n",
+                (unsigned long)liteCount,
+                (unsigned long)fullCount,
+                (unsigned)wsClients);
 }
 
 void sendSchemaError(AsyncWebServerRequest* request, const String& detail) {
@@ -346,12 +557,8 @@ bool WebServerManager::isAuthorized(AsyncWebServerRequest* request) const {
   if (cfg->securityConfig.apiToken.length() == 0) return false;
 
   String token;
-  if (request->hasHeader("X-Api-Key")) {
-    token = request->getHeader("X-Api-Key")->value();
-  }
-  if (token.length() == 0 && request->hasHeader("X-API-Token")) {
-    token = request->getHeader("X-API-Token")->value();
-  }
+  bool tokenTooLong = false;
+  extractAuthToken(request, false, token, tokenTooLong);
   bool ok = token.length() > 0 && token == cfg->securityConfig.apiToken;
   if (!ok) {
     IPAddress ip;
@@ -368,23 +575,14 @@ bool WebServerManager::isWebSocketAuthorized(AsyncWebServerRequest* request) con
   if (cfg->securityConfig.apiToken.length() == 0) return false;
 
   String token;
-  if (request->hasParam("token")) {
-    token = request->getParam("token")->value();
-  }
-  if (token.length() == 0 && request->hasHeader("X-Api-Key")) {
-    token = request->getHeader("X-Api-Key")->value();
-  }
-  if (token.length() == 0 && request->hasHeader("X-API-Token")) {
-    token = request->getHeader("X-API-Token")->value();
-  }
+  bool tokenTooLong = false;
+  extractAuthToken(request, true, token, tokenTooLong);
 
   bool ok = token.length() > 0 && token == cfg->securityConfig.apiToken;
   if (!ok) {
     IPAddress ip;
     if (request->client()) ip = request->client()->remoteIP();
-    Serial.printf("WS AUTH FAIL %s from %s\n",
-                  request->url().c_str(),
-                  ip.toString().c_str());
+    logAuthFailRateLimited(request->url(), ip);
   }
   return ok;
 }
@@ -401,7 +599,8 @@ void WebServerManager::setupRoutes() {
     stats.statusReqCount++;
     stats.lastApiReqMs = millis();
     stats.lastStatusReqMs = millis();
-    StaticJsonDocument<4096> doc;
+    logStatusUsageRateLimited(stats.statusLiteReqCount, stats.statusReqCount, (uint16_t)ws.count());
+    StaticJsonDocument<5120> doc;
     JsonObject root = doc.to<JsonObject>();
     if (statusCb) {
       statusCb(root);
@@ -422,7 +621,18 @@ void WebServerManager::setupRoutes() {
                     (unsigned)ws.count(),
                     (unsigned long)stats.statusReqCount);
     }
-    sendJson(request, doc);
+    {
+      // Use String (single malloc) instead of AsyncResponseStream (cbuf+realloc loop)
+      // to avoid abort() from CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS during heap pressure.
+      const size_t jsonLen = measureJson(doc);
+      if (ESP.getMaxAllocHeap() < (uint32_t)jsonLen * 2 + 4096U) {
+        Serial.printf("[HTTP] /api/status heap_guard jsonLen=%u maxAlloc=%u\n",
+                      (unsigned)jsonLen, (unsigned)ESP.getMaxAllocHeap());
+        request->send(503, "application/json", "{\"ok\":false,\"error\":\"low_heap\"}");
+        return;
+      }
+      request->send(200, "application/json", serializeJsonString(doc));
+    }
   });
 
   server.on("/api/status-lite", HTTP_GET, [this](AsyncWebServerRequest *request){
@@ -430,6 +640,7 @@ void WebServerManager::setupRoutes() {
     stats.apiReqCount++;
     stats.statusLiteReqCount++;
     stats.lastApiReqMs = millis();
+    logStatusUsageRateLimited(stats.statusLiteReqCount, stats.statusReqCount, (uint16_t)ws.count());
     StaticJsonDocument<768> doc;
     JsonObject root = doc.to<JsonObject>();
     if (statusLiteCb) {
@@ -441,7 +652,16 @@ void WebServerManager::setupRoutes() {
       root["ok"] = false;
       root["error"] = "no_status_provider";
     }
-    sendJson(request, doc);
+    {
+      const size_t jsonLen = measureJson(doc);
+      if (ESP.getMaxAllocHeap() < (uint32_t)jsonLen * 2 + 4096U) {
+        Serial.printf("[HTTP] /api/status-lite heap_guard jsonLen=%u maxAlloc=%u\n",
+                      (unsigned)jsonLen, (unsigned)ESP.getMaxAllocHeap());
+        request->send(503, "application/json", "{\"ok\":false,\"error\":\"low_heap\"}");
+        return;
+      }
+      request->send(200, "application/json", serializeJsonString(doc));
+    }
   });
 
   server.on("/api/config", HTTP_GET, [this](AsyncWebServerRequest *request){
@@ -965,7 +1185,7 @@ void WebServerManager::setupRoutes() {
     ev["btnToggle"] = btnT;
     ev["btnGreen"] = btnG;
     String payload = serializeJsonString(ev);
-    ws.textAll(payload);
+    safeWsTextAll(ws, payload, "test_remote");
 
     if (testCb) testCb(serial, encript, btnT, btnG, false);
     request->send(200, "application/json", "{\"status\":\"ok\"}");
@@ -1033,13 +1253,26 @@ void WebServerManager::setupRoutes() {
       request->send(500, "application/json", out);
       return;
     }
+    const uint32_t scanStartUs = micros();
+    size_t fileCount = 0;
+    bool truncated = false;
     File file = root.openNextFile();
     while (file) {
       arr.add(String(file.name()));
       file.close();
+       fileCount++;
+       if (fileCount >= kMaxFsListEntries || (micros() - scanStartUs) > kMaxFsListScanUs) {
+        truncated = true;
+        break;
+      }
       file = root.openNextFile();
     }
     root.close();
+    if (truncated) {
+      Serial.printf("[FS] /api/fslist truncated files=%u dt=%luus\n",
+                    (unsigned)fileCount,
+                    (unsigned long)(micros() - scanStartUs));
+    }
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);
@@ -1066,10 +1299,14 @@ void WebServerManager::setupRoutes() {
         return;
       }
       // Odpowiedź wysyłana po zakończeniu przesyłania pliku.
-      bool ok = !Update.hasError();
+      // ok = true tylko gdy upload ukończony bez błędu i bez flagi failed.
+      const bool ok = !otaHttpUploadFailed && !Update.hasError();
+      const bool hadError = Update.hasError();
+      otaHttpUploadFailed = false;  // reset po odpowiedzi
       String resp = ok
         ? "{\"ok\":true}"
-        : String("{\"ok\":false,\"error\":\"") + Update.errorString() + "\"}";
+        : String("{\"ok\":false,\"error\":\"") +
+            (hadError ? Update.errorString() : "upload_failed") + "\"}";
       request->send(200, "application/json", resp);
       if (ok) {
         // Restart planowany poza callbackiem HTTP, żeby odpowiedź zdążyła wrócić do klienta.
@@ -1078,36 +1315,67 @@ void WebServerManager::setupRoutes() {
     },
     [this](AsyncWebServerRequest *request, const String &filename,
            size_t index, uint8_t *data, size_t len, bool final) {
-      // Sprawdź autoryzację przy pierwszym chunку.
-      if (index == 0 && !isAuthorized(request)) {
-        // Nie możemy wysłać 401 z handlera upload — przerywamy przez błąd.
-        Update.abort();
-        return;
-      }
-      if (index == 0 && (!cfg || !cfg->otaConfig.enabled)) {
-        Update.abort();
-        return;
-      }
       if (index == 0) {
+        // Blokuj równoczesne uploady — nie dopuść do dwóch Update.begin().
+        if (otaHttpUploadStarted) {
+          Serial.printf("[OTA-HTTP] reject: already_in_progress aborts=%lu\n",
+                        (unsigned long)(g_otaAbortCount + 1));
+          g_otaAbortCount++;
+          otaHttpUploadFailed = true;
+          return;
+        }
+        // Sprawdź autoryzację przy pierwszym chunku.
+        if (!isAuthorized(request)) {
+          Serial.printf("[OTA-HTTP] abort: unauthorized\n");
+          g_otaAbortCount++;
+          otaHttpUploadFailed = true;
+          otaHttpUploadStarted = false;
+          Update.abort();
+          return;
+        }
+        if (!cfg || !cfg->otaConfig.enabled) {
+          Serial.printf("[OTA-HTTP] abort: ota_disabled\n");
+          g_otaAbortCount++;
+          otaHttpUploadFailed = true;
+          otaHttpUploadStarted = false;
+          Update.abort();
+          return;
+        }
+        // Nowy upload — reset stanu.
+        otaHttpUploadFailed = false;
         Serial.printf("[OTA-HTTP] Start: %s size=%u\n",
                       filename.c_str(), request->contentLength());
         if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
           Serial.printf("[OTA-HTTP] begin error: %s\n", Update.errorString());
-        } else {
-          otaHttpUploadStarted = true;
+          otaHttpUploadFailed = true;
+          return;
         }
+        otaHttpUploadStarted = true;
       }
+      // Pomiń dalsze przetwarzanie jeśli ten upload jest zablokowany lub nieudany.
+      if (otaHttpUploadFailed) return;
       if (Update.isRunning()) {
         if (Update.write(data, len) != len) {
-          Serial.printf("[OTA-HTTP] write error: %s\n", Update.errorString());
+          // Błąd zapisu — natychmiast przerwij, nie kontynuuj i nie restartuj.
+          Serial.printf("[OTA-HTTP] write error: %s – aborting\n", Update.errorString());
+          g_otaAbortCount++;
+          Update.abort();
+          otaHttpUploadFailed = true;
+          otaHttpUploadStarted = false;
+          return;
         }
       }
       if (final) {
+        // Ten upload jest właścicielem — resetuj stan przed odpowiedzią.
+        otaHttpUploadStarted = false;
+        otaHttpUploadFailed = false;
         if (Update.isRunning()) {
           if (Update.end(true)) {
             Serial.printf("[OTA-HTTP] Done: %u B\n", index + len);
           } else {
             Serial.printf("[OTA-HTTP] end error: %s\n", Update.errorString());
+            otaHttpUploadFailed = true;
+            g_otaAbortCount++;
           }
         }
       }
@@ -1312,21 +1580,49 @@ void WebServerManager::setupRoutes() {
         return;
       }
       stats.lastWsConnectMs = millis();
-      if (!statusCb) return;
-      StaticJsonDocument<2048> doc;
-      doc["type"] = "status";
+      noteWsConnect(client);
+      if (!statusLiteCb && !statusCb) return;
+      StaticJsonDocument<1792> doc;
+      doc["type"] = statusLiteCb ? "status_lite" : "status";
       JsonObject dataObj = doc.createNestedObject("data");
-      statusCb(dataObj);
-      String payload = serializeJsonString(doc);
-      safeWsClientText(client, payload, "connect_status");
+      if (statusLiteCb) statusLiteCb(dataObj);
+      else statusCb(dataObj);
+      safeWsClientTextDoc(client, doc, "connect_status");
       return;
     }
     if (type == WS_EVT_DISCONNECT) {
       stats.lastWsDisconnectMs = millis();
+      noteWsDisconnect(client);
     }
   });
 
+  // Reject new WS connections at HTTP level when at client limit (count >= 4).
+  // HTTP 503 is cheaper than accepting the WS handshake and then sending close(1008),
+  // which requires a full TCP round-trip and burdens async_tcp.
+  // Browser WebSocket sees a non-101 response → onclose(1006, wasClean=false) → rapidFailure backoff.
+  ws.setFilter([this](AsyncWebServerRequest* request) -> bool {
+    (void)request;
+    return ws.count() < 4;
+  });
   server.addHandler(&ws);
+
+  // Fallback: catches WS upgrade requests that the WS handler's filter rejected (count >= 4).
+  server.on("/ws", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    stats.wsRejected++;
+    static uint32_t lastRejectLogMs = 0;
+    static uint32_t suppressedRejects = 0;
+    const uint32_t nowMs = (uint32_t)millis();
+    if (nowMs - lastRejectLogMs >= 5000U) {
+      Serial.printf("[WS] reject HTTP-503 count=%u total=%lu suppressed=%u\n",
+                    (unsigned)ws.count(), (unsigned long)stats.wsRejected, (unsigned)suppressedRejects);
+      lastRejectLogMs = nowMs;
+      suppressedRejects = 0;
+    } else {
+      suppressedRejects++;
+      stats.wsRejectLogSuppressed++;
+    }
+    request->send(503, "application/json", "{\"ok\":false,\"error\":\"max_clients\"}");
+  });
 
   server.serveStatic("/", LittleFS, "/")
     .setDefaultFile("index.html")
@@ -1395,18 +1691,18 @@ void WebServerManager::broadcastJson(const char* json) {
 }
 
 void WebServerManager::broadcastStatus() {
-  if (!statusCb) return;
+  if (!statusLiteCb && !statusCb) return;
   if (ws.count() == 0) return;
-  StaticJsonDocument<2048> doc;
-  doc["type"] = "status";
+  StaticJsonDocument<1792> doc;
+  doc["type"] = statusLiteCb ? "status_lite" : "status";
   JsonObject data = doc.createNestedObject("data");
-  statusCb(data);
+  if (statusLiteCb) statusLiteCb(data);
+  else statusCb(data);
   if (data.containsKey("uptimeMs")) {
     unsigned long uptime = data["uptimeMs"] | 0UL;
     data["uptimeMs"] = (uptime / 1000UL) * 1000UL;
   }
-  String payload = serializeJsonString(doc);
-  safeWsTextAll(ws, payload, "status");
+  safeWsTextAllDoc(ws, doc, "status");
 }
 
 void WebServerManager::broadcastEvent(const char* level, const char* message) {
@@ -1415,13 +1711,21 @@ void WebServerManager::broadcastEvent(const char* level, const char* message) {
   doc["type"] = "event";
   doc["level"] = level;
   doc["message"] = message;
-  String payload = serializeJsonString(doc);
-  safeWsTextAll(ws, payload, "event");
+  safeWsTextAllDoc(ws, doc, "event");
 }
 
 void WebServerManager::maintenance() {
   stats.lastMaintenanceMs = millis();
-  ws.cleanupClients();
+  // Explicit limit: ESP32 default is 8, which allows too many concurrent clients.
+  // >4 clients causes heap exhaustion + async_tcp WDT stalls under load.
+  ws.cleanupClients(4);
+  // Jeśli klient zerwał połączenie w trakcie uploadu (brak final chunk),
+  // Update.isRunning() wróci do false – czyść wtedy flagę, żeby nie blokować kolejnych OTA.
+  if (otaHttpUploadStarted && !Update.isRunning()) {
+    Serial.printf("[OTA-HTTP] reset: abandoned upload detected\n");
+    otaHttpUploadStarted = false;
+    otaHttpUploadFailed  = false;
+  }
 
   // FIX A4: Remove stale BodyBuffers whose HTTP connections were dropped
   // before the body handler completed (no onDisconnect for raw HTTP in
@@ -1446,5 +1750,76 @@ void WebServerManager::maintenance() {
 WebRuntimeStats WebServerManager::runtimeStats() const {
   WebRuntimeStats out = stats;
   out.wsClients = (uint16_t)ws.count();
+  out.wsSendOk = g_wsSendOk;
+  out.wsSendSkipped = g_wsSendSkippedLowHeap;
+  out.wsSendSkippedNoClient = g_wsSendSkippedNoClient;
+  out.authFails = g_authFailTotal;
+  out.bodyBufActive = (uint16_t)g_bodyBuffers.size();
+  out.otaAborts = g_otaAbortCount;
   return out;
+}
+
+void WebServerManager::appendWsClientDiagnostics(JsonObject& out) const {
+  struct PeerSnapshot {
+    uint32_t clientId = 0;
+    uint32_t ipKey = 0;
+    uint32_t connectedAtMs = 0;
+  };
+  struct IpCountSnapshot {
+    uint32_t ipKey = 0;
+    uint16_t count = 0;
+  };
+
+  PeerSnapshot peerSnapshot[6];
+  IpCountSnapshot ipSnapshot[6];
+  size_t peerCount = 0;
+  size_t ipCount = 0;
+  uint32_t lastConnectIpKey = 0;
+  uint32_t lastDisconnectIpKey = 0;
+  uint32_t lastConnectClientId = 0;
+  uint32_t lastDisconnectClientId = 0;
+
+  portENTER_CRITICAL(&g_wsPeersMux);
+  lastConnectIpKey = g_lastWsConnectIpKey;
+  lastDisconnectIpKey = g_lastWsDisconnectIpKey;
+  lastConnectClientId = g_lastWsConnectClientId;
+  lastDisconnectClientId = g_lastWsDisconnectClientId;
+  for (auto it = g_wsActivePeers.begin(); it != g_wsActivePeers.end() && peerCount < 6; ++it) {
+    peerSnapshot[peerCount].clientId = it->second.clientId;
+    peerSnapshot[peerCount].ipKey = it->second.ipKey;
+    peerSnapshot[peerCount].connectedAtMs = it->second.connectedAtMs;
+    peerCount++;
+  }
+  for (auto it = g_wsPeerCountByIp.begin(); it != g_wsPeerCountByIp.end() && ipCount < 6; ++it) {
+    ipSnapshot[ipCount].ipKey = it->first;
+    ipSnapshot[ipCount].count = it->second;
+    ipCount++;
+  }
+  portEXIT_CRITICAL(&g_wsPeersMux);
+
+  const uint32_t nowMs = millis();
+  out["clients"] = (uint16_t)ws.count();
+  out["distinctIpCount"] = (uint16_t)ipCount;
+  out["lastConnectClientId"] = lastConnectClientId;
+  out["lastDisconnectClientId"] = lastDisconnectClientId;
+  out["lastConnectIp"] = lastConnectIpKey ? ipKeyToString(lastConnectIpKey) : "";
+  out["lastDisconnectIp"] = lastDisconnectIpKey ? ipKeyToString(lastDisconnectIpKey) : "";
+
+  JsonArray byIp = out.createNestedArray("perIp");
+  for (size_t i = 0; i < ipCount; ++i) {
+    JsonObject item = byIp.createNestedObject();
+    item["ip"] = ipKeyToString(ipSnapshot[i].ipKey);
+    item["count"] = ipSnapshot[i].count;
+  }
+
+  JsonArray active = out.createNestedArray("activePeers");
+  for (size_t i = 0; i < peerCount; ++i) {
+    JsonObject item = active.createNestedObject();
+    item["clientId"] = peerSnapshot[i].clientId;
+    item["ip"] = ipKeyToString(peerSnapshot[i].ipKey);
+    item["connectedAtMs"] = peerSnapshot[i].connectedAtMs;
+    item["ageMs"] = (peerSnapshot[i].connectedAtMs == 0 || nowMs < peerSnapshot[i].connectedAtMs)
+                      ? -1L
+                      : (long)(nowMs - peerSnapshot[i].connectedAtMs);
+  }
 }

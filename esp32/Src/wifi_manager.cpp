@@ -73,6 +73,9 @@ void WiFiManagerClass::loop() {
 
   if (wasConnected) {
     wasConnected = false;
+    _reconnectCount++;
+    Serial.printf("[WIFI] disconnect rssi=%d reconnects=%u\n",
+                  (int)WiFi.RSSI(), (unsigned)_reconnectCount);
   }
 
   unsigned long now = millis();

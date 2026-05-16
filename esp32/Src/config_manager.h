@@ -13,6 +13,7 @@ static constexpr const char* CONFIG_TMP_PATH = "/config.tmp";
 static constexpr const char* CONFIG_BAK_PATH = "/config.bak";
 static constexpr int CONFIG_VERSION = 1;
 static constexpr size_t CONFIG_JSON_CAPACITY = 16384;
+static constexpr size_t CONFIG_MAX_REMOTES = 128;
 
 struct GateConfig {
   float totalDistance = 12.0f; // legacy alias for maxDistance

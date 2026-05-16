@@ -41,6 +41,16 @@ struct WebRuntimeStats {
   uint32_t lastWsConnectMs = 0;
   uint32_t lastWsDisconnectMs = 0;
   uint16_t wsClients = 0;
+  // DIAG: logi COM3
+  uint32_t wsSendOk = 0;
+  uint32_t wsSendSkipped = 0;
+  uint32_t wsSendSkippedNoClient = 0;
+  uint32_t authFails = 0;
+  uint16_t bodyBufActive = 0;
+  uint32_t otaAborts = 0;
+  uint32_t wsRejected = 0;
+  uint32_t wsRejectLogSuppressed = 0;
+  uint32_t wsBroadcastSkippedOverLimit = 0;
 };
 
 class WebServerManager {
@@ -68,6 +78,7 @@ public:
   void broadcastEvent(const char* level, const char* message);
   void maintenance();
   WebRuntimeStats runtimeStats() const;
+  void appendWsClientDiagnostics(JsonObject& out) const;
 
 private:
   ConfigManager* cfg;
@@ -78,6 +89,7 @@ private:
   AsyncWebSocket ws{ "/ws" };
   bool fsMounted = false;
   bool otaHttpUploadStarted = false;
+  bool otaHttpUploadFailed  = false;
   WebRuntimeStats stats;
 
   void setupRoutes();

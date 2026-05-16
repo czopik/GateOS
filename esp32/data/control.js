@@ -4,7 +4,6 @@ const tokenKey = 'apiToken';
 const cameraUrlKey = 'gateos.camera.snapshotUrl';
 const snapshotRefreshMs = 5000;
 const litePollMs = 1250;
-const fullPollMs = 30000;
 const wsReconnectBaseMs = 3000;
 const wsReconnectMaxMs = 30000;
 const wsReconnectCooldownMs = 30000;
@@ -50,7 +49,6 @@ const ui = {
 
 const state = {
   liteInFlight: false,
-  fullInFlight: false,
   currentState: '',
   currentFaultSeverity: 'none',
   posPercent: 0,
@@ -68,8 +66,8 @@ const state = {
   wsFailureCount: 0,
   wsReconnectDelayMs: wsReconnectBaseMs,
   wsReconnectTimer: null,
+  wsOpenedAt: 0,
   statusLiteTimer: null,
-  statusFullTimer: null,
 };
 
 function getToken() {
@@ -316,23 +314,31 @@ function updateUI(data) {
   setChip(ui.cLimC, `CLOSE: ${inputs.limitClose ? 'ON' : 'OFF'}`, inputs.limitClose ? 'success' : '');
 }
 
+function normalizeLitePayload(data) {
+  if (!data) return null;
+  return {
+    gate: {
+      state: data.state,
+      moving: data.moving,
+      positionPercent: data.positionPercent,
+      faultSeverity: data.faultSeverity
+    },
+    wifi: data.wifi || {},
+    hb: data.hb || {
+      rpm: data.rpm,
+      iA: data.iA
+    },
+    inputs: {
+      limitOpen: data.limitOpen,
+      limitClose: data.limitClose
+    }
+  };
+}
+
 function updateLite(data) {
-  if (!data) return;
-  const gateState = (data.state || '').toLowerCase();
-  if (!gateState) return;
-
-  const faultSeverity = normalizeFaultSeverity(data.faultSeverity, gateState);
-  const pct = typeof data.positionPercent === 'number'
-    ? Math.min(100, Math.max(0, Math.round(data.positionPercent)))
-    : 0;
-
-  updateCoreState(gateState, faultSeverity, pct);
-  updateLimitTiles(Boolean(data.limitOpen), Boolean(data.limitClose));
-  setChip(ui.cLimO, `OPEN: ${data.limitOpen ? 'ON' : 'OFF'}`, data.limitOpen ? 'success' : '');
-  setChip(ui.cLimC, `CLOSE: ${data.limitClose ? 'ON' : 'OFF'}`, data.limitClose ? 'success' : '');
-
-  if (typeof data.rpm === 'number') setText(ui.mRpm, `${data.rpm}`);
-  if (typeof data.iA === 'number' && data.iA >= 0) setText(ui.mCurrent, `${data.iA.toFixed(1)}A`);
+  const normalized = normalizeLitePayload(data);
+  if (!normalized) return;
+  updateUI(normalized);
 }
 
 async function fetchJson(path, timeoutMs) {
@@ -361,17 +367,6 @@ async function fetchLite() {
     if (data) updateLite(data);
   } finally {
     state.liteInFlight = false;
-  }
-}
-
-async function fetchFull() {
-  if (document.hidden || state.fullInFlight) return;
-  state.fullInFlight = true;
-  try {
-    const data = await fetchJson('/api/status', 2000);
-    if (data) updateUI(data);
-  } finally {
-    state.fullInFlight = false;
   }
 }
 
@@ -697,20 +692,12 @@ function stopStatusPolling() {
     clearInterval(state.statusLiteTimer);
     state.statusLiteTimer = null;
   }
-  if (state.statusFullTimer) {
-    clearInterval(state.statusFullTimer);
-    state.statusFullTimer = null;
-  }
 }
 
 function startStatusPolling() {
   stopStatusPolling();
   fetchLite();
-  setTimeout(() => {
-    if (!document.hidden) fetchFull();
-  }, 250);
   state.statusLiteTimer = setInterval(fetchLite, litePollMs);
-  state.statusFullTimer = setInterval(fetchFull, fullPollMs);
 }
 
 async function connectWs() {
@@ -724,21 +711,30 @@ async function connectWs() {
     state.ws = ws;
     ws.onopen = () => {
       state.wsConnected = true;
-      state.wsFailureCount = 0;
-      state.wsReconnectDelayMs = wsReconnectBaseMs;
+      state.wsOpenedAt = Date.now();
     };
     ws.onmessage = (evt) => {
+      if (state.wsOpenedAt > 0) {
+        state.wsFailureCount = 0;
+        state.wsReconnectDelayMs = wsReconnectBaseMs;
+        state.wsOpenedAt = 0;
+      }
       try {
         const msg = JSON.parse(evt.data);
-        if (msg.type === 'status') updateUI(msg.data);
+        if (msg.type === 'status' && msg.data) updateUI(msg.data);
+        if (msg.type === 'status_lite' && msg.data) updateLite(msg.data);
       } catch {}
     };
     ws.onerror = () => {};
     ws.onclose = (event) => {
+      const wsOpenedAt = state.wsOpenedAt;
       if (state.ws === ws) state.ws = null;
       state.wsConnected = false;
+      state.wsOpenedAt = 0;
 
-      const rapidFailure = event.code === 1006 || event.code === 1007 || event.code === 1002 || event.wasClean === false;
+      const shortLived = wsOpenedAt > 0 && (Date.now() - wsOpenedAt) < 500;
+      const rapidFailure = event.code === 1006 || event.code === 1007 || event.code === 1002 ||
+                           event.code === 1008 || event.wasClean === false || shortLived;
       if (rapidFailure) {
         state.wsFailureCount += 1;
       } else {
@@ -869,6 +865,13 @@ document.addEventListener('visibilitychange', () => {
   startStatusPolling();
   startCameraRefresh();
   connectWs();
+});
+
+// iOS Safari i niektóre Android nie wyzwalają visibilitychange przy nawigacji.
+// pagehide zapewnia czyszczenie timerów i WS przed bfcache/unload.
+window.addEventListener('pagehide', () => {
+  stopStatusPolling();
+  closeWsConnection();
 });
 
 window.addEventListener('resize', refreshInteractionMode);

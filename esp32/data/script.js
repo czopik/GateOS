@@ -26,6 +26,44 @@ const scheduleFullRender = core.createRafBatcher((data) => {
   }
 });
 
+function normalizeLiteStatus(data) {
+  if (!data) return null;
+  const gate = {
+    state: data.state,
+    moving: data.moving,
+    positionPercent: data.positionPercent,
+    targetPosition: data.targetPosition,
+    maxDistance: data.maxDistance,
+    stopReason: data.stopReason,
+    errorCode: data.errorCode,
+    faultSeverity: data.faultSeverity,
+    faultCode: data.faultCode,
+    faultReason: data.faultReason,
+    warningCount: data.warningCount,
+    softFaultCount: data.softFaultCount
+  };
+  const hb = data.hb || {
+    rpm: data.rpm,
+    iA: data.iA
+  };
+  const inputs = {
+    limitOpen: data.limitOpen,
+    limitClose: data.limitClose,
+    photocellBlocked: data.photocellBlocked
+  };
+  return {
+    uptimeMs: data.uptimeMs,
+    runtime: data.runtime || {},
+    gate,
+    wifi: data.wifi || {},
+    mqtt: data.mqtt || {},
+    hb,
+    limits: data.limits || {},
+    inputs,
+    remotes: data.remotes || {}
+  };
+}
+
 const ui = {
   gateState: qs('gateState'),
   gateProgress: qs('gateProgress'),
@@ -81,9 +119,7 @@ const state = {
   currentFaultSeverity: 'none',
   intervalsStarted: false,
   statusLiteInFlight: false,
-  statusFullInFlight: false,
   statusAbort: null,
-  fullAbort: null,
   eventListSignature: '',
   wsConnected: false,
   lastFullAppliedAt: 0,
@@ -417,56 +453,21 @@ function updateStatus(data) {
 }
 
 function updateStatusLite(data) {
-  if (!data) return;
-  const rawState = (data.state || '').toString();
-  if (!rawState) return;
-  const gateStateRaw = rawState.toLowerCase();
-  const faultSeverity = normalizeFaultSeverity(data.faultSeverity, gateStateRaw);
-  state.currentFaultSeverity = faultSeverity;
-  const gateState = formatGateStateLabel(rawState.toUpperCase(), faultSeverity);
-  if (ui.gateState.textContent !== gateState) ui.gateState.textContent = gateState;
-  updateSafetyBadge(faultSeverity);
-
-  const pct = typeof data.positionPercent === 'number' ? data.positionPercent : 0;
-  setGatePercent(pct >= 0 ? pct : 0);
-
-  const limitOpen = Boolean(data.limitOpen);
-  const limitClose = Boolean(data.limitClose);
-  setChip(ui.limitOpenChip, `OPEN: ${limitOpen ? 'ON' : 'OFF'}`, limitOpen ? 'success' : '');
-  setChip(ui.limitCloseChip, `CLOSE: ${limitClose ? 'ON' : 'OFF'}`, limitClose ? 'success' : '');
-
-  if (typeof data.rpm === 'number') {
-    const rpm = `${data.rpm}`;
-    if (ui.hbRpmValue.textContent !== rpm) ui.hbRpmValue.textContent = rpm;
-  }
-  if (typeof data.iA === 'number' && ui.hbIAValue) {
-    const iA = data.iA >= 0 ? `${data.iA.toFixed(2)} A` : '---';
-    if (ui.hbIAValue.textContent !== iA) ui.hbIAValue.textContent = iA;
-  }
-
-  updateSafetyDiagnostics({
-    faultSeverity,
-    faultCode: data.faultCode,
-    faultReason: data.faultReason,
-    warningCount: data.warningCount,
-    softFaultCount: data.softFaultCount,
-  });
-
-  updateSafetyAlert(faultSeverity, data.faultReason, data.faultCode, data.warningCount, data.softFaultCount);
-  applyDashboardControlState();
+  const normalized = normalizeLiteStatus(data);
+  if (!normalized) return;
+  updateStatus(normalized);
 }
 
-async function fetchJsonWithTimeout(path, timeoutMs, abortRefKey) {
+async function fetchJsonWithTimeout(path, timeoutMs) {
   try {
-    const requestKey = abortRefKey === 'statusAbort' ? 'dashboard-status-lite' : 'dashboard-status-full';
     const result = await apiClient.request(path, {
-      requestKey,
+      requestKey: 'dashboard-status-lite',
       timeoutMs,
       responseType: 'json'
     });
     return result.data;
   } finally {
-    state[abortRefKey] = null;
+    state.statusAbort = null;
   }
 }
 
@@ -475,7 +476,7 @@ async function fetchStatusLite() {
   state.statusLiteInFlight = true;
   state.statusAbort = true;
   try {
-    const data = await fetchJsonWithTimeout('/api/status-lite', 2000, 'statusAbort');
+    const data = await fetchJsonWithTimeout('/api/status-lite', 2000);
     if (!data) return;
     state.lastLiteAppliedAt = core.nowMs();
     scheduleLiteRender(data);
@@ -483,22 +484,6 @@ async function fetchStatusLite() {
     // ignore
   } finally {
     state.statusLiteInFlight = false;
-  }
-}
-
-async function fetchStatusFull() {
-  if (document.hidden || state.statusFullInFlight) return;
-  state.statusFullInFlight = true;
-  state.fullAbort = true;
-  try {
-    const data = await fetchJsonWithTimeout('/api/status', 2000, 'fullAbort');
-    if (!data) return;
-    state.lastFullAppliedAt = core.nowMs();
-    scheduleFullRender(data);
-  } catch {
-    // ignore
-  } finally {
-    state.statusFullInFlight = false;
   }
 }
 
@@ -553,14 +538,13 @@ function connectWs() {
   const unsubscribe = wsManager.subscribe({
     open() {
       state.wsConnected = true;
-      fetchStatusFull();
     },
     close() {
       state.wsConnected = false;
     },
     stale() {
       state.wsConnected = false;
-      fetchStatusFull();
+      fetchStatusLite();
     },
     message(evt) {
       try {
@@ -568,6 +552,9 @@ function connectWs() {
         if (msg.type === 'status' && msg.data) {
           state.lastFullAppliedAt = core.nowMs();
           scheduleFullRender(msg.data);
+        } else if (msg.type === 'status_lite' && msg.data) {
+          state.lastLiteAppliedAt = core.nowMs();
+          scheduleLiteRender(msg.data);
         } else if (msg.type === 'event') {
           addEvent({ level: msg.level, message: msg.message, ts: Date.now() });
         } else if (msg.type === 'learn') {
@@ -591,27 +578,24 @@ function startPollingOnce() {
   if (state.intervalsStarted) return;
   state.intervalsStarted = true;
   scheduler.every(fetchStatusLite, 1500);
-  scheduler.every(fetchStatusFull, 30000);
 }
 
 core.bindPageLifecycle({
   onHide() {
     apiClient.abort('dashboard-status-lite', 'page_hidden');
-    apiClient.abort('dashboard-status-full', 'page_hidden');
     wsManager.setVisibility(false);
   },
   onShow() {
     wsManager.setVisibility(true);
     fetchStatusLite();
-    fetchStatusFull();
   },
   onWake() {
     wsManager.reconnect('wake');
-    fetchStatusFull();
+    fetchStatusLite();
   },
   onOnline() {
     wsManager.setOnline(true);
-    fetchStatusFull();
+    fetchStatusLite();
   },
   onOffline() {
     state.wsConnected = false;
@@ -624,7 +608,6 @@ window.addEventListener('load', async () => {
   if (core.isRedirectingToPreferredBase()) return;
   setupControls();
   setupEvents();
-  fetchStatusFull();
   fetchStatusLite();
   startPollingOnce();
   connectWs();

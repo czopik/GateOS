@@ -543,6 +543,8 @@
       lastMessageAt: 0,
       backoffMs: baseDelayMs,
       rapidFailures: 0,
+      openedAt: 0,
+      stableConnected: false,
     };
 
     function snapshot() {
@@ -587,6 +589,8 @@
       const socket = state.socket;
       state.socket = null;
       state.connecting = false;
+      state.openedAt = 0;
+      state.stableConnected = false;
       if (!socket) return;
       socket.onopen = null;
       socket.onmessage = null;
@@ -643,8 +647,7 @@
         socket.onopen = () => {
           if (state.socket !== socket) return;
           state.connecting = false;
-          state.rapidFailures = 0;
-          state.backoffMs = baseDelayMs;
+          state.openedAt = nowMs();
           state.lastMessageAt = nowMs();
           emit('open', { reason });
           startHeartbeatChecks();
@@ -653,6 +656,11 @@
         socket.onmessage = (event) => {
           if (state.socket !== socket) return;
           state.lastMessageAt = nowMs();
+          if (!state.stableConnected) {
+            state.stableConnected = true;
+            state.rapidFailures = 0;
+            state.backoffMs = baseDelayMs;
+          }
           emit('message', event);
         };
 
@@ -663,13 +671,18 @@
 
         socket.onclose = (event) => {
           if (state.socket !== socket) return;
+          const openedAt = state.openedAt;
           state.socket = null;
           state.connecting = false;
+          state.openedAt = 0;
+          state.stableConnected = false;
           clearHeartbeatTimer();
           emit('close', event);
           if (!state.desired || !state.visible || !state.online) return;
 
-          const abnormal = event.code === 1006 || event.code === 1007 || event.code === 1002 || event.wasClean === false;
+          const shortLived = openedAt > 0 && (nowMs() - openedAt) < 500;
+          const abnormal = event.code === 1006 || event.code === 1007 || event.code === 1002 ||
+                           event.code === 1008 || event.wasClean === false || shortLived;
           if (abnormal) state.rapidFailures += 1;
           else state.rapidFailures = 0;
 

@@ -125,6 +125,11 @@ static volatile bool learnMode = false;
 static volatile uint32_t learnModeUntilMs = 0;
 static constexpr uint32_t kLearnModeWindowMs = 30000;
 static const int kMaxEvents = 80;
+static constexpr unsigned long kFsStatsRefreshMs = 5000UL;
+static constexpr size_t kRemoteSeenMaxEntries = CONFIG_MAX_REMOTES;
+static constexpr unsigned long kRemoteSeenStaleMs = 300000UL;
+static constexpr uint8_t kEventDrainBudgetPerLoop = 8;
+static constexpr uint32_t kConfigApplyPauseAckTimeoutMs = 500UL;
 static EventEntry events[kMaxEvents];
 static int eventHead = 0;
 static int eventCount = 0;
@@ -382,10 +387,31 @@ static long readHallCountAtomic() {
 }
 
 void updateFsStats(uint32_t nowMs) {
-  if (fsLastStatsMs != 0) return;
+  if (fsLastStatsMs != 0 && (uint32_t)(nowMs - fsLastStatsMs) < kFsStatsRefreshMs) return;
   fsTotalBytesCached = LittleFS.totalBytes();
   fsUsedBytesCached = LittleFS.usedBytes();
   fsLastStatsMs = nowMs;
+}
+
+static void pruneLastRemoteMap(unsigned long nowMs) {
+  for (auto it = lastRemoteMap.begin(); it != lastRemoteMap.end();) {
+    const unsigned long age = (it->second.lastMs != 0) ? (nowMs - it->second.lastMs) : ULONG_MAX;
+    if (age > kRemoteSeenStaleMs) {
+      it = lastRemoteMap.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  while (lastRemoteMap.size() >= kRemoteSeenMaxEntries) {
+    auto oldestIt = lastRemoteMap.begin();
+    for (auto it = lastRemoteMap.begin(); it != lastRemoteMap.end(); ++it) {
+      if (it->second.lastMs < oldestIt->second.lastMs) {
+        oldestIt = it;
+      }
+    }
+    lastRemoteMap.erase(oldestIt);
+  }
 }
 
 bool isSafeToSaveConfig() {
@@ -1015,9 +1041,12 @@ void pushEventf(const char* level, const char* fmt, unsigned long value) {
 void drainEventQueue() {
   if (!eventQueue) return;
   EventEntry e;
-  while (xQueueReceive(eventQueue, &e, 0) == pdTRUE) {
+  uint8_t drained = 0;
+  while (drained < kEventDrainBudgetPerLoop &&
+         xQueueReceive(eventQueue, &e, 0) == pdTRUE) {
     webserver.broadcastEvent(e.level, e.message);
     mqttPublishEvent(e.level, e.message);
+    drained++;
   }
 }
 
@@ -1166,14 +1195,28 @@ void mqttPublishPosition() {
 void logSummary1Hz() {
   static unsigned long lastDiagLogMs = 0;
   const unsigned long now = millis();
-  if (config.deviceConfig.diagnosticsEnabled && (lastDiagLogMs == 0 || now - lastDiagLogMs >= 60000)) {
+  if (lastDiagLogMs == 0 || now - lastDiagLogMs >= 15000) {
     lastDiagLogMs = now;
-    const WebRuntimeStats ws = webserver.runtimeStats();
-    Serial.printf("[DIAG] heap=%u minHeap=%u maxAlloc=%u ws=%u\n",
-                  (unsigned)ESP.getFreeHeap(),
+    const WebRuntimeStats st = webserver.runtimeStats();
+    const uint32_t freeH = ESP.getFreeHeap();
+    const uint32_t maxH  = ESP.getMaxAllocHeap();
+    const uint8_t  frag  = (freeH > 0) ? (uint8_t)(100u - maxH * 100u / freeH) : 100u;
+    const long mainAge = (mainLoopHeartbeatMs == 0) ? -1L : (long)(now - mainLoopHeartbeatMs);
+    const long gateAge = (gateTaskHeartbeatMs == 0) ? -1L : (long)(now - gateTaskHeartbeatMs);
+    Serial.printf("[DIAG] up=%lu wifi=%d rssi=%d re=%lu free=%u min=%u max=%u frag=%u%% ws=%u skip=%lu api=%lu mainAge=%ld gateAge=%ld\n",
+                  now,
+                  (int)WiFi.status(),
+                  WiFiManager.isConnected() ? (int)WiFi.RSSI() : 0,
+                  (unsigned long)WiFiManager.reconnectCount(),
+                  freeH,
                   (unsigned)ESP.getMinFreeHeap(),
-                  (unsigned)ESP.getMaxAllocHeap(),
-                  (unsigned)ws.wsClients);
+                  maxH,
+                  (unsigned)frag,
+                  (unsigned)st.wsClients,
+                  (unsigned long)st.wsSendSkipped,
+                  (unsigned long)st.apiReqCount,
+                  mainAge,
+                  gateAge);
   }
 #if !defined(GATE_LOG_PERIODIC)
   return;
@@ -1555,6 +1598,8 @@ void fillDiagnostics(JsonObject& out) {
   const uint32_t nowMs = millis();
   JsonObject runtimeObj = out.createNestedObject("runtime");
   fillRuntimeSnapshot(runtimeObj, ws, nowMs);
+  JsonObject wsObj = out.createNestedObject("ws");
+  webserver.appendWsClientDiagnostics(wsObj);
 
   JsonObject hoverObj = out.createNestedObject("hoverUart");
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
@@ -1902,6 +1947,15 @@ void fillStatus(JsonObject& out) {
 
 void fillStatusLite(JsonObject& out) {
   syncLegacyPositionState();
+  const uint32_t nowMs = millis();
+  out["uptimeMs"] = nowMs;
+  JsonObject runtimeObj = out.createNestedObject("runtime");
+  runtimeObj["resetReason"] = resetReasonToString(bootResetReason);
+
+  bool limitOpenActive = inputManager.limitOpenActive(config);
+  bool limitCloseActive = inputManager.limitCloseActive(config);
+  bool photocellBlocked = config.sensorsConfig.photocell.enabled && inputManager.obstacleActive();
+
   if (gate) {
     const GateStatus& st = gate->getStatus();
     out["state"] = effectiveGateStateString();
@@ -1922,8 +1976,12 @@ void fillStatusLite(JsonObject& out) {
     out["faultReason"] = static_cast<int>(st.faultReason);
     out["warningCount"] = st.warningCount;
     out["softFaultCount"] = st.softFaultCount;
-    out["limitOpen"] = inputManager.limitOpenActive(config);
-    out["limitClose"] = inputManager.limitCloseActive(config);
+    out["targetPosition"] = st.targetPosition;
+    out["maxDistance"] = st.maxDistance;
+    out["stopReason"] = static_cast<int>(st.lastStopReason);
+    out["limitOpen"] = limitOpenActive;
+    out["limitClose"] = limitCloseActive;
+    out["photocellBlocked"] = photocellBlocked;
   } else {
     out["state"] = "unknown";
     out["moving"] = false;
@@ -1935,24 +1993,100 @@ void fillStatusLite(JsonObject& out) {
     out["faultReason"] = 0;
     out["warningCount"] = 0;
     out["softFaultCount"] = 0;
+    out["targetPosition"] = 0.0f;
+    out["maxDistance"] = maxDistanceMeters;
+    out["stopReason"] = 0;
     out["limitOpen"] = false;
     out["limitClose"] = false;
+    out["photocellBlocked"] = false;
   }
 
+  bool wifiConnected = WiFiManager.isConnected();
+  const char* wifiMode = WiFiManager.getModeCString();
+  JsonObject wifiObj = out.createNestedObject("wifi");
+  wifiObj["connected"] = wifiConnected;
+  wifiObj["mode"] = wifiMode;
+  wifiObj["ssid"] = wifiConnected ? WiFi.SSID() : "";
+  wifiObj["ip"] = wifiConnected ? WiFi.localIP().toString() : "";
+  wifiObj["rssi"] = wifiConnected ? WiFi.RSSI() : 0;
+  wifiObj["apMode"] = strcmp(wifiMode, "AP") == 0;
+
+  JsonObject mqttObj = out.createNestedObject("mqtt");
+  mqttObj["connected"] = mqtt.connected();
+
+  JsonObject limitsObj = out.createNestedObject("limits");
+  limitsObj["enabled"] = config.limitsConfig.enabled;
+  limitsObj["openEnabled"] = config.limitsConfig.open.enabled;
+  limitsObj["closeEnabled"] = config.limitsConfig.close.enabled;
+
+  JsonObject inputsObj = out.createNestedObject("inputs");
+  inputsObj["limitOpen"] = limitOpenActive;
+  inputsObj["limitClose"] = limitCloseActive;
+  inputsObj["photocellBlocked"] = photocellBlocked;
+  inputsObj["photocellEnabled"] = config.sensorsConfig.photocell.enabled;
+
+  JsonObject hbObj = out.createNestedObject("hb");
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
     const HoverTelemetry& tel = motor->hoverTelemetry();
-    updateChargerConnectedFromTelemetry(tel, millis());
+    updateChargerConnectedFromTelemetry(tel, nowMs);
+    hbObj["enabled"] = true;
+    hbObj["dist_mm"] = (long)lroundf(positionMetersRaw * 1000.0f);
+    hbObj["batValid"] = tel.batValid;
+    hbObj["rawBat"] = tel.rawBat;
+    hbObj["batScale"] = tel.batScale;
+    if (tel.batValid) hbObj["batV"] = tel.batV;
+    else hbObj["batV"] = nullptr;
     out["rpm"] = tel.rpm;
     out["iA"] = tel.iA_x100 >= 0 ? ((float)tel.iA_x100) / 100.0f : -1.0f;
+    hbObj["rpm"] = tel.rpm;
+    hbObj["iA"] = tel.iA_x100 >= 0 ? ((float)tel.iA_x100) / 100.0f : -1.0f;
+    hbObj["armed"] = tel.armed;
+    hbObj["fault"] = tel.fault;
+    hbObj["lastTelMs"] = tel.lastTelMs;
+    hbObj["cmdAgeMs"] = tel.cmdAgeMs;
+    hbObj["telAgeMs"] = (tel.lastTelMs == 0) ? -1 : (long)(nowMs - tel.lastTelMs);
     out["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
     out["chargerKnown"] = chargerStateKnown;
     out["chargerPending"] = chargerPending;
+    hbObj["chargerConnected"] = chargerStateKnown ? chargerConnected : false;
+    hbObj["chargerKnown"] = chargerStateKnown;
+    hbObj["chargerPending"] = chargerPending;
   } else {
+    hbObj["enabled"] = false;
+    hbObj["dist_mm"] = 0;
+    hbObj["batValid"] = false;
+    hbObj["rawBat"] = -1;
+    hbObj["batScale"] = 0;
+    hbObj["batV"] = nullptr;
     out["rpm"] = 0;
     out["iA"] = -1.0f;
+    hbObj["rpm"] = 0;
+    hbObj["iA"] = -1.0f;
+    hbObj["armed"] = false;
+    hbObj["fault"] = 0;
+    hbObj["lastTelMs"] = 0;
+    hbObj["cmdAgeMs"] = -1;
+    hbObj["telAgeMs"] = -1;
     out["chargerConnected"] = false;
     out["chargerKnown"] = false;
     out["chargerPending"] = false;
+    hbObj["chargerConnected"] = false;
+    hbObj["chargerKnown"] = false;
+    hbObj["chargerPending"] = false;
+  }
+
+  JsonObject remObj = out.createNestedObject("remotes");
+  remObj["learnMode"] = learnMode;
+  JsonObject lastObj = remObj.createNestedObject("last");
+  lastObj["serial"] = lastRemote.serial;
+  lastObj["encript"] = lastRemote.encript;
+  lastObj["known"] = lastRemote.known;
+  lastObj["authorized"] = lastRemote.authorized;
+  lastObj["ts"] = lastRemote.ts;
+  RemoteEntry r;
+  if (lastRemote.serial != 0 && config.getRemote(lastRemote.serial, r)) {
+    lastObj["name"] = r.name;
+    lastObj["enabled"] = r.enabled;
   }
 }
 
@@ -2092,11 +2226,17 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
     configApplyPausing = true;
     portMEMORY_BARRIER();
     const uint32_t pauseWaitStart = millis();
-    while (!configApplyPaused && (millis() - pauseWaitStart < 120)) {
+    while (!configApplyPaused &&
+           (millis() - pauseWaitStart < kConfigApplyPauseAckTimeoutMs)) {
       vTaskDelay(pdMS_TO_TICKS(5));
     }
     if (!configApplyPaused) {
-      Serial.println("[CFG_APPLY] WARNING: GateTask pause ack timeout – proceeding anyway");
+      configApplyPausing = false;
+      portMEMORY_BARRIER();
+      runtimeConfigApplyPending = true;
+      runtimeConfigApplyRequestedMs = nowMs;
+      Serial.println("[CFG_APPLY] WARNING: GateTask pause ack timeout - retry scheduled");
+      return;
     }
   }
 
@@ -2244,7 +2384,6 @@ void onHcsReceived(unsigned long serial, unsigned long encript, bool btnToggle, 
   lastRemote.known = known;
   lastRemote.authorized = authorized;
 
-  RemoteSeen& seen = lastRemoteMap[serial];
   unsigned long debounceMs = (unsigned long)config.remoteConfig.antiRepeatMs;
   if (debounceMs < 50) debounceMs = 50;
   if (debounceMs > 2000) debounceMs = 2000;
@@ -2279,6 +2418,9 @@ void onHcsReceived(unsigned long serial, unsigned long encript, bool btnToggle, 
   // Debounce: accept toggle or green (fallback) to avoid "dead" buttons.
   bool actionToggle = btnToggle || btnGreen;
   if (!actionToggle) return;
+  pruneLastRemoteMap(now);
+  RemoteSeen& seen = lastRemoteMap[serial];
+  seen.lastMs = now;
   if (now - seen.lastActionMs < debounceMs) return;
   if (seen.encript == encript) return;
   seen.lastActionMs = now;
@@ -2666,6 +2808,76 @@ void setup() {
 void loop() {
   mainLoopHeartbeatMs = millis();
   WiFiManager.loop();
+
+  // === Recovery watchdog: WiFi stall + heap exhaustion ===
+  {
+    static uint32_t wifiStallMs     = 0;
+    static bool     wifiReconnTried = false;
+    static uint32_t heapLowMs       = 0;
+    static bool     deferredRestart = false;
+    static char     deferredReason[32] = {};
+    const uint32_t  nowMs  = (uint32_t)mainLoopHeartbeatMs;
+    const bool      apMode = (strcmp(WiFiManager.getModeCString(), "AP") == 0);
+    const bool      wifiOk = WiFiManager.isConnected();
+    const bool      moving = effectiveGateMoving();
+
+    // Execute deferred restart once gate has stopped
+    if (deferredRestart && !moving) {
+      Serial.printf("[RECOVERY] web_stall_restart reason=%s deferred up=%lu\n",
+                    deferredReason, (unsigned long)nowMs);
+      delay(50);
+      ESP.restart();
+    }
+
+    // WiFi stall: >30 s disconnected → reconnect; >90 s → restart
+    if (!wifiOk && !apMode) {
+      if (wifiStallMs == 0) wifiStallMs = nowMs;
+      if (!wifiReconnTried && (nowMs - wifiStallMs) >= 30000U) {
+        Serial.printf("[RECOVERY] wifi_reconnect up=%lu stall=%lu re=%lu\n",
+                      (unsigned long)nowMs, (unsigned long)(nowMs - wifiStallMs),
+                      (unsigned long)WiFiManager.reconnectCount());
+        WiFi.disconnect(false);
+        WiFi.reconnect();
+        wifiReconnTried = true;
+      }
+      if ((nowMs - wifiStallMs) >= 90000U) {
+        if (!moving) {
+          Serial.printf("[RECOVERY] web_stall_restart reason=wifi_lost up=%lu\n",
+                        (unsigned long)nowMs);
+          delay(50);
+          ESP.restart();
+        } else if (!deferredRestart) {
+          Serial.printf("[RECOVERY] restart_deferred reason=wifi_lost (gate moving)\n");
+          strncpy(deferredReason, "wifi_lost", sizeof(deferredReason) - 1);
+          deferredRestart = true;
+        }
+      }
+    } else {
+      wifiStallMs     = 0;
+      wifiReconnTried = false;
+    }
+
+    // Heap crash guard: maxAllocHeap < 20 KB for >60 s → restart
+    if (ESP.getMaxAllocHeap() < 20480U) {
+      if (heapLowMs == 0) heapLowMs = nowMs;
+      if ((nowMs - heapLowMs) >= 60000U) {
+        if (!moving) {
+          Serial.printf("[RECOVERY] web_stall_restart reason=heap_exhausted maxAlloc=%u up=%lu\n",
+                        (unsigned)ESP.getMaxAllocHeap(), (unsigned long)nowMs);
+          delay(50);
+          ESP.restart();
+        } else if (!deferredRestart) {
+          Serial.printf("[RECOVERY] restart_deferred reason=heap_exhausted (gate moving)\n");
+          strncpy(deferredReason, "heap_exhausted", sizeof(deferredReason) - 1);
+          deferredRestart = true;
+        }
+        heapLowMs = nowMs; // reset timer to avoid tight loop while gate moves
+      }
+    } else {
+      heapLowMs = 0;
+    }
+  }
+
   if (hcs) hcs->loop();
 
   if (learnMode && learnModeUntilMs != 0 && (int32_t)(millis() - learnModeUntilMs) >= 0) {
@@ -2758,8 +2970,20 @@ void loop() {
   }
 
   // Push status frequently while moving (smooth UI), slower when idle.
+  // Back off to 3 s when WS sends are failing (skip count growing) to reduce
+  // async_tcp queue pressure and prevent task_wdt stall.
+  static uint32_t lastSkipSnapshot  = 0;
+  static uint32_t wsThrottledUntilMs = 0;
+  {
+    const uint32_t curSkip = webserver.runtimeStats().wsSendSkipped;
+    if (curSkip != lastSkipSnapshot) {
+      lastSkipSnapshot  = curSkip;
+      wsThrottledUntilMs = now + 10000U; // throttle for 10 s on each new skip
+    }
+  }
   uint32_t statusIntervalMs = 1000;
   if (gate && gate->isMoving()) statusIntervalMs = 500;
+  else if ((int32_t)(now - wsThrottledUntilMs) < 0) statusIntervalMs = 3000;
   if (now - lastStatusMs > statusIntervalMs) {
     lastStatusMs = now;
     webserver.broadcastStatus();

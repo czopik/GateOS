@@ -131,6 +131,13 @@ bool isValidLocalBaseUrl(const String& rawValue) {
   return true;
 }
 
+bool appendRemoteWithLimit(std::vector<RemoteEntry>& remotes, const RemoteEntry& entry) {
+  if (entry.serial == 0) return true;
+  if (remotes.size() >= CONFIG_MAX_REMOTES) return false;
+  remotes.push_back(entry);
+  return true;
+}
+
 String normalizeLabel(const String& value) {
   String tmp = value;
   tmp.toLowerCase();
@@ -527,87 +534,95 @@ void ConfigManager::load() {
       return;
     }
   }
-  struct LoadMutexGuard {
-    SemaphoreHandle_t sem;
-    explicit LoadMutexGuard(SemaphoreHandle_t s) : sem(s) {}
-    ~LoadMutexGuard() { if (sem) xSemaphoreGive(sem); }
-  } guard(_saveMutex);
+  bool rewriteLoadedConfig = false;
+  bool abortLoad = false;
+  {
+    struct LoadMutexGuard {
+      SemaphoreHandle_t sem;
+      explicit LoadMutexGuard(SemaphoreHandle_t s) : sem(s) {}
+      ~LoadMutexGuard() { if (sem) xSemaphoreGive(sem); }
+    } guard(_saveMutex);
 
-  String err;
-  if (!ensureDefaultConfigExists(&err)) {
-    Serial.printf("CONFIG LOAD: default ensure failed (%s)\n", err.c_str());
-    return;
-  }
+    String err;
+    if (!ensureDefaultConfigExists(&err)) {
+      Serial.printf("CONFIG LOAD: default ensure failed (%s)\n", err.c_str());
+      abortLoad = true;
+    } else {
+      resetToDefaults();
 
-  resetToDefaults();
+      DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
+      if (!readConfigFileToDoc(doc, err)) {
+        Serial.printf("CONFIG LOAD FAIL: %s\n", err.c_str());
+        DynamicJsonDocument backupDoc(CONFIG_JSON_CAPACITY);
+        String backupErr;
+        if (readJsonFile(CONFIG_BAK_PATH, backupDoc, backupErr) &&
+            validateAndStripChecksum(backupDoc, backupErr)) {
+          Serial.printf("CONFIG LOAD: recovering from backup (%s)\n", CONFIG_BAK_PATH);
+          if (fromJsonVariant(backupDoc.as<JsonVariantConst>())) {
+            rewriteLoadedConfig = true;
+          } else {
+            Serial.println("CONFIG LOAD FAIL: backup_parse_apply");
+            resetToDefaults();
+            rewriteLoadedConfig = true;
+          }
+        } else {
+          if (LittleFS.exists(CONFIG_BAK_PATH)) {
+            Serial.printf("CONFIG BACKUP FAIL: %s\n", backupErr.c_str());
+          }
+          resetToDefaults();
+          rewriteLoadedConfig = true;
+        }
+      } else {
+        JsonVariantConst root = doc.as<JsonVariantConst>();
+        if (!root.is<JsonObjectConst>()) {
+          Serial.println("CONFIG LOAD FAIL: root_not_object");
+          resetToDefaults();
+          rewriteLoadedConfig = true;
+        } else {
+          int version = root["version"] | CONFIG_VERSION;
+          if (version != CONFIG_VERSION) {
+            Serial.printf("CONFIG LOAD FAIL: version_mismatch %d != %d (stored config left untouched)\n",
+                          version, CONFIG_VERSION);
+            resetToDefaults();
+            abortLoad = true;
+          } else if (!fromJsonVariant(root)) {
+            Serial.println("CONFIG LOAD FAIL: parse_apply");
+            resetToDefaults();
+            rewriteLoadedConfig = true;
+          } else {
+            Serial.printf("[CFG_LOAD] gate.maxDistance=%.3f gate.totalDistance=%.3f gate.position=%.3f\n",
+                          gateConfig.maxDistance, gateConfig.totalDistance, gateConfig.position);
 
-  DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
-  if (!readConfigFileToDoc(doc, err)) {
-    Serial.printf("CONFIG LOAD FAIL: %s\n", err.c_str());
-    DynamicJsonDocument backupDoc(CONFIG_JSON_CAPACITY);
-    String backupErr;
-    if (readJsonFile(CONFIG_BAK_PATH, backupDoc, backupErr) && validateAndStripChecksum(backupDoc, backupErr)) {
-      Serial.printf("CONFIG LOAD: recovering from backup (%s)\n", CONFIG_BAK_PATH);
-      if (fromJsonVariant(backupDoc.as<JsonVariantConst>())) {
-        save(nullptr);
-        return;
+            // If API security is enabled but no token is set, generate a token and persist it.
+            if (securityConfig.enabled && securityConfig.apiToken.length() == 0) {
+              const char* hex = "0123456789abcdef";
+              String t;
+              t.reserve(32);
+              for (int i = 0; i < 32; ++i) {
+                uint32_t r = esp_random();
+                t += hex[r & 0xF];
+              }
+              securityConfig.apiToken = t;
+              Serial.println("[security] generated apiToken");
+              rewriteLoadedConfig = true;
+            }
+
+            if (deviceConfig.mode == "gate" || deviceConfig.mode == "production") {
+              DynamicJsonDocument validateDoc(CONFIG_JSON_CAPACITY);
+              buildJson(validateDoc);
+              String validationError;
+              if (!validate(validateDoc.as<JsonVariantConst>(), validationError)) {
+                Serial.printf("[CFG_WARN] unsafe production config: %s\n", validationError.c_str());
+              }
+            }
+          }
+        }
       }
-      Serial.println("CONFIG LOAD FAIL: backup_parse_apply");
-    } else if (LittleFS.exists(CONFIG_BAK_PATH)) {
-      Serial.printf("CONFIG BACKUP FAIL: %s\n", backupErr.c_str());
-    }
-    save(nullptr);
-    return;
-  }
-
-  JsonVariantConst root = doc.as<JsonVariantConst>();
-  if (!root.is<JsonObjectConst>()) {
-    Serial.println("CONFIG LOAD FAIL: root_not_object");
-    resetToDefaults();
-    save(nullptr);
-    return;
-  }
-
-  int version = root["version"] | CONFIG_VERSION;
-  if (version != CONFIG_VERSION) {
-    Serial.printf("CONFIG LOAD FAIL: version_mismatch %d != %d\n", version, CONFIG_VERSION);
-    resetToDefaults();
-    save(nullptr);
-    return;
-  }
-
-  if (!fromJsonVariant(root)) {
-    Serial.println("CONFIG LOAD FAIL: parse_apply");
-    resetToDefaults();
-    save(nullptr);
-    return;
-  }
-
-  Serial.printf("[CFG_LOAD] gate.maxDistance=%.3f gate.totalDistance=%.3f gate.position=%.3f\n",
-                gateConfig.maxDistance, gateConfig.totalDistance, gateConfig.position);
-
-  // If API security is enabled but no token is set, generate a token and persist it.
-  if (securityConfig.enabled && securityConfig.apiToken.length() == 0) {
-    const char* hex = "0123456789abcdef";
-    String t;
-    t.reserve(32);
-    for (int i = 0; i < 32; ++i) {
-      uint32_t r = esp_random();
-      t += hex[r & 0xF];
-    }
-    securityConfig.apiToken = t;
-    Serial.println("[security] generated apiToken");
-    save(nullptr);
-  }
-
-  if (deviceConfig.mode == "gate" || deviceConfig.mode == "production") {
-    DynamicJsonDocument validateDoc(CONFIG_JSON_CAPACITY);
-    buildJson(validateDoc);
-    String validationError;
-    if (!validate(validateDoc.as<JsonVariantConst>(), validationError)) {
-      Serial.printf("[CFG_WARN] unsafe production config: %s\n", validationError.c_str());
     }
   }
+
+  if (abortLoad) return;
+  if (rewriteLoadedConfig) save(nullptr);
 
 }
 
@@ -718,21 +733,11 @@ bool ConfigManager::saveInternal(String* error, bool force) {
     committed = LittleFS.rename(CONFIG_TMP_PATH, CONFIG_PATH);
   } else {
     committed = LittleFS.rename(CONFIG_TMP_PATH, CONFIG_PATH);
-    if (!committed) {
-      // LittleFS may reject unlink/replace when another request still has CONFIG_PATH open.
-      // Fallback to an in-place rewrite to avoid "Has open FD" on remove(CONFIG_PATH).
-      // Rebuild doc because it was cleared/modified by step 2.
-      Serial.printf("[save] rename fallback path errno=%d\n", errno);
-      doc.clear();
-      buildJson(doc);
-      attachDocumentChecksum(doc);
-      committed = writeJsonFile(CONFIG_PATH, doc, &written);
-      LittleFS.remove(CONFIG_TMP_PATH);
-    }
   }
   if (!committed) {
     lastSaveError = "commit_failed";
-    Serial.printf("[save] bytes=%u fail errno=%d\n", (unsigned)written, errno);
+    Serial.printf("[save] bytes=%u commit_failed errno=%d (tmp kept for retry)\n",
+                  (unsigned)written, errno);
     setError(error, lastSaveError.c_str());
     pendingSave = true;
     pendingSaveAtMs = millis();
@@ -1084,6 +1089,7 @@ if (obj.containsKey("motor")) {
       JsonArrayConst items = rem["items"].as<JsonArrayConst>();
       if (!items.isNull()) {
         remotes.clear();
+        bool truncated = false;
         for (JsonObjectConst item : items) {
           RemoteEntry r;
           r.serial = item["serial"] | 0;
@@ -1091,16 +1097,29 @@ if (obj.containsKey("motor")) {
           r.enabled = item["enabled"] | true;
           r.lastCounter = item["lastCounter"] | 0;
           r.lastSeenMs = item["lastSeenMs"] | 0;
-          if (r.serial != 0) remotes.push_back(r);
+          if (!appendRemoteWithLimit(remotes, r)) {
+            truncated = true;
+            break;
+          }
+        }
+        if (truncated) {
+          Serial.printf("[CFG] remotes truncated at %u entries\n", (unsigned)CONFIG_MAX_REMOTES);
         }
       }
     } else if (remVar.is<JsonArrayConst>()) {
       JsonArrayConst arr = remVar.as<JsonArrayConst>();
       remotes.clear();
+      bool truncated = false;
       for (JsonVariantConst v : arr) {
         RemoteEntry r;
         r.serial = v.as<unsigned long>();
-        if (r.serial != 0) remotes.push_back(r);
+        if (!appendRemoteWithLimit(remotes, r)) {
+          truncated = true;
+          break;
+        }
+      }
+      if (truncated) {
+        Serial.printf("[CFG] remotes truncated at %u entries\n", (unsigned)CONFIG_MAX_REMOTES);
       }
     }
   }
@@ -1277,6 +1296,24 @@ bool ConfigManager::validate(JsonVariantConst root, String& error) {
   if (securityEnabled && !isBenchMode(validatedMode) && apiToken.length() == 0) {
     error = "security.apiToken_required_outside_bench";
     return false;
+  }
+
+  if (obj.containsKey("remotes")) {
+    JsonVariantConst remVar = obj["remotes"];
+    size_t remoteCount = 0;
+    if (remVar.is<JsonObjectConst>()) {
+      JsonArrayConst items = remVar["items"].as<JsonArrayConst>();
+      if (!items.isNull()) remoteCount = items.size();
+    } else if (remVar.is<JsonArrayConst>()) {
+      remoteCount = remVar.as<JsonArrayConst>().size();
+    } else if (!remVar.isNull()) {
+      error = "remotes_invalid";
+      return false;
+    }
+    if (remoteCount > CONFIG_MAX_REMOTES) {
+      error = "remotes.too_many";
+      return false;
+    }
   }
 
   if (!isBenchMode(validatedMode) && apFallbackPassword.length() < 8) {
@@ -1758,6 +1795,12 @@ MotionAdvancedConfig ConfigManager::motionProfile() const {
 bool ConfigManager::addRemote(unsigned long serial, const String& name) {
   for (auto& r : remotes) {
     if (r.serial == serial) return false;
+  }
+  if (remotes.size() >= CONFIG_MAX_REMOTES) {
+    lastRemotesSaveOk = false;
+    lastRemotesSaveMs = millis();
+    lastRemotesSaveError = "too_many_remotes";
+    return false;
   }
   RemoteEntry entry;
   entry.serial = serial;

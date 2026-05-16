@@ -361,7 +361,7 @@ function connectWs() {
     message(evt) {
       try {
         const msg = JSON.parse(evt.data);
-        if (msg.type === 'status' && msg.data) {
+        if ((msg.type === 'status' || msg.type === 'status_lite') && msg.data) {
           if (msg.data.remotes && msg.data.remotes.last) {
             updateLastRemote(msg.data.remotes.last);
           }
