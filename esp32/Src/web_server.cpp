@@ -1582,7 +1582,7 @@ void WebServerManager::setupRoutes() {
       stats.lastWsConnectMs = millis();
       noteWsConnect(client);
       if (!statusLiteCb && !statusCb) return;
-      StaticJsonDocument<1792> doc;
+      StaticJsonDocument<1024> doc;
       doc["type"] = statusLiteCb ? "status_lite" : "status";
       JsonObject dataObj = doc.createNestedObject("data");
       if (statusLiteCb) statusLiteCb(dataObj);
@@ -1693,7 +1693,7 @@ void WebServerManager::broadcastJson(const char* json) {
 void WebServerManager::broadcastStatus() {
   if (!statusLiteCb && !statusCb) return;
   if (ws.count() == 0) return;
-  StaticJsonDocument<1792> doc;
+  StaticJsonDocument<1024> doc;
   doc["type"] = statusLiteCb ? "status_lite" : "status";
   JsonObject data = doc.createNestedObject("data");
   if (statusLiteCb) statusLiteCb(data);

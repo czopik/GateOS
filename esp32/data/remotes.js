@@ -13,7 +13,7 @@ const wsManager = core.createWebSocketManager({
   cooldownMs: 30000,
   maxRapidFailures: 3,
   heartbeatIntervalMs: 15000,
-  staleTimeoutMs: 45000,
+  staleTimeoutMs: 90000,
 });
 const ui = {
   learnToggle: document.getElementById('learnToggle'),

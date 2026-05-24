@@ -878,6 +878,18 @@
                 <small class="field-note">Jesli ustawiony, ten adres ma pierwszenstwo dla API, WebSocket i modulow UI. Zostaw puste, aby uzyc biezacego origin.</small>
               </div>
               <div class="field">
+                <label>Lokalny URL snapshotu kamery</label>
+                <input id="cameraSnapshotUrl" type="url" placeholder="http://kamera.local/shot.jpg">
+                <small class="field-note">Zapisywane tylko lokalnie w tej przegladarce. Karta Sterowanie uzyje tego adresu do podgladu kamery.</small>
+              </div>
+              <div class="field">
+                <label>Podglad kamery</label>
+                <div class="section-actions" style="margin-top:0">
+                  <button class="btn ghost" id="cameraSnapshotSaveBtn" type="button">Zapisz lokalnie</button>
+                  <button class="btn ghost" id="cameraSnapshotClearBtn" type="button">Wyczysc</button>
+                </div>
+              </div>
+              <div class="field">
                 <label>Haslo OTA</label>
                 <input type="password" data-path="ota.password">
               </div>

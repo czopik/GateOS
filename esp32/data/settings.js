@@ -1,4 +1,5 @@
 const tokenKey = 'apiToken';
+const cameraUrlKey = 'gateos.camera.snapshotUrl';
 const core = window.GateOSWeb;
 const logger = core.createLogger('settings');
 const apiClient = core.createApiClient({ tokenKey, logger: core.createLogger('settings-api'), defaultTimeoutMs: 3000 });
@@ -22,6 +23,9 @@ const motionDerived = document.getElementById('motionDerived');
 const motionOpenBtn = document.getElementById('motionOpenBtn');
 const motionStopBtn = document.getElementById('motionStopBtn');
 const motionCloseBtn = document.getElementById('motionCloseBtn');
+const cameraSnapshotInput = document.getElementById('cameraSnapshotUrl');
+const cameraSnapshotSaveBtn = document.getElementById('cameraSnapshotSaveBtn');
+const cameraSnapshotClearBtn = document.getElementById('cameraSnapshotClearBtn');
 const statusEls = {
   limitOpenStatus: document.getElementById('limitOpenStatus'),
   limitCloseStatus: document.getElementById('limitCloseStatus'),
@@ -118,6 +122,24 @@ function showToast(message) {
   toast.textContent = message;
   toast.className = 'toast show';
   setTimeout(() => toast.className = 'toast', 2400);
+}
+
+function getLocalCameraSnapshotUrl() {
+  try {
+    return localStorage.getItem(cameraUrlKey) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setLocalCameraSnapshotUrl(value) {
+  try {
+    if (value) {
+      localStorage.setItem(cameraUrlKey, value);
+    } else {
+      localStorage.removeItem(cameraUrlKey);
+    }
+  } catch {}
 }
 
 function redirectToPort(newPort) {
@@ -773,6 +795,29 @@ function revealSectionFromHash() {
   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+function bindLocalCameraSettings() {
+  if (!cameraSnapshotInput || !cameraSnapshotSaveBtn || !cameraSnapshotClearBtn) return;
+
+  const saveLocalCameraUrl = () => {
+    const value = (cameraSnapshotInput.value || '').trim();
+    setLocalCameraSnapshotUrl(value);
+    showToast(value ? 'URL kamery zapisany lokalnie' : 'URL kamery usuniety');
+  };
+
+  cameraSnapshotInput.value = getLocalCameraSnapshotUrl();
+  cameraSnapshotSaveBtn.addEventListener('click', saveLocalCameraUrl);
+  cameraSnapshotClearBtn.addEventListener('click', () => {
+    cameraSnapshotInput.value = '';
+    setLocalCameraSnapshotUrl('');
+    showToast('URL kamery usuniety');
+  });
+  cameraSnapshotInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    saveLocalCameraUrl();
+  });
+}
+
 function setupListeners() {
   inputs.forEach(input => {
     const path = input.dataset.path;
@@ -1013,6 +1058,7 @@ window.addEventListener('load', async () => {
   setupAccordion();
   window.addEventListener('hashchange', revealSectionFromHash);
   setupListeners();
+  bindLocalCameraSettings();
   loadConfig();
   loadStatus();
   startStatusPollingOnce();

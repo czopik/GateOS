@@ -14,7 +14,7 @@ const wsManager = core.createWebSocketManager({
   cooldownMs: 30000,
   maxRapidFailures: 3,
   heartbeatIntervalMs: 15000,
-  staleTimeoutMs: 45000,
+  staleTimeoutMs: 90000,
 });
 const scheduleLiteRender = core.createRafBatcher((data) => updateStatusLite(data));
 const scheduleFullRender = core.createRafBatcher((data) => {

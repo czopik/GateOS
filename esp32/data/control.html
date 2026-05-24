@@ -24,59 +24,32 @@
     }
 
     .control-app-shell{
-      width:min(100%, 1120px);
+      width:min(100%, 920px);
       margin:0 auto;
-      padding:24px 16px calc(28px + var(--safe-bottom));
+      padding:18px 16px calc(28px + var(--safe-bottom));
       display:grid;
-      grid-template-columns:minmax(0, 1.08fr) minmax(320px, 0.92fr);
-      gap:20px;
-      align-items:start;
-    }
-
-    .control-primary,
-    .control-secondary{
-      display:grid;
-      gap:20px;
+      gap:14px;
+      align-content:start;
     }
 
     .control-card{
       background:rgba(11,18,30,0.82);
       border:1px solid rgba(255,255,255,0.12);
       border-radius:26px;
-      padding:18px;
       box-shadow:0 24px 60px rgba(0,0,0,0.32);
       backdrop-filter:blur(16px);
     }
 
-    .camera-card-head,
-    .status-card-head{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:14px;
-    }
-
-    .camera-kicker,
-    .eyebrow{
-      margin:0 0 6px;
-      font-size:12px;
-      font-weight:700;
-      letter-spacing:0.08em;
-      color:var(--muted);
-      text-transform:uppercase;
-    }
-
-    .camera-card h2,
-    .status-card h2{
-      margin:0;
-      font-size:22px;
+    .camera-card{
+      padding:10px;
+      min-height:220px;
     }
 
     .camera-frame{
       position:relative;
       width:100%;
-      aspect-ratio:16 / 9;
-      margin-top:14px;
+      height:min(42dvh, 420px);
+      min-height:200px;
       border-radius:22px;
       overflow:hidden;
       background:
@@ -85,33 +58,20 @@
       border:1px solid rgba(255,255,255,0.08);
     }
 
-    .camera-frame img{
-      width:100%;
-      height:100%;
-      object-fit:cover;
-      display:none;
-    }
-
+    .camera-frame img,
     .camera-frame iframe{
       width:100%;
       height:100%;
       border:0;
       display:none;
+      object-fit:cover;
       background:rgba(8,14,24,0.92);
     }
 
-    .camera-frame.has-image img{
-      display:block;
-    }
-
+    .camera-frame.has-image img{display:block}
+    .camera-frame.has-embed iframe{display:block}
     .camera-frame.has-image .camera-empty,
-    .camera-frame.has-embed .camera-empty{
-      display:none;
-    }
-
-    .camera-frame.has-embed iframe{
-      display:block;
-    }
+    .camera-frame.has-embed .camera-empty{display:none}
 
     .camera-empty{
       position:absolute;
@@ -130,84 +90,19 @@
       font-size:18px;
     }
 
-    .camera-actions{
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      margin-top:14px;
+    .status-card{
+      padding:14px 16px;
     }
 
-    .camera-actions .btn,
-    .camera-config .btn{
-      min-height:44px;
-      padding:12px 16px;
-    }
-
-    .camera-actions .btn.is-disabled{
-      opacity:0.45;
-      pointer-events:none;
-    }
-
-    .camera-config{
-      margin-top:14px;
-    }
-
-    .camera-config .info-row{
-      margin-top:12px;
-      margin-bottom:0;
-      line-height:1.5;
-      align-items:flex-start;
-    }
-
-    .status-card-head{
-      align-items:stretch;
-    }
-
-    .state-label{
-      font-size:clamp(20px, 3.4vw, 30px);
-      font-weight:800;
-      text-transform:uppercase;
-      letter-spacing:0.08em;
-      line-height:1.05;
-      margin-top:4px;
-    }
-
-    .state-label.opening{color:var(--accent)}
-    .state-label.closing{color:var(--warn)}
-    .state-label.stopped,.state-label.idle{color:var(--muted)}
-    .state-label.open{color:var(--success)}
-    .state-label.closed{color:var(--text)}
-    .state-label.error{color:var(--danger)}
-
-    .opening-panel{
-      min-width:124px;
-      padding:12px 14px;
-      border-radius:18px;
-      background:rgba(255,255,255,0.04);
-      border:1px solid rgba(255,255,255,0.08);
+    .gate-progress-shell{
       display:grid;
-      gap:4px;
-      text-align:right;
+      grid-template-columns:18px minmax(0, 1fr) 18px;
+      gap:10px;
+      align-items:center;
     }
 
-    .opening-label{
-      font-size:12px;
-      font-weight:700;
-      letter-spacing:0.06em;
-      text-transform:uppercase;
-      color:var(--muted);
-    }
-
-    .opening-value{
-      font-size:clamp(28px, 5vw, 44px);
-      font-weight:800;
-      line-height:1;
-      letter-spacing:-0.04em;
-      color:var(--text);
-    }
-
-    .status-summary{
-      margin:16px 0 14px;
+    .gate-progress-track{
+      min-width:0;
     }
 
     .progress-arc{
@@ -216,7 +111,6 @@
       border-radius:999px;
       background:rgba(255,255,255,0.08);
       overflow:hidden;
-      margin-top:6px;
     }
 
     .progress-arc-fill{
@@ -227,51 +121,27 @@
       border-radius:999px;
     }
 
-    .opening-copy{
-      margin-top:10px;
-      font-size:13px;
-      color:var(--muted);
-      line-height:1.45;
+    .limit-indicator{
+      width:18px;
+      height:18px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(255,255,255,0.08);
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,0.04);
+      transition:background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
     }
 
-    .status-tiles{
-      display:grid;
-      grid-template-columns:repeat(3, minmax(0, 1fr));
-      gap:10px;
-      margin-top:16px;
+    .limit-indicator.is-active{
+      background:var(--success);
+      border-color:rgba(99,230,165,0.95);
+      box-shadow:0 0 0 7px rgba(99,230,165,0.14);
+      transform:scale(1.02);
     }
-
-    .status-tile{
-      padding:14px 12px;
-      border-radius:20px;
-      background:rgba(255,255,255,0.04);
-      border:1px solid rgba(255,255,255,0.08);
-      display:grid;
-      gap:8px;
-    }
-
-    .status-tile span{
-      font-size:12px;
-      font-weight:700;
-      letter-spacing:0.06em;
-      text-transform:uppercase;
-      color:var(--muted);
-    }
-
-    .status-tile strong{
-      font-size:clamp(20px, 3vw, 28px);
-      line-height:1;
-      color:var(--text);
-    }
-
-    .status-tile strong[data-tone="good"]{color:var(--success)}
-    .status-tile strong[data-tone="warn"]{color:var(--warn)}
-    .status-tile strong[data-tone="danger"]{color:var(--danger)}
-    .status-tile strong[data-tone="info"]{color:var(--accent-2)}
 
     .action-card{
+      padding:16px;
       display:grid;
-      gap:14px;
+      gap:10px;
     }
 
     .hold-hint{
@@ -285,7 +155,7 @@
 
     .hold-button{
       width:100%;
-      min-height:110px;
+      min-height:102px;
       border-radius:30px;
       border:1px solid rgba(255,255,255,0.1);
       background:
@@ -298,7 +168,6 @@
       gap:16px;
       padding:16px 18px;
       cursor:pointer;
-      position:relative;
       text-align:left;
       transition:transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, opacity 160ms ease;
       -webkit-tap-highlight-color:transparent;
@@ -313,6 +182,7 @@
       opacity:0.45;
       cursor:not-allowed;
       box-shadow:none;
+      transform:none;
     }
 
     .hold-button.is-holding{
@@ -326,6 +196,11 @@
       box-shadow:0 0 0 14px rgba(61,217,182,0.12), 0 24px 70px rgba(61,217,182,0.22);
     }
 
+    .hold-button.is-sending{
+      border-color:rgba(90,169,255,0.96);
+      box-shadow:0 0 0 12px rgba(90,169,255,0.14), 0 24px 70px rgba(90,169,255,0.18);
+    }
+
     .hold-button.moving{
       border-color:rgba(244,195,92,0.92);
     }
@@ -336,9 +211,9 @@
     }
 
     .hold-button-track{
-      --track-width:116px;
-      --track-height:60px;
-      --thumb-size:48px;
+      --track-width:112px;
+      --track-height:58px;
+      --thumb-size:46px;
       flex:0 0 auto;
       width:var(--track-width);
       height:var(--track-height);
@@ -376,11 +251,16 @@
       color:#2b0f0f;
     }
 
+    .hold-button.is-sending .hold-button-thumb{
+      background:linear-gradient(135deg, #78b4ff, #5aa9ff);
+      color:#081a2c;
+    }
+
     .hold-button-copy{
       min-width:0;
       flex:1;
       display:grid;
-      gap:6px;
+      gap:5px;
     }
 
     .hold-icon{
@@ -389,7 +269,7 @@
     }
 
     .hold-title{
-      font-size:clamp(28px, 4vw, 38px);
+      font-size:clamp(24px, 4vw, 36px);
       font-weight:800;
       line-height:1;
       text-transform:uppercase;
@@ -398,79 +278,9 @@
 
     .hold-subtitle{
       font-size:13px;
-      line-height:1.45;
+      line-height:1.35;
       color:var(--muted);
       max-width:320px;
-    }
-
-    .quick-metrics,
-    .details-grid{
-      display:grid;
-      grid-template-columns:repeat(3,1fr);
-      gap:10px;
-      width:100%;
-    }
-
-    .metric-pill{
-      padding:12px 10px;
-      border-radius:18px;
-      background:rgba(255,255,255,0.04);
-      border:1px solid rgba(255,255,255,0.08);
-      display:grid;
-      gap:8px;
-      text-align:center;
-    }
-
-    .metric-pill span{
-      font-size:11px;
-      font-weight:700;
-      letter-spacing:0.05em;
-      text-transform:uppercase;
-      color:var(--muted);
-    }
-
-    .metric-pill strong{
-      font-size:18px;
-      color:var(--text);
-      font-weight:700;
-    }
-
-    .details-card{
-      padding:18px;
-    }
-
-    .details-card > summary{
-      cursor:pointer;
-      list-style:none;
-      font-size:14px;
-      font-weight:700;
-      color:var(--text);
-    }
-
-    .details-card > summary::-webkit-details-marker{display:none}
-
-    .details-card > summary::after{
-      content:'Rozwin';
-      float:right;
-      color:var(--muted);
-      font-size:12px;
-      font-weight:600;
-      text-transform:uppercase;
-      letter-spacing:0.05em;
-    }
-
-    .details-card[open] > summary::after{content:'Zwin'}
-
-    .details-card .details-grid,
-    .details-card .status-bar{
-      margin-top:16px;
-    }
-
-    .details-card .status-bar{
-      width:100%;
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
     }
 
     .toast{
@@ -486,46 +296,33 @@
     @media (max-width:900px){
       .control-topbar{display:none}
 
+      body.control-mobile{
+        overflow:hidden;
+      }
+
       .control-app-shell{
         width:100%;
         min-height:100dvh;
-        grid-template-columns:1fr;
-        gap:12px;
-        padding:calc(12px + var(--safe-top)) 12px calc(94px + var(--safe-bottom));
+        height:100dvh;
+        padding:calc(12px + var(--safe-top)) 12px calc(92px + var(--safe-bottom));
+        overflow:hidden;
       }
 
-      .control-primary,
-      .control-secondary{
-        gap:12px;
+      .camera-card{
+        min-height:0;
       }
 
-      .control-card{
-        padding:16px;
-        border-radius:24px;
+      .camera-frame{
+        height:clamp(180px, 34dvh, 272px);
+        min-height:180px;
       }
 
-      .camera-card-head,
-      .status-card-head{
-        gap:12px;
-      }
-
-      .status-card-head{
-        align-items:flex-end;
-      }
-
-      .opening-panel{
-        min-width:110px;
-        padding:10px 12px;
-      }
-
-      .status-tiles,
-      .quick-metrics,
-      .details-grid{
-        gap:8px;
+      .status-card{
+        padding:12px 14px;
       }
 
       .hold-button{
-        min-height:98px;
+        min-height:92px;
         padding:14px 16px;
         gap:14px;
       }
@@ -534,10 +331,6 @@
         --track-width:104px;
         --track-height:56px;
         --thumb-size:44px;
-      }
-
-      .details-grid{
-        grid-template-columns:repeat(2, minmax(0, 1fr));
       }
 
       .mobile-tabbar{
@@ -587,48 +380,15 @@
     }
 
     @media (max-width:520px){
-      .camera-card h2,
-      .status-card h2{
-        font-size:18px;
-      }
-
-      .status-card-head{
-        align-items:flex-start;
-      }
-
-      .opening-panel{
-        min-width:96px;
-      }
-
-      .opening-value{
-        font-size:32px;
-      }
-
-      .status-tiles,
-      .quick-metrics{
-        grid-template-columns:repeat(3, minmax(0, 1fr));
-      }
-
-      .details-grid{
-        grid-template-columns:repeat(2, minmax(0, 1fr));
-      }
-
-      .status-tile,
-      .metric-pill{
-        padding:12px 8px;
-      }
-
-      .status-tile strong,
-      .metric-pill strong{
-        font-size:16px;
+      .camera-frame{
+        height:clamp(168px, 31dvh, 224px);
       }
 
       .hold-title{
-        font-size:18px;
+        font-size:20px;
       }
 
-      .hold-subtitle,
-      .opening-copy{
+      .hold-subtitle{
         font-size:12px;
       }
     }
@@ -651,145 +411,59 @@
   </header>
 
   <main class="control-app-shell">
-    <div class="control-primary">
-      <section class="control-card camera-card" id="cameraCard">
-        <div class="camera-card-head">
-          <div>
-            <p class="camera-kicker">Kamera opcjonalna</p>
-            <h2>Podglad kamery</h2>
-          </div>
-          <span class="status-pill neutral" id="cameraBadge">BRAK URL</span>
+    <section class="control-card camera-card" id="cameraCard">
+      <div class="camera-frame" id="cameraFrame">
+        <img id="cameraImage" alt="Podglad kamery" loading="lazy" referrerpolicy="no-referrer">
+        <iframe id="cameraEmbed" title="Podglad kamery" loading="lazy" referrerpolicy="no-referrer" allow="fullscreen"></iframe>
+        <div class="camera-empty" id="cameraEmpty">
+          <strong id="cameraEmptyTitle">Brak obrazu kamery</strong>
+          <p id="cameraEmptyText">Ustaw lokalny URL snapshotu w Ustawieniach.</p>
         </div>
+      </div>
+    </section>
 
-        <div class="camera-frame" id="cameraFrame">
-          <img id="cameraImage" alt="Podglad kamery" loading="lazy" referrerpolicy="no-referrer">
-          <iframe id="cameraEmbed" title="Podglad kamery" loading="lazy" referrerpolicy="no-referrer" allow="fullscreen"></iframe>
-          <div class="camera-empty" id="cameraEmpty">
-            <strong id="cameraEmptyTitle">Dodaj lokalny URL snapshotu</strong>
-            <p id="cameraEmptyText">Wklej bezposredni adres JPG lub PNG. Ten adres jest zapisywany tylko lokalnie w tej przegladarce.</p>
-          </div>
-        </div>
+    <section class="control-card status-card">
+      <div class="sr-only">
+        <div class="state-label" id="stateLabel">--</div>
+        <span class="status-pill ok" id="safetyBadge">OK</span>
+        <span class="status-pill neutral" id="controlBadge">Sterowanie: dozwolone</span>
+        <span id="posPct">--</span>
+        <span id="liveValue">--</span>
+      </div>
 
-        <div class="camera-actions">
-          <a class="btn ghost is-disabled" id="cameraOpenLink" href="#" target="_blank" rel="noreferrer noopener">Otworz kamerę w nowej karcie</a>
-          <button class="btn ghost" id="cameraRefreshBtn" type="button">Odswiez</button>
-        </div>
-
-        <details class="advanced camera-config" id="cameraConfig">
-          <summary>Skonfiguruj lokalny URL snapshotu</summary>
-          <div class="field" style="margin-top:14px">
-            <label for="cameraUrlInput">URL snapshotu kamery (JPEG / PNG, localStorage only)</label>
-            <input id="cameraUrlInput" type="url" placeholder="np. http://kamera.local/shot.jpg">
-            <small class="field-note">Dla zwyklego snapshotu JPEG karta odswieza obraz lokalnie co kilka sekund. Jesli w URL jest login i haslo, beda widoczne lokalnie w tej przegladarce.</small>
-          </div>
-          <div class="section-actions">
-            <button class="btn primary" id="cameraSaveBtn" type="button">Zapisz i odswiez</button>
-            <button class="btn ghost" id="cameraClearBtn" type="button">Wyczysc</button>
-          </div>
-          <div class="info-row">ESP32 nie robi proxy obrazu. Ta karta laduje snapshot bezposrednio w przegladarce i odswieza go lokalnie.</div>
-        </details>
-      </section>
-
-      <section class="control-card status-card">
-        <div class="status-card-head">
-          <div>
-            <p class="eyebrow">Stan bramy</p>
-            <div class="state-label" id="stateLabel">--</div>
-          </div>
-          <div class="opening-panel">
-            <span class="opening-label">Otwarcie</span>
-            <span class="opening-value" id="posPct">--</span>
+      <div class="gate-progress-shell" aria-label="Pozycja bramy i stan krancowek">
+        <span class="limit-indicator" id="limitCloseValue" aria-label="Krancowka zamkniecia nieaktywna"></span>
+        <div class="gate-progress-track">
+          <div class="progress-arc" aria-label="Otwarcie bramy">
+            <div class="progress-arc-fill" id="progressFill"></div>
           </div>
         </div>
+        <span class="limit-indicator" id="limitOpenValue" aria-label="Krancowka otwarcia nieaktywna"></span>
+      </div>
+    </section>
 
-        <div class="status-summary">
-          <span class="status-pill ok" id="safetyBadge">OK</span>
-          <span class="status-pill neutral" id="controlBadge">Sterowanie: dozwolone</span>
-        </div>
+    <section class="control-card action-card">
+      <p class="hold-hint" id="holdHint">Przytrzymaj 1 s, aby aktywowac</p>
 
-        <div class="progress-arc" aria-label="Otwarcie bramy">
-          <div class="progress-arc-fill" id="progressFill"></div>
-        </div>
-
-        <div class="opening-copy">Otwarcie liczone jest jako 0% zamknieta, 100% otwarta.</div>
-
-        <div class="status-tiles">
-          <div class="status-tile">
-            <span>Otwarcie</span>
-            <strong id="limitOpenValue">--</strong>
-          </div>
-          <div class="status-tile">
-            <span>Zamkniecie</span>
-            <strong id="limitCloseValue">--</strong>
-          </div>
-          <div class="status-tile">
-            <span>Tryb</span>
-            <strong id="liveValue">--</strong>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <div class="control-secondary">
-      <section class="control-card action-card">
-        <p class="hold-hint" id="holdHint">Przytrzymaj kciukiem, aby aktywowac</p>
-
-        <button class="hold-button" id="toggleBtn" aria-label="Otworz lub zamknij brame">
-          <span class="hold-button-track" aria-hidden="true">
-            <span class="hold-button-thumb">
-              <svg class="hold-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M14 46V20l10-8h16l10 8v26"/>
-                <path d="M24 46V22"/>
-                <path d="M32 46V22"/>
-                <path d="M40 46V22"/>
-                <path d="M48 46V22"/>
-                <path d="M14 30h36"/>
-              </svg>
-            </span>
+      <button class="hold-button" id="toggleBtn" aria-label="Otworz lub zamknij brame">
+        <span class="hold-button-track" aria-hidden="true">
+          <span class="hold-button-thumb">
+            <svg class="hold-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 46V20l10-8h16l10 8v26"/>
+              <path d="M24 46V22"/>
+              <path d="M32 46V22"/>
+              <path d="M40 46V22"/>
+              <path d="M48 46V22"/>
+              <path d="M14 30h36"/>
+            </svg>
           </span>
-          <span class="hold-button-copy">
-            <span class="hold-title" id="toggleTitle">Otworz</span>
-            <span class="hold-subtitle" id="holdStateText">Po 0,5 s wysle TOGGLE</span>
-          </span>
-        </button>
-      </section>
-
-      <details class="control-card details-card">
-        <summary>Wiecej danych na zywo</summary>
-        <div class="details-grid">
-          <div class="metric-pill">
-            <span>Bateria</span>
-            <strong id="mBat">--</strong>
-          </div>
-          <div class="metric-pill">
-            <span>Prad</span>
-            <strong id="mCurrent">--</strong>
-          </div>
-          <div class="metric-pill">
-            <span>RPM</span>
-            <strong id="mRpm">--</strong>
-          </div>
-          <div class="metric-pill">
-            <span>Dystans</span>
-            <strong id="mDist">--</strong>
-          </div>
-          <div class="metric-pill">
-            <span>ARM</span>
-            <strong id="mArmed">--</strong>
-          </div>
-          <div class="metric-pill">
-            <span>Fault</span>
-            <strong id="mFault">--</strong>
-          </div>
-        </div>
-
-        <div class="status-bar">
-          <span class="chip" id="cWifi">WiFi: --</span>
-          <span class="chip" id="cLimO">OPEN: --</span>
-          <span class="chip" id="cLimC">CLOSE: --</span>
-        </div>
-      </details>
-    </div>
+        </span>
+        <span class="hold-button-copy">
+          <span class="hold-title" id="toggleTitle">Otworz</span>
+          <span class="hold-subtitle" id="holdStateText">Przytrzymaj 1 s, aby wyslac sygnal</span>
+        </span>
+      </button>
+    </section>
   </main>
 
   <nav class="mobile-tabbar" aria-label="Szybka nawigacja">
@@ -821,6 +495,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="/webui-core.js?v=20260515b"></script>
-  <script src="/control.js?v=20260515d"></script>
+  <script src="/control.js?v=20260516e"></script>
 </body>
 </html>

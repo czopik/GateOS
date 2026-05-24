@@ -4,10 +4,18 @@ const tokenKey = 'apiToken';
 const cameraUrlKey = 'gateos.camera.snapshotUrl';
 const snapshotRefreshMs = 5000;
 const litePollMs = 1250;
-const wsReconnectBaseMs = 3000;
-const wsReconnectMaxMs = 30000;
-const wsReconnectCooldownMs = 30000;
-const maxWsFailuresBeforeCooldown = 3;
+const wsManager = core.createWebSocketManager({
+  key: 'gateos-control-ws',
+  path: '/ws',
+  tokenKey,
+  logger: core.createLogger('control-ws'),
+  baseDelayMs: 3000,
+  maxDelayMs: 30000,
+  cooldownMs: 30000,
+  maxRapidFailures: 3,
+  heartbeatIntervalMs: 15000,
+  staleTimeoutMs: 90000,
+});
 
 const ui = {
   stateLabel: qs('stateLabel'),
@@ -22,28 +30,12 @@ const ui = {
   toggleTitle: qs('toggleTitle'),
   holdHint: qs('holdHint'),
   holdStateText: qs('holdStateText'),
-  mBat: qs('mBat'),
-  mCurrent: qs('mCurrent'),
-  mRpm: qs('mRpm'),
-  mDist: qs('mDist'),
-  mArmed: qs('mArmed'),
-  mFault: qs('mFault'),
-  cWifi: qs('cWifi'),
-  cLimO: qs('cLimO'),
-  cLimC: qs('cLimC'),
   cameraFrame: qs('cameraFrame'),
   cameraImage: qs('cameraImage'),
   cameraEmbed: qs('cameraEmbed'),
   cameraEmpty: qs('cameraEmpty'),
   cameraEmptyTitle: qs('cameraEmptyTitle'),
   cameraEmptyText: qs('cameraEmptyText'),
-  cameraBadge: qs('cameraBadge'),
-  cameraUrlInput: qs('cameraUrlInput'),
-  cameraSaveBtn: qs('cameraSaveBtn'),
-  cameraClearBtn: qs('cameraClearBtn'),
-  cameraRefreshBtn: qs('cameraRefreshBtn'),
-  cameraOpenLink: qs('cameraOpenLink'),
-  cameraConfig: qs('cameraConfig'),
   toast: qs('toast'),
 };
 
@@ -53,7 +45,7 @@ const state = {
   currentFaultSeverity: 'none',
   posPercent: 0,
   toggleBusy: false,
-  touchHoldEnabled: false,
+  touchFeedback: false,
   holdTimer: null,
   holdTriggered: false,
   holdPointerId: null,
@@ -61,12 +53,7 @@ const state = {
   cameraRefreshTimer: null,
   cameraPreviewMode: 'none',
   cameraLoadTimer: null,
-  ws: null,
   wsConnected: false,
-  wsFailureCount: 0,
-  wsReconnectDelayMs: wsReconnectBaseMs,
-  wsReconnectTimer: null,
-  wsOpenedAt: 0,
   statusLiteTimer: null,
 };
 
@@ -74,20 +61,8 @@ function getToken() {
   return localStorage.getItem(tokenKey) || '';
 }
 
-function detectTouchHoldMode() {
-  const mobileWidth = window.matchMedia('(max-width: 900px)').matches;
-  const touchCapable = navigator.maxTouchPoints > 0 || window.matchMedia('(any-pointer: coarse)').matches;
-  return mobileWidth && touchCapable;
-}
-
-function safeLocalStorageSet(key, value) {
-  try {
-    if (value) {
-      localStorage.setItem(key, value);
-    } else {
-      localStorage.removeItem(key);
-    }
-  } catch {}
+function detectTouchFeedback() {
+  return navigator.maxTouchPoints > 0 || window.matchMedia('(any-pointer: coarse)').matches;
 }
 
 function safeLocalStorageGet(key) {
@@ -112,7 +87,9 @@ async function apiFetch(path, options = {}) {
 function showToast(msg, type = 'info') {
   ui.toast.textContent = msg;
   ui.toast.className = `toast show ${type}`;
-  setTimeout(() => { ui.toast.className = 'toast'; }, 2600);
+  setTimeout(() => {
+    ui.toast.className = 'toast';
+  }, 2600);
 }
 
 function setText(el, value, fallback = '-') {
@@ -121,30 +98,8 @@ function setText(el, value, fallback = '-') {
   if (el.textContent !== next) el.textContent = next;
 }
 
-function setTone(el, tone) {
-  if (!el) return;
-  if (tone) {
-    el.dataset.tone = tone;
-  } else {
-    delete el.dataset.tone;
-  }
-}
-
-function setChip(el, text, cls) {
-  if (!el) return;
-  setText(el, text);
-  el.classList.remove('success', 'warn', 'danger');
-  if (cls) el.classList.add(cls);
-}
-
 function isMoving(stateName) {
   return stateName === 'opening' || stateName === 'closing';
-}
-
-function gateIsMostlyOpen() {
-  if (state.currentState === 'open' || state.currentState === 'opening') return true;
-  if (state.currentState === 'closed' || state.currentState === 'closing') return false;
-  return state.posPercent >= 50;
 }
 
 function normalizeFaultSeverity(severity, gateState = '') {
@@ -153,61 +108,20 @@ function normalizeFaultSeverity(severity, gateState = '') {
   return gateState === 'error' ? 'fatal_fault' : 'none';
 }
 
-function faultSeverityLabel(severity) {
-  switch (normalizeFaultSeverity(severity)) {
-    case 'warning':
-      return 'WARNING';
-    case 'soft_fault':
-      return 'SOFT_FAULT';
-    case 'fatal_fault':
-      return 'FATAL_FAULT';
-    default:
-      return '';
-  }
-}
-
-function safetyBadgeLabel(severity) {
-  const normalized = normalizeFaultSeverity(severity);
-  return normalized === 'none' ? 'OK' : faultSeverityLabel(normalized);
-}
-
-function safetyBadgeClass(severity) {
-  switch (normalizeFaultSeverity(severity)) {
-    case 'warning':
-      return 'warn';
-    case 'soft_fault':
-      return 'soft';
-    case 'fatal_fault':
-      return 'fatal';
-    case 'none':
-    default:
-      return 'ok';
-  }
-}
-
 function isFatalFault(severity) {
   return normalizeFaultSeverity(severity) === 'fatal_fault';
 }
 
-function updateSafetyBadge(severity) {
-  ui.safetyBadge.textContent = safetyBadgeLabel(severity);
-  ui.safetyBadge.className = `status-pill ${safetyBadgeClass(severity)}`;
-}
-
-function updateControlBadge() {
-  const blocked = isFatalFault(state.currentFaultSeverity);
-  ui.controlBadge.textContent = `Sterowanie: ${blocked ? 'zablokowane' : 'dozwolone'}`;
-  ui.controlBadge.className = `status-pill ${blocked ? 'fatal' : 'neutral'}`;
-}
-
-function formatStateLabel(stateLabel, severity) {
-  const faultLabel = faultSeverityLabel(severity);
-  return faultLabel ? `${stateLabel} / ${faultLabel}` : stateLabel;
+function gateIsMostlyOpen() {
+  if (state.currentState === 'open' || state.currentState === 'opening') return true;
+  if (state.currentState === 'closed' || state.currentState === 'closing') return false;
+  return state.posPercent >= 50;
 }
 
 function updateActionCopy() {
   const blocked = isFatalFault(state.currentFaultSeverity);
   const mostlyOpen = gateIsMostlyOpen();
+  const moving = isMoving(state.currentState);
 
   ui.toggleBtn.classList.toggle('is-on', mostlyOpen);
   ui.toggleBtn.classList.toggle('is-off', !mostlyOpen);
@@ -219,50 +133,19 @@ function updateActionCopy() {
     return;
   }
 
-  const moving = isMoving(state.currentState);
   setText(ui.toggleTitle, moving ? 'STOP' : (mostlyOpen ? 'Zamknij' : 'Otworz'));
+  setText(ui.holdHint, 'Przytrzymaj 1 s, aby aktywowac');
+  setText(ui.holdStateText, moving ? 'Przytrzymaj 1 s, aby wyslac STOP' : 'Przytrzymaj 1 s, aby wyslac sygnal');
+}
 
-  if (state.touchHoldEnabled) {
-    setText(ui.holdHint, moving
-      ? 'Przytrzymaj kciukiem, aby zatrzymac'
-      : (mostlyOpen ? 'Przytrzymaj kciukiem, aby zamknac' : 'Przytrzymaj kciukiem, aby otworzyc'));
-    setText(ui.holdStateText, moving ? 'Po 0,5 s wysle STOP' : 'Po 0,5 s wysle TOGGLE');
-  } else {
-    setText(ui.holdHint, moving ? 'Kliknij, aby zatrzymac' : (mostlyOpen ? 'Kliknij, aby zamknac' : 'Kliknij, aby otworzyc'));
-    setText(ui.holdStateText, moving ? 'Przycisk wysle STOP' : 'Przycisk wysle TOGGLE');
+function updateLimitIndicators(limitOpen, limitClose) {
+  if (ui.limitOpenValue) {
+    ui.limitOpenValue.classList.toggle('is-active', limitOpen);
+    ui.limitOpenValue.setAttribute('aria-label', limitOpen ? 'Krancowka otwarcia aktywna' : 'Krancowka otwarcia nieaktywna');
   }
-}
-
-function updateLiveValue(isLive) {
-  setText(ui.liveValue, isLive ? 'LIVE' : 'OFFLINE');
-  setTone(ui.liveValue, isLive ? 'good' : 'muted');
-}
-
-function updateLimitTiles(limitOpen, limitClose) {
-  setText(ui.limitOpenValue, limitOpen ? 'OK' : 'NIE');
-  setTone(ui.limitOpenValue, limitOpen ? 'good' : 'warn');
-  setText(ui.limitCloseValue, limitClose ? 'OK' : 'NIE');
-  setTone(ui.limitCloseValue, limitClose ? 'good' : 'warn');
-}
-
-function updateTelemetry(hb = {}, faultSeverity = 'none') {
-  setText(ui.mBat, hb.batV && hb.batV > 0 ? `${hb.batV.toFixed(1)}V` : '--');
-  setText(ui.mCurrent, typeof hb.iA === 'number' && hb.iA >= 0 ? `${hb.iA.toFixed(1)}A` : '--');
-  setText(ui.mRpm, typeof hb.rpm === 'number' ? `${hb.rpm}` : '--');
-  const dist = typeof hb.dist_mm === 'number' && hb.dist_mm >= 0
-    ? (hb.dist_mm >= 1000 ? `${(hb.dist_mm / 1000).toFixed(2)}m` : `${hb.dist_mm}mm`)
-    : '--';
-  setText(ui.mDist, dist);
-  const armed = hb.armed ? 'ON' : 'OFF';
-  setText(ui.mArmed, armed);
-  setTone(ui.mArmed, hb.armed ? 'good' : 'muted');
-
-  if (typeof hb.fault === 'number' && hb.fault > 0) {
-    setText(ui.mFault, `${hb.fault}`);
-    setTone(ui.mFault, 'danger');
-  } else {
-    setText(ui.mFault, safetyBadgeLabel(faultSeverity));
-    setTone(ui.mFault, normalizeFaultSeverity(faultSeverity) === 'none' ? 'good' : 'warn');
+  if (ui.limitCloseValue) {
+    ui.limitCloseValue.classList.toggle('is-active', limitClose);
+    ui.limitCloseValue.setAttribute('aria-label', limitClose ? 'Krancowka zamkniecia aktywna' : 'Krancowka zamkniecia nieaktywna');
   }
 }
 
@@ -273,45 +156,30 @@ function applyToggleAvailability(severity, gateState) {
   ui.toggleBtn.disabled = fatalFault;
   ui.toggleBtn.classList.toggle('error', fatalFault);
   ui.toggleBtn.classList.toggle('moving', isMoving(gateState));
-  updateControlBadge();
   updateActionCopy();
 }
 
 function updateCoreState(gateState, faultSeverity, percent) {
   state.currentState = gateState;
   state.posPercent = percent;
-
-  const label = formatStateLabel(gateState.toUpperCase(), faultSeverity);
-  setText(ui.stateLabel, label);
-  ui.stateLabel.className = `state-label ${gateState}`;
-
+  setText(ui.stateLabel, gateState.toUpperCase());
   setText(ui.posPct, `${percent}%`);
   ui.progressFill.style.width = `${percent}%`;
-  updateSafetyBadge(faultSeverity);
   applyToggleAvailability(faultSeverity, gateState);
-  updateLiveValue(true);
 }
 
 function updateUI(data) {
   if (!data) return;
   const gate = data.gate || {};
-  const wifi = data.wifi || {};
-  const hb = data.hb || {};
   const inputs = data.inputs || {};
-
   const gateState = (gate.state || 'unknown').toLowerCase();
   const faultSeverity = normalizeFaultSeverity(gate.faultSeverity, gateState);
-  const pct = typeof gate.positionPercent === 'number'
+  const percent = typeof gate.positionPercent === 'number'
     ? Math.min(100, Math.max(0, Math.round(gate.positionPercent)))
     : 0;
 
-  updateCoreState(gateState, faultSeverity, pct);
-  updateLimitTiles(Boolean(inputs.limitOpen), Boolean(inputs.limitClose));
-  updateTelemetry(hb, faultSeverity);
-
-  setChip(ui.cWifi, `WiFi: ${wifi.connected ? (wifi.ssid || 'OK') : 'OFF'}`, wifi.connected ? 'success' : 'warn');
-  setChip(ui.cLimO, `OPEN: ${inputs.limitOpen ? 'ON' : 'OFF'}`, inputs.limitOpen ? 'success' : '');
-  setChip(ui.cLimC, `CLOSE: ${inputs.limitClose ? 'ON' : 'OFF'}`, inputs.limitClose ? 'success' : '');
+  updateCoreState(gateState, faultSeverity, percent);
+  updateLimitIndicators(Boolean(inputs.limitOpen), Boolean(inputs.limitClose));
 }
 
 function normalizeLitePayload(data) {
@@ -322,11 +190,6 @@ function normalizeLitePayload(data) {
       moving: data.moving,
       positionPercent: data.positionPercent,
       faultSeverity: data.faultSeverity
-    },
-    wifi: data.wifi || {},
-    hb: data.hb || {
-      rpm: data.rpm,
-      iA: data.iA
     },
     inputs: {
       limitOpen: data.limitOpen,
@@ -349,7 +212,11 @@ async function fetchJson(path, timeoutMs) {
     const token = getToken();
     if (token) headers['X-Api-Key'] = token;
     if (core) await core.ensurePreferredBaseUrlLoaded({ navigate: false, tokenKey });
-    const res = await fetch(core ? core.resolveApiUrl(path) : path, { signal: ctrl.signal, cache: 'no-store', headers });
+    const res = await fetch(core ? core.resolveApiUrl(path) : path, {
+      signal: ctrl.signal,
+      cache: 'no-store',
+      headers
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -385,6 +252,9 @@ async function sendControl(action) {
 async function performToggleAction() {
   if (state.toggleBusy || ui.toggleBtn.disabled) return;
   state.toggleBusy = true;
+  ui.toggleBtn.classList.add('is-sending');
+  ui.toggleBtn.setAttribute('aria-busy', 'true');
+  setText(ui.holdStateText, 'Wysylanie...');
   try {
     if (isMoving(state.currentState)) {
       await sendControl('stop');
@@ -394,29 +264,29 @@ async function performToggleAction() {
   } finally {
     setTimeout(() => {
       state.toggleBusy = false;
-      ui.toggleBtn.classList.remove('hold-fired');
+      ui.toggleBtn.classList.remove('hold-fired', 'is-sending');
+      ui.toggleBtn.removeAttribute('aria-busy');
       updateActionCopy();
-    }, 400);
+    }, 420);
   }
 }
 
 function vibrate(ms) {
-  if (!state.touchHoldEnabled) return;
+  if (!state.touchFeedback) return;
   if (typeof navigator.vibrate === 'function') navigator.vibrate(ms);
 }
 
 function clearHoldTimer() {
-  if (state.holdTimer) {
-    clearTimeout(state.holdTimer);
-    state.holdTimer = null;
-  }
+  if (!state.holdTimer) return;
+  clearTimeout(state.holdTimer);
+  state.holdTimer = null;
 }
 
 function resetHoldState() {
   clearHoldTimer();
   state.holdTriggered = false;
   state.holdPointerId = null;
-  ui.toggleBtn.classList.remove('is-holding');
+  ui.toggleBtn.classList.remove('is-holding', 'hold-fired');
   updateActionCopy();
 }
 
@@ -425,24 +295,22 @@ function triggerHoldAction() {
   ui.toggleBtn.classList.remove('is-holding');
   ui.toggleBtn.classList.add('hold-fired');
   setText(ui.holdStateText, 'Aktywowano');
-  vibrate(30);
+  vibrate(45);
   performToggleAction();
 }
 
 function onPointerDown(event) {
-  if (!state.touchHoldEnabled || ui.toggleBtn.disabled || state.toggleBusy) return;
-  if (event.pointerType === 'mouse') return;
+  if (ui.toggleBtn.disabled || state.toggleBusy) return;
   event.preventDefault();
   clearHoldTimer();
   state.holdTriggered = false;
   state.holdPointerId = event.pointerId;
   ui.toggleBtn.classList.add('is-holding');
   setText(ui.holdStateText, 'Trzymaj jeszcze chwile');
-  state.holdTimer = setTimeout(triggerHoldAction, 500);
+  state.holdTimer = setTimeout(triggerHoldAction, 1000);
 }
 
 function onPointerEnd(event) {
-  if (!state.touchHoldEnabled) return;
   if (state.holdPointerId !== null && event.pointerId !== undefined && event.pointerId !== state.holdPointerId) return;
   if (state.holdTriggered) {
     state.holdTriggered = false;
@@ -500,24 +368,17 @@ function parseCameraUrl(url) {
 }
 
 function clearCameraLoadTimer() {
-  if (state.cameraLoadTimer) {
-    clearTimeout(state.cameraLoadTimer);
-    state.cameraLoadTimer = null;
-  }
+  if (!state.cameraLoadTimer) return;
+  clearTimeout(state.cameraLoadTimer);
+  state.cameraLoadTimer = null;
 }
 
 function resetCameraPreviewMedia() {
   clearCameraLoadTimer();
   state.cameraPreviewMode = 'none';
   ui.cameraFrame.classList.remove('has-image', 'has-embed');
-
-  if (ui.cameraImage.getAttribute('src')) {
-    ui.cameraImage.removeAttribute('src');
-  }
-
-  if (ui.cameraEmbed.getAttribute('src')) {
-    ui.cameraEmbed.removeAttribute('src');
-  }
+  if (ui.cameraImage.getAttribute('src')) ui.cameraImage.removeAttribute('src');
+  if (ui.cameraEmbed.getAttribute('src')) ui.cameraEmbed.removeAttribute('src');
 }
 
 function activateCameraImagePreview() {
@@ -525,14 +386,12 @@ function activateCameraImagePreview() {
   state.cameraPreviewMode = 'image';
   ui.cameraFrame.classList.remove('has-embed');
   ui.cameraFrame.classList.add('has-image');
-  ui.cameraBadge.textContent = looksLikeSnapshotUrl(state.cameraUrl) ? 'SNAPSHOT' : 'PODGLAD';
-  ui.cameraBadge.className = 'status-pill ok';
   setText(ui.cameraEmptyTitle, 'Podglad kamery aktywny');
   setText(
     ui.cameraEmptyText,
     looksLikeSnapshotUrl(state.cameraUrl)
-      ? 'Snapshot JPEG jest odswiezany lokalnie w tej przegladarce, bez proxy przez ESP32.'
-      : 'Obraz jest ladowany bezposrednio przez te przegladarke, bez proxy przez ESP32.'
+      ? 'Snapshot jest odswiezany lokalnie w tej przegladarce.'
+      : 'Obraz jest ladowany bezposrednio przez te przegladarke.'
   );
 }
 
@@ -542,95 +401,64 @@ function activateCameraEmbedPreview() {
   const cameraUrl = parseCameraUrl(state.cameraUrl);
   ui.cameraFrame.classList.remove('has-image');
   ui.cameraFrame.classList.add('has-embed');
-  ui.cameraBadge.textContent = 'OSADZONO';
-  ui.cameraBadge.className = 'status-pill neutral';
   setText(ui.cameraEmptyTitle, 'Osadzony podglad strony kamery');
-  setText(ui.cameraEmptyText, 'Bezposredni obraz nie zaladowal sie jako snapshot, wiec UI osadza strone kamery.');
+  setText(ui.cameraEmptyText, 'Bezposredni snapshot nie zaladowal sie, wiec osadzono strone kamery.');
   stopCameraRefresh();
   ui.cameraEmbed.src = cameraUrl.previewUrl;
 }
 
-function updateCameraOpenLink() {
-  const hasUrl = Boolean(state.cameraUrl);
-  if (hasUrl) {
-    ui.cameraOpenLink.href = parseCameraUrl(state.cameraUrl).rawUrl;
-    ui.cameraOpenLink.classList.remove('is-disabled');
-  } else {
-    ui.cameraOpenLink.href = '#';
-    ui.cameraOpenLink.classList.add('is-disabled');
-  }
-}
-
-function openCameraConfig(shouldFocus = false) {
-  if (ui.cameraConfig && typeof ui.cameraConfig.open === 'boolean') ui.cameraConfig.open = true;
-  if (!shouldFocus || !ui.cameraUrlInput) return;
-  if (!ui.cameraUrlInput) return;
-  try {
-    ui.cameraUrlInput.focus();
-    ui.cameraUrlInput.select();
-  } catch {}
-}
-
-function showCameraPlaceholder(title, text, badgeText = 'BRAK OBRAZU', badgeClass = 'neutral') {
+function showCameraPlaceholder(title, text) {
   resetCameraPreviewMedia();
   setText(ui.cameraEmptyTitle, title);
   setText(ui.cameraEmptyText, text);
-  ui.cameraBadge.textContent = badgeText;
-  ui.cameraBadge.className = `status-pill ${badgeClass}`;
 }
 
 function refreshCamera(force = false) {
   const cameraUrl = parseCameraUrl(state.cameraUrl);
   const snapshotLike = looksLikeSnapshotUrl(cameraUrl.previewUrl);
+
   if (!state.cameraUrl) {
     showCameraPlaceholder(
-      'Dodaj lokalny URL snapshotu',
-      'Wklej bezposredni adres JPG lub PNG. Ten adres jest zapisywany tylko lokalnie w tej przegladarce.',
-      'BRAK URL',
-      'neutral'
+      'Brak obrazu kamery',
+      'Ustaw lokalny URL snapshotu w Ustawieniach.'
     );
-    openCameraConfig(false);
     return;
   }
+
   if (document.hidden && !force) return;
 
   clearCameraLoadTimer();
   ui.cameraFrame.classList.remove('has-embed');
   ui.cameraFrame.classList.add('has-image');
-  ui.cameraBadge.textContent = state.cameraPreviewMode === 'image' ? 'ODSWIEZANIE' : 'LADOWANIE';
-  ui.cameraBadge.className = 'status-pill neutral';
   state.cameraPreviewMode = 'loading-image';
   ui.cameraImage.src = buildCameraSrc(cameraUrl.previewUrl);
   state.cameraLoadTimer = setTimeout(() => {
-    if (state.cameraPreviewMode === 'loading-image' && state.cameraUrl) {
-      if (cameraUrl.hasEmbeddedCredentials) {
-        showCameraPlaceholder(
-          'Wymagana autoryzacja przegladarki',
-          'Ta przegladarka blokuje osadzanie adresu z loginem i haslem. Otworz kamere w nowej karcie raz, wroc tutaj i kliknij Odswiez.',
-          'WYMAGA LOGOWANIA',
-          'warn'
-        );
-      } else {
-        if (snapshotLike) {
-          showCameraPlaceholder(
-            'Nie udalo sie pobrac snapshotu JPEG',
-            'Sprawdz bezposredni URL obrazka albo otworz kamere w nowej karcie i skopiuj docelowy adres JPG.',
-            'BRAK SNAPSHOTA',
-            'warn'
-          );
-        } else {
-          activateCameraEmbedPreview();
-        }
-      }
+    if (state.cameraPreviewMode !== 'loading-image' || !state.cameraUrl) return;
+
+    if (cameraUrl.hasEmbeddedCredentials) {
+      showCameraPlaceholder(
+        'Wymagane logowanie przegladarki',
+        'Sprawdz URL kamery w Ustawieniach albo zaloguj sie do kamery w tej przegladarce.'
+      );
+      return;
     }
+
+    if (snapshotLike) {
+      showCameraPlaceholder(
+        'Nie udalo sie pobrac snapshotu JPEG',
+        'Sprawdz URL kamery w Ustawieniach.'
+      );
+      return;
+    }
+
+    activateCameraEmbedPreview();
   }, snapshotLike ? 5000 : 3200);
 }
 
 function stopCameraRefresh() {
-  if (state.cameraRefreshTimer) {
-    clearInterval(state.cameraRefreshTimer);
-    state.cameraRefreshTimer = null;
-  }
+  if (!state.cameraRefreshTimer) return;
+  clearInterval(state.cameraRefreshTimer);
+  state.cameraRefreshTimer = null;
 }
 
 function startCameraRefresh() {
@@ -643,55 +471,10 @@ function startCameraRefresh() {
   }, refreshMs);
 }
 
-function applyCameraUrl(url) {
-  state.cameraUrl = (url || '').trim();
-  safeLocalStorageSet(cameraUrlKey, state.cameraUrl);
-  if (ui.cameraUrlInput && ui.cameraUrlInput.value !== state.cameraUrl) ui.cameraUrlInput.value = state.cameraUrl;
-  updateCameraOpenLink();
-  if (state.cameraUrl) {
-    if (ui.cameraConfig && typeof ui.cameraConfig.open === 'boolean') ui.cameraConfig.open = false;
-    startCameraRefresh();
-    showToast('URL kamery zapisany lokalnie');
-  } else {
-    if (ui.cameraConfig && typeof ui.cameraConfig.open === 'boolean') ui.cameraConfig.open = true;
-    stopCameraRefresh();
-    refreshCamera(true);
-  }
-}
-
-function clearWsReconnectTimer() {
-  if (!state.wsReconnectTimer) return;
-  clearTimeout(state.wsReconnectTimer);
-  state.wsReconnectTimer = null;
-}
-
-function scheduleWsReconnect(delayMs) {
-  if (document.hidden) return;
-  clearWsReconnectTimer();
-  state.wsReconnectTimer = setTimeout(() => {
-    state.wsReconnectTimer = null;
-    connectWs();
-  }, delayMs);
-}
-
-function closeWsConnection() {
-  clearWsReconnectTimer();
-  state.wsConnected = false;
-  const ws = state.ws;
-  state.ws = null;
-  if (!ws) return;
-  if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-    try {
-      ws.close(1000, 'page_hidden');
-    } catch {}
-  }
-}
-
 function stopStatusPolling() {
-  if (state.statusLiteTimer) {
-    clearInterval(state.statusLiteTimer);
-    state.statusLiteTimer = null;
-  }
+  if (!state.statusLiteTimer) return;
+  clearInterval(state.statusLiteTimer);
+  state.statusLiteTimer = null;
 }
 
 function startStatusPolling() {
@@ -701,71 +484,36 @@ function startStatusPolling() {
 }
 
 async function connectWs() {
-  if (document.hidden) return;
-  if (state.ws && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) return;
-  clearWsReconnectTimer();
-  try {
-    if (core) await core.ensurePreferredBaseUrlLoaded({ navigate: false, tokenKey });
-    const url = core ? core.resolveWebSocketUrl('/ws') : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-    const ws = new WebSocket(url);
-    state.ws = ws;
-    ws.onopen = () => {
+  if (connectWs._done) return;
+  connectWs._done = true;
+
+  wsManager.subscribe({
+    open() {
       state.wsConnected = true;
-      state.wsOpenedAt = Date.now();
-    };
-    ws.onmessage = (evt) => {
-      if (state.wsOpenedAt > 0) {
-        state.wsFailureCount = 0;
-        state.wsReconnectDelayMs = wsReconnectBaseMs;
-        state.wsOpenedAt = 0;
-      }
+    },
+    close() {
+      state.wsConnected = false;
+    },
+    stale() {
+      state.wsConnected = false;
+      fetchLite();
+    },
+    message(evt) {
       try {
         const msg = JSON.parse(evt.data);
         if (msg.type === 'status' && msg.data) updateUI(msg.data);
         if (msg.type === 'status_lite' && msg.data) updateLite(msg.data);
       } catch {}
-    };
-    ws.onerror = () => {};
-    ws.onclose = (event) => {
-      const wsOpenedAt = state.wsOpenedAt;
-      if (state.ws === ws) state.ws = null;
-      state.wsConnected = false;
-      state.wsOpenedAt = 0;
+    }
+  });
 
-      const shortLived = wsOpenedAt > 0 && (Date.now() - wsOpenedAt) < 500;
-      const rapidFailure = event.code === 1006 || event.code === 1007 || event.code === 1002 ||
-                           event.code === 1008 || event.wasClean === false || shortLived;
-      if (rapidFailure) {
-        state.wsFailureCount += 1;
-      } else {
-        state.wsFailureCount = 0;
-      }
-
-      if (state.wsFailureCount >= maxWsFailuresBeforeCooldown) {
-        state.wsFailureCount = 0;
-        state.wsReconnectDelayMs = wsReconnectBaseMs;
-        scheduleWsReconnect(wsReconnectCooldownMs);
-        return;
-      }
-
-      const delayMs = state.wsReconnectDelayMs;
-      state.wsReconnectDelayMs = Math.min(wsReconnectMaxMs, Math.round(state.wsReconnectDelayMs * 1.8));
-      scheduleWsReconnect(delayMs);
-    };
-  } catch {
-    state.ws = null;
-    state.wsConnected = false;
-    const delayMs = state.wsReconnectDelayMs;
-    state.wsReconnectDelayMs = Math.min(wsReconnectMaxMs, Math.round(state.wsReconnectDelayMs * 1.8));
-    scheduleWsReconnect(delayMs);
-  }
+  wsManager.setVisibility(!document.hidden);
+  wsManager.setOnline(navigator.onLine !== false);
+  wsManager.connect();
 }
 
 function bindCameraUi() {
   state.cameraUrl = safeLocalStorageGet(cameraUrlKey);
-  if (ui.cameraUrlInput) ui.cameraUrlInput.value = state.cameraUrl;
-  if (!state.cameraUrl && ui.cameraConfig && typeof ui.cameraConfig.open === 'boolean') ui.cameraConfig.open = true;
-  updateCameraOpenLink();
   refreshCamera(true);
 
   ui.cameraImage.addEventListener('load', () => {
@@ -776,62 +524,29 @@ function bindCameraUi() {
     if (!state.cameraUrl) return;
     const cameraUrl = parseCameraUrl(state.cameraUrl);
     const snapshotLike = looksLikeSnapshotUrl(cameraUrl.previewUrl);
+
     if (cameraUrl.hasEmbeddedCredentials) {
       showCameraPlaceholder(
-        'Wymagana autoryzacja przegladarki',
-        'Kliknij Otworz kamerę w nowej karcie, pozwol przegladarce zapamietac logowanie, a potem wroc i kliknij Odswiez.',
-        'WYMAGA LOGOWANIA',
-        'warn'
+        'Wymagane logowanie przegladarki',
+        'Sprawdz URL kamery w Ustawieniach albo zaloguj sie do kamery w tej przegladarce.'
       );
       return;
     }
+
     if (snapshotLike) {
       showCameraPlaceholder(
         'Nie udalo sie pobrac snapshotu JPEG',
-        'Ten adres nie zwrocil obrazka. Upewnij sie, ze podajesz bezposredni URL JPG lub PNG, a nie strone HTML.',
-        'BRAK SNAPSHOTA',
-        'warn'
+        'Ten adres nie zwrocil obrazka. Sprawdz URL kamery w Ustawieniach.'
       );
       return;
     }
+
     activateCameraEmbedPreview();
   });
 
   ui.cameraEmbed.addEventListener('load', () => {
     if (state.cameraPreviewMode !== 'iframe') return;
-    ui.cameraBadge.textContent = 'OSADZONO';
-    ui.cameraBadge.className = 'status-pill ok';
-  });
-
-  ui.cameraSaveBtn.addEventListener('click', () => {
-    applyCameraUrl(ui.cameraUrlInput.value);
-  });
-
-  ui.cameraUrlInput.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    applyCameraUrl(ui.cameraUrlInput.value);
-  });
-
-  ui.cameraClearBtn.addEventListener('click', () => {
-    ui.cameraUrlInput.value = '';
-    applyCameraUrl('');
-  });
-
-  ui.cameraRefreshBtn.addEventListener('click', () => {
-    if (!state.cameraUrl) {
-      openCameraConfig(true);
-      showToast('Najpierw wklej lokalny URL snapshotu');
-      return;
-    }
-    refreshCamera(true);
-  });
-
-  ui.cameraOpenLink.addEventListener('click', (event) => {
-    if (state.cameraUrl) return;
-    event.preventDefault();
-    openCameraConfig(true);
-    showToast('Najpierw wklej lokalny URL snapshotu');
+    setText(ui.cameraEmptyTitle, 'Osadzony podglad strony kamery');
   });
 }
 
@@ -841,37 +556,41 @@ function bindToggleUi() {
   ui.toggleBtn.addEventListener('pointercancel', onPointerEnd);
   ui.toggleBtn.addEventListener('pointerleave', onPointerEnd);
   ui.toggleBtn.addEventListener('click', (event) => {
-    if (state.touchHoldEnabled) {
-      event.preventDefault();
-      return;
-    }
-    performToggleAction();
+    event.preventDefault();
   });
 }
 
 function refreshInteractionMode() {
-  state.touchHoldEnabled = detectTouchHoldMode();
+  state.touchFeedback = detectTouchFeedback();
   updateActionCopy();
 }
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
+core.bindPageLifecycle({
+  onHide() {
     clearHoldTimer();
     stopCameraRefresh();
     stopStatusPolling();
-    closeWsConnection();
-    return;
+    state.wsConnected = false;
+    wsManager.setVisibility(false);
+  },
+  onShow() {
+    startStatusPolling();
+    startCameraRefresh();
+    wsManager.setVisibility(true);
+    fetchLite();
+  },
+  onWake() {
+    wsManager.reconnect('wake');
+    fetchLite();
+  },
+  onOnline() {
+    wsManager.setOnline(true);
+    fetchLite();
+  },
+  onOffline() {
+    state.wsConnected = false;
+    wsManager.setOnline(false);
   }
-  startStatusPolling();
-  startCameraRefresh();
-  connectWs();
-});
-
-// iOS Safari i niektóre Android nie wyzwalają visibilitychange przy nawigacji.
-// pagehide zapewnia czyszczenie timerów i WS przed bfcache/unload.
-window.addEventListener('pagehide', () => {
-  stopStatusPolling();
-  closeWsConnection();
 });
 
 window.addEventListener('resize', refreshInteractionMode);
@@ -885,5 +604,6 @@ window.addEventListener('load', async () => {
   bindToggleUi();
   refreshInteractionMode();
   startStatusPolling();
+  startCameraRefresh();
   connectWs();
 });
