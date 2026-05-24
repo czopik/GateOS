@@ -1071,6 +1071,92 @@ void WebServerManager::setupRoutes() {
     request->send(200, "application/json", "{\"status\":\"ok\"}");
     scheduleFactoryReset(3200);
   };
+  // HTTP LittleFS OTA upload - upload esp32/.pio/build/esp32/littlefs.bin.
+  // This updates the filesystem/data partition, not the firmware partition.
+  server.on("/api/ota/fs", HTTP_POST,
+    [this](AsyncWebServerRequest *request) {
+      if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+      if (!cfg || !cfg->otaConfig.enabled) {
+        request->send(423, "application/json", "{\"ok\":false,\"target\":\"fs\",\"error\":\"ota_disabled\"}");
+        return;
+      }
+
+      bool ok = !Update.hasError();
+      String resp = ok
+        ? "{\"ok\":true,\"target\":\"fs\"}"
+        : String("{\"ok\":false,\"target\":\"fs\",\"error\":\"") + Update.errorString() + "\"}";
+
+      request->send(ok ? 200 : 500, "application/json", resp);
+
+      if (ok) {
+        delay(300);
+        ESP.restart();
+      }
+    },
+    [this](AsyncWebServerRequest *request, const String &filename,
+           size_t index, uint8_t *data, size_t len, bool final) {
+      if (index == 0) {
+        if (otaHttpUploadStarted) {
+          Serial.printf("[OTA-FS] reject: already_in_progress\n");
+          Update.abort();
+          return;
+        }
+
+        if (!isAuthorized(request)) {
+          Serial.printf("[OTA-FS] abort: unauthorized\n");
+          otaHttpUploadStarted = false;
+          Update.abort();
+          return;
+        }
+
+        if (!cfg || !cfg->otaConfig.enabled) {
+          Serial.printf("[OTA-FS] abort: ota_disabled\n");
+          otaHttpUploadStarted = false;
+          Update.abort();
+          return;
+        }
+
+        if (request->contentLength() == 0) {
+          Serial.printf("[OTA-FS] abort: empty_upload\n");
+          otaHttpUploadStarted = false;
+          Update.abort();
+          return;
+        }
+
+        Serial.printf("[OTA-FS] Start: %s size=%u\n",
+                      filename.c_str(), request->contentLength());
+
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
+          Serial.printf("[OTA-FS] begin error: %s\n", Update.errorString());
+          otaHttpUploadStarted = false;
+          return;
+        }
+
+        otaHttpUploadStarted = true;
+      }
+
+      if (Update.isRunning()) {
+        if (Update.write(data, len) != len) {
+          Serial.printf("[OTA-FS] write error: %s - aborting\n", Update.errorString());
+          Update.abort();
+          otaHttpUploadStarted = false;
+          return;
+        }
+      }
+
+      if (final) {
+        otaHttpUploadStarted = false;
+
+        if (Update.isRunning()) {
+          if (Update.end(true)) {
+            Serial.printf("[OTA-FS] Done: %u B\n", index + len);
+          } else {
+            Serial.printf("[OTA-FS] end error: %s\n", Update.errorString());
+          }
+        }
+      }
+    }
+  );
   server.on("/api/factory_reset", HTTP_POST, factoryResetHandler);
   server.on("/api/factory-reset", HTTP_POST, factoryResetHandler);
 
