@@ -18,8 +18,36 @@ namespace {
 enum class BodyAppendResult {
   Ok = 0,
   BadOffset,
-  BadSize
+  BadSize,
+  TooLarge,
+  NoMemory
 };
+
+constexpr size_t kDefaultApiBodyLimit = 4096;
+constexpr size_t kConfigApiBodyLimit = 16384;
+
+size_t apiBodyLimitForUrl(const String& url) {
+  if (url == "/api/config" ||
+      url == "/api/config/validate" ||
+      url == "/api/motion/profile") {
+    return kConfigApiBodyLimit;
+  }
+  return kDefaultApiBodyLimit;
+}
+
+bool isCriticalApiPath(const String& url) {
+  return url == "/api/config" ||
+         url == "/api/config/validate" ||
+         url == "/api/remotes" ||
+         url == "/api/fslist" ||
+         url == "/api/fs_status" ||
+         url == "/api/diagnostics" ||
+         url == "/api/ota/upload" ||
+         url == "/api/factory_reset" ||
+         url == "/api/factory-reset" ||
+         url == "/api/reboot";
+}
+
 
 struct BodyBuffer {
   String body;
@@ -73,10 +101,14 @@ void releaseBody(AsyncWebServerRequest* request) {
 BodyBuffer* getBodyBuffer(AsyncWebServerRequest* request, size_t total) {
   auto it = g_bodyBuffers.find(request);
   if (it != g_bodyBuffers.end()) return it->second;
-  auto* buf = new BodyBuffer();
+  auto* buf = new (std::nothrow) BodyBuffer();
+  if (!buf) return nullptr;
   buf->total = total;
   buf->startMs = millis(); // FIX A4: record creation time
-  if (total > 0) buf->body.reserve(total + 1);
+  if (total > 0 && !buf->body.reserve(total + 1)) {
+    delete buf;
+    return nullptr;
+  }
   g_bodyBuffers[request] = buf;
   return buf;
 }
@@ -87,15 +119,15 @@ BodyAppendResult appendBody(BodyBuffer* buf, const uint8_t* data, size_t len, si
     buf->body = "";
     buf->badOffset = false;
     buf->total = total;
-    if (total > 0) buf->body.reserve(total + 1);
+    if (total > 0 && !buf->body.reserve(total + 1)) return BodyAppendResult::NoMemory;
   }
   if (buf->body.length() != index) {
     buf->badOffset = true;
     return BodyAppendResult::BadOffset;
   }
   if (total > 0 && index + len > total) return BodyAppendResult::BadSize;
+  if (!buf->body.reserve(buf->body.length() + len + 1)) return BodyAppendResult::NoMemory;
   // Avoid String::concat(pointer, len) overload ambiguity across cores; append byte-by-byte.
-  buf->body.reserve(buf->body.length() + len + 1);
   for (size_t i = 0; i < len; ++i) {
     buf->body += static_cast<char>(data[i]);
   }
@@ -103,11 +135,23 @@ BodyAppendResult appendBody(BodyBuffer* buf, const uint8_t* data, size_t len, si
 }
 
 BodyBuffer* appendBodyChunk(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+  const size_t limit = apiBodyLimitForUrl(request ? request->url() : String());
+  if (total > limit || index + len > limit) {
+    request->send(413, "application/json", "{\"status\":\"payload_too_large\"}");
+    releaseBody(request);
+    return nullptr;
+  }
   BodyBuffer* buf = getBodyBuffer(request, total);
+  if (!buf) {
+    request->send(507, "application/json", "{\"status\":\"insufficient_storage\"}");
+    return nullptr;
+  }
   BodyAppendResult res = appendBody(buf, data, len, index, total);
   if (res != BodyAppendResult::Ok) {
     if (res == BodyAppendResult::BadOffset) {
       request->send(400, "application/json", "{\"status\":\"bad_body_offset\"}");
+    } else if (res == BodyAppendResult::NoMemory) {
+      request->send(507, "application/json", "{\"status\":\"insufficient_storage\"}");
     } else {
       request->send(400, "application/json", "{\"status\":\"bad_body\"}");
     }
@@ -149,6 +193,10 @@ bool parseJsonBody(AsyncWebServerRequest* request, JsonDocument& doc, const char
 }
 
 void sendJson(AsyncWebServerRequest* request, JsonDocument& doc, int code = 200) {
+  if (doc.overflowed()) {
+    request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"json_overflow\"}");
+    return;
+  }
   AsyncResponseStream* response = request->beginResponseStream("application/json");
   response->setCode(code);
   serializeJson(doc, *response);
@@ -222,13 +270,17 @@ void WebServerManager::begin() {
 
 bool WebServerManager::isAuthorized(AsyncWebServerRequest* request) const {
   if (!cfg) return true;
-  if (!cfg->securityConfig.enabled) return true;
+
+  // Critical endpoints stay token-protected whenever a token exists, even if
+  // global API security is disabled for basic status/control compatibility.
+  const String url = request ? request->url() : "";
+  const bool criticalPath = isCriticalApiPath(url);
+  if (!cfg->securityConfig.enabled && !criticalPath) return true;
 
   // Allow configuring security only when no token is set yet (initial setup).
-  const String url = request ? request->url() : "";
   if (url == "/api/security" && cfg->securityConfig.apiToken.length() == 0) return true;
 
-  if (cfg->securityConfig.apiToken.length() == 0) return false;
+  if (cfg->securityConfig.apiToken.length() == 0) return !criticalPath && !cfg->securityConfig.enabled;
 
   String token;
   if (request->hasHeader("X-Api-Key")) {
@@ -315,6 +367,56 @@ void WebServerManager::setupRoutes() {
       return;
     }
     request->send(200, "application/json", cfg->toApiJson(true));
+  });
+
+
+  server.on("/api/config", HTTP_PUT, [this](AsyncWebServerRequest *request){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
+    if (!buf) return;
+    if (index + len != total) return;
+
+    DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
+    if (!parseJsonBody(request, doc, "api_config_put")) {
+      request->send(400, "application/json", "{\"status\":\"bad_json\"}");
+      return;
+    }
+    JsonVariantConst root = doc.as<JsonVariantConst>();
+    JsonVariantConst wrapped = doc["config"];
+    if (wrapped.is<JsonObjectConst>()) {
+      root = wrapped;
+    }
+
+    const int previousWebPort = cfg ? cfg->deviceConfig.webPort : 80;
+    ConfigManager updated = *cfg;
+    updated.setSaveAllowedCallback(nullptr);
+    String err;
+    if (!updated.validate(root, err)) {
+      sendSchemaError(request, err);
+      return;
+    }
+    if (!updated.fromJsonVariant(root)) {
+      request->send(400, "application/json", "{\"status\":\"bad_payload\"}");
+      return;
+    }
+    if (!updated.save(nullptr)) {
+      request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"fs_write_failed\"}");
+      return;
+    }
+    cfg->adoptPersistenceMetaFrom(updated);
+    if (updated.deviceConfig.webPort != previousWebPort) {
+      char response[128];
+      snprintf(response, sizeof(response),
+               "{\"status\":\"ok\",\"apply\":\"restart\",\"restartMs\":1500,\"redirectPort\":%d}",
+               updated.deviceConfig.webPort);
+      scheduleRestart(1500);
+      request->send(200, "application/json", response);
+      return;
+    }
+    scheduleRuntimeConfigApply();
+    request->send(200, "application/json", "{\"status\":\"ok\",\"apply\":\"scheduled\"}");
   });
 
   server.on("/api/config", HTTP_POST, [this](AsyncWebServerRequest *request){
@@ -963,12 +1065,14 @@ void WebServerManager::setupRoutes() {
   );
 
 
-  server.on("/api/factory_reset", HTTP_POST, [this](AsyncWebServerRequest *request){
+  auto factoryResetHandler = [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
     if (led) led->setFactoryCountdown(3);
     request->send(200, "application/json", "{\"status\":\"ok\"}");
     scheduleFactoryReset(3200);
-  });
+  };
+  server.on("/api/factory_reset", HTTP_POST, factoryResetHandler);
+  server.on("/api/factory-reset", HTTP_POST, factoryResetHandler);
 
   server.on("/api/gate/calibrate", HTTP_POST, [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
