@@ -272,9 +272,9 @@ Get current configuration.
 
 ---
 
-### PUT /api/config
+### POST /api/config or PUT /api/config
 
-Update configuration.
+Update and persist configuration. `PUT` is accepted as a REST-compatible alias for the existing `POST` endpoint.
 
 **Request:**
 ```json
@@ -288,30 +288,16 @@ Update configuration.
 **Response:**
 ```json
 {
-  "success": true,
-  "restartRequired": false
+  "status": "ok",
+  "apply": "scheduled"
 }
 ```
 
 ---
 
-### POST /api/config/save
+### POST /api/factory_reset or POST /api/factory-reset
 
-Save current configuration to flash.
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Configuration saved"
-}
-```
-
----
-
-### POST /api/factory-reset
-
-Reset to factory defaults.
+Reset to factory defaults. Both spellings are accepted; `/api/factory_reset` is the original endpoint and `/api/factory-reset` is a compatibility alias.
 
 **Request:**
 ```json
@@ -323,8 +309,7 @@ Reset to factory defaults.
 **Response:**
 ```json
 {
-  "success": true,
-  "message": "Factory reset scheduled. Device will restart."
+  "status": "ok"
 }
 ```
 
@@ -416,6 +401,27 @@ Send after connecting:
 
 ---
 
+
+## Security and limits
+
+Critical endpoints such as config, remotes, diagnostics, filesystem status/list, OTA upload, reboot and factory reset require the configured API token whenever one exists. This remains true even if general API security is disabled for basic compatibility.
+
+JSON request bodies are capped to protect ESP32 heap:
+
+- 16 KiB for `/api/config`, `/api/config/validate` and `/api/motion/profile`
+- 4 KiB for other JSON API endpoints
+
+If a response document overflows its ArduinoJson capacity, the API returns:
+
+```json
+{
+  "status": "error",
+  "error": "json_overflow"
+}
+```
+
+---
+
 ## Rate Limits
 
 - REST API: 10 requests/second
@@ -466,16 +472,17 @@ def open_gate():
     return resp.json()
 
 def get_position():
-    resp = requests.get(f"{BASE_URL}/position")
-    return resp.json()["position"]
+    resp = requests.get(f"{BASE_URL}/status-lite")
+    data = resp.json()
+    return data.get("positionMm")
 
 def wait_for_stop(timeout=60):
     import time
     start = time.time()
     while time.time() - start < timeout:
-        status = requests.get(f"{BASE_URL}/status").json()
+        status = requests.get(f"{BASE_URL}/status-lite").json()
         if not status["moving"]:
-            return status["position"]
+            return status.get("positionMm")
         time.sleep(0.1)
     return None
 ```
