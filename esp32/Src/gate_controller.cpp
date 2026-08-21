@@ -881,13 +881,19 @@ void GateController::onLimitOpen() {
   limitOpenActive = true;
   limitCloseActive = false;
   setTerminalState(GateTerminalState::FullyOpen);
-  // Hard resync position at open limit
+
   float md = status.maxDistance > 0.0f ? status.maxDistance : configuredMaxDistance();
   if (md > 0.0f) {
-    status.position = md;
+    // Hard resync position at open limit with a canonical 100% position.
+    setPosition(md, md);
     status.targetPosition = md;
-    controlPosition = md;
+  } else {
+    status.position = 0.0f;
+    status.targetPosition = 0.0f;
+    controlPosition = 0.0f;
+    status.positionPercent = -1;
   }
+
   if (state == GATE_OPENING || moving) {
     stop(GATE_STOP_LIMIT_OPEN);
   } else {
@@ -899,10 +905,12 @@ void GateController::onLimitClose() {
   limitCloseActive = true;
   limitOpenActive = false;
   setTerminalState(GateTerminalState::FullyClosed);
-  // Hard resync position at close limit
-  status.position = 0.0f;
+
+  float md = status.maxDistance > 0.0f ? status.maxDistance : configuredMaxDistance();
+  // Hard resync position at close limit with a canonical 0% position.
+  setPosition(0.0f, md);
   status.targetPosition = 0.0f;
-  controlPosition = 0.0f;
+
   if (state == GATE_CLOSING || moving) {
     stop(GATE_STOP_LIMIT_CLOSE);
   } else {
