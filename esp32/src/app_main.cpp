@@ -268,7 +268,7 @@ static bool homingChecked = false;
 static bool homingActive = false;
 static uint32_t homingStartMs = 0;
 static uint32_t homingReadySinceMs = 0;
-static bool explicitHomingRequested = false;
+static volatile bool explicitHomingRequested = false;
 static bool startupHomingEnabled = true;
 static bool startupPositionCertain = false;
 static bool startupSafetyLocked = false;
@@ -966,6 +966,7 @@ static void runGateTaskHoming(uint32_t nowMs) {
       motor->stopHard();
     }
     homingActive = false;
+    explicitHomingRequested = false;
     homingChecked = true;
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
@@ -983,6 +984,7 @@ static void runGateTaskHoming(uint32_t nowMs) {
     gate->stop(GATE_STOP_OBSTACLE);
     gate->setError(GATE_ERR_OBSTACLE, GATE_STOP_OBSTACLE);
     homingActive = false;
+    explicitHomingRequested = false;
     homingChecked = true;
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
@@ -1001,6 +1003,7 @@ static void runGateTaskHoming(uint32_t nowMs) {
     gate->stop(GATE_STOP_TELEMETRY_TIMEOUT);
     gate->setError(GATE_ERR_HOVER_TEL_TIMEOUT, GATE_STOP_TELEMETRY_TIMEOUT);
     homingActive = false;
+    explicitHomingRequested = false;
     homingChecked = false;
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
@@ -1013,6 +1016,7 @@ static void runGateTaskHoming(uint32_t nowMs) {
 
   if (gate->getErrorCode() != GATE_ERR_NONE || gate->getState() == GATE_ERROR) {
     homingActive = false;
+    explicitHomingRequested = false;
     homingChecked = true;
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
@@ -1032,6 +1036,7 @@ static void runGateTaskHoming(uint32_t nowMs) {
     gate->stop(GATE_STOP_ERROR);
     gate->setError(GATE_ERR_TIMEOUT, GATE_STOP_ERROR);
     homingActive = false;
+    explicitHomingRequested = false;
     homingChecked = true;
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
@@ -1046,6 +1051,7 @@ static void runGateTaskHoming(uint32_t nowMs) {
     gate->stop(GATE_STOP_ERROR);
     gate->setError(GATE_ERR_TIMEOUT, GATE_STOP_ERROR);
     homingActive = false;
+    explicitHomingRequested = false;
     homingChecked = true;
     setHomingSoftLimitsOverride(false);
     restoreNormalMotionProfile();
@@ -1940,7 +1946,7 @@ void fillStatus(JsonObject &out) {
   wifiObj["ssid"] = wifiConnected ? WiFi.SSID() : "";
   wifiObj["ip"] = wifiConnected ? WiFi.localIP().toString() : "";
   wifiObj["rssi"] = wifiConnected ? WiFi.RSSI() : 0;
-  wifiObj["apMode"] = strcmp(wifiMode, "AP") == 0;
+  wifiObj["apMode"] = (strcmp(wifiMode, "AP") == 0 || strcmp(wifiMode, "AP_STA") == 0 || (WiFi.getMode() & WIFI_AP) != 0);
 
   JsonObject mqttObj = out.createNestedObject("mqtt");
   mqttObj["connected"] = mqtt.connected();
@@ -2339,11 +2345,7 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
 #endif
 }
 
-void markHomingRequested() { explicitHomingRequested = true; }
 ControlResult handleControlWrapper(const String &action) {
-  if (action == "open" || action == "close" || action == "toggle") {
-    explicitHomingRequested = true;
-  }
 
   // === v2.1 FIX B: "stop" routed via xTaskNotify — no volatile flag, no direct
   // gate->stop(). GateTask processes GATE_NOTIFY_STOP within ≤10 ms (one
