@@ -71,7 +71,7 @@ compile_file() {
         -DFEEDBACK_SERIAL_USART2 \
         $includes \
         -I"$STM32_DIR/Src" \
-        -I"$STM32_DIR/Src/gate_app" \
+        -I"$STM32_DIR/Inc" -I"$STM32_DIR/.pio/build/VARIANT_USART/FrameworkHALDriver/Inc" -I"$STM32_DIR/.pio/build/VARIANT_USART/FrameworkCMSISDevice/Device/ST/STM32F1xx/Include" -I"$STM32_DIR/.pio/build/VARIANT_USART/FrameworkCMSISDevice/CMSIS/Core/Include" \
         -c "$src_file" \
         -o "$obj_file"
 }
@@ -91,8 +91,8 @@ build() {
     
     # Source files to compile (GateOS additions)
     local gate_files=(
-        "$GATE_APP_DIR/uart_protocol.c"
-        "$GATE_APP_DIR/gate_controller.c"
+        "$SRC_DIR/main.c"
+        "$SRC_DIR/bldc.c"
     )
     
     # Compile GateOS modules
