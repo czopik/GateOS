@@ -363,8 +363,10 @@ class GateTester:
             return False
 
 
+
 def main():
     import argparse
+    global TEST_ITERATIONS
     
     parser = argparse.ArgumentParser(description='GateOS Test Suite')
     parser.add_argument('--url', default=BASE_URL, help=f'Base URL (default: {BASE_URL})')
@@ -377,7 +379,6 @@ def main():
     args = parser.parse_args()
     
     tester = GateTester(args.url, args.token)
-    global TEST_ITERATIONS
     TEST_ITERATIONS = args.iterations
     
     if args.test == 'all':

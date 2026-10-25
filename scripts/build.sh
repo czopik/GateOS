@@ -88,7 +88,7 @@ build_stm32() {
     
     # Use the dedicated STM32 build script if available
     if [ -f "$SCRIPT_DIR/build_stm32.sh" ]; then
-        bash "$SCRIPT_DIR/build_stm32.sh" build
+        cd "$PROJECT_ROOT/stm32" && pio run
         log_info "STM32 build complete"
         return
     fi
@@ -161,7 +161,7 @@ format_code() {
     
     # Format C/C++ files
     if command -v clang-format &> /dev/null; then
-        find "$PROJECT_ROOT/esp32/Src" -name "*.cpp" -o -name "*.h" | \
+        find "$PROJECT_ROOT/esp32/src" -name "*.cpp" -o -name "*.h" | \
             xargs clang-format -i
         find "$PROJECT_ROOT/stm32/Src" -name "*.c" -o -name "*.h" | \
             xargs clang-format -i
