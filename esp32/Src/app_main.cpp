@@ -781,6 +781,17 @@ static void runGateTaskHoming(uint32_t nowMs) {
       Serial.println("[HOMING] close limit active -> reference set, no movement");
       return;
     }
+    // Same for the OPEN limit: the one-shot startup check can run before the
+    // debounced inputs settle, leaving a gate parked on OPEN as "unknown".
+    if (openActive && !closeActive) {
+      gate->onLimitOpen();
+      positionTracker.requestResyncOpen();
+      setStartupSafetyState(true, false, "open_limit_reference");
+      homingChecked = true;
+      setHomingResult(HOMING_RESULT_SKIP, HOMING_REASON_OPEN_LIMIT_ACTIVE);
+      Serial.println("[HOMING] open limit active -> reference set, no movement");
+      return;
+    }
     if (obstacle && !homingSearchOpen) {
       setStartupSafetyState(false, false, "obstacle_active");
       setHomingResult(HOMING_RESULT_BLOCKED, HOMING_REASON_OBSTACLE_ACTIVE);
