@@ -7,6 +7,21 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+// Global recursive lock guarding ConfigManager data (String fields, remotes
+// vector) that is read/written from several FreeRTOS tasks: loop(), async_tcp
+// (web handlers), ConfigSave task and GateTask.  Lock ordering rule: always take
+// ConfigLock BEFORE ConfigManager::_saveMutex.  RAII; recursive, so nested use
+// (e.g. addRemote -> saveInternal) is safe.
+class ConfigLock {
+public:
+  ConfigLock();
+  ~ConfigLock();
+  ConfigLock(const ConfigLock&) = delete;
+  ConfigLock& operator=(const ConfigLock&) = delete;
+private:
+  bool held_ = false;
+};
+
 // ConfigManager - persistent JSON config stored in LittleFS (/config.json)
 static constexpr const char* CONFIG_PATH = "/config.json";
 static constexpr const char* CONFIG_TMP_PATH = "/config.tmp";

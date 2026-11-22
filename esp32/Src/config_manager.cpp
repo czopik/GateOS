@@ -227,6 +227,40 @@ bool isTimeMode(const String& mode) {
 }
 } // namespace
 
+namespace {
+SemaphoreHandle_t g_cfgLock = nullptr;
+portMUX_TYPE g_cfgLockInitMux = portMUX_INITIALIZER_UNLOCKED;
+
+SemaphoreHandle_t cfgLockHandle() {
+  if (g_cfgLock) return g_cfgLock;
+  SemaphoreHandle_t created = xSemaphoreCreateRecursiveMutex();
+  portENTER_CRITICAL(&g_cfgLockInitMux);
+  if (!g_cfgLock) {
+    g_cfgLock = created;
+    created = nullptr;
+  }
+  portEXIT_CRITICAL(&g_cfgLockInitMux);
+  if (created) vSemaphoreDelete(created);
+  return g_cfgLock;
+}
+} // namespace
+
+ConfigLock::ConfigLock() {
+  if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) return;
+  SemaphoreHandle_t s = cfgLockHandle();
+  if (!s) return;
+  // Bounded wait: a stuck holder must never hang the caller forever (WDT/UI
+  // freeze).  Normal hold times are < 0.5 s (flash save).
+  held_ = xSemaphoreTakeRecursive(s, pdMS_TO_TICKS(3000)) == pdTRUE;
+  if (!held_) {
+    Serial.println("[CFG_LOCK] timeout - proceeding without lock");
+  }
+}
+
+ConfigLock::~ConfigLock() {
+  if (held_ && g_cfgLock) xSemaphoreGiveRecursive(g_cfgLock);
+}
+
 ConfigManager::ConfigManager() {}
 
 void ConfigManager::begin() {
@@ -239,10 +273,12 @@ void ConfigManager::begin() {
   if (!_saveMutex) {
     _saveMutex = xSemaphoreCreateMutex();
   }
+  (void)cfgLockHandle();
   ensureDefaultConfigExists();
 }
 
 void ConfigManager::resetToDefaults() {
+  ConfigLock lock;
   gateConfig = GateConfig();
   limitsConfig = LimitsConfig();
   wifiConfig = WiFiConfig();
@@ -498,6 +534,7 @@ void ConfigManager::buildJson(JsonDocument& doc, bool redactSecrets) const {
 }
 
 bool ConfigManager::ensureDefaultConfigExists(String* error) {
+  ConfigLock lock;
   if (!LittleFS.exists(CONFIG_PATH) && LittleFS.exists(CONFIG_BAK_PATH)) {
     if (copyFile(CONFIG_BAK_PATH, CONFIG_PATH)) {
       Serial.println("CONFIG: restored primary config from backup");
@@ -514,6 +551,7 @@ bool ConfigManager::ensureDefaultConfigExists(String* error) {
 }
 
 void ConfigManager::load() {
+  ConfigLock lock;  // must be taken before _saveMutex (lock ordering)
   // === v2 FIX D: Protect load() with the same mutex used by saveInternal().
   // Prevents a concurrent processDeferredSave() (in configSaveTask) from writing
   // the config file while load() is reading and parsing it.
@@ -616,6 +654,7 @@ bool ConfigManager::processDeferredSave() {
 }
 
 bool ConfigManager::saveInternal(String* error, bool force) {
+  ConfigLock lock;  // must be taken before _saveMutex (lock ordering)
   if (!force && saveAllowedCb && !saveAllowedCb()) {
     pendingSave = true;
     pendingSaveAtMs = millis();
@@ -767,6 +806,7 @@ String ConfigManager::toJson() {
 }
 
 String ConfigManager::toApiJson(bool redactSecrets) {
+  ConfigLock lock;
   DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
   buildJson(doc, redactSecrets);
   attachDocumentChecksum(doc);
@@ -1624,6 +1664,7 @@ MotionAdvancedConfig ConfigManager::motionProfile() const {
 }
 
 bool ConfigManager::addRemote(unsigned long serial, const String& name) {
+  ConfigLock lock;
   for (auto& r : remotes) {
     if (r.serial == serial) return false;
   }
@@ -1646,6 +1687,7 @@ bool ConfigManager::addRemote(unsigned long serial, const String& name) {
 }
 
 bool ConfigManager::updateRemote(unsigned long serial, const String& name, bool enabled) {
+  ConfigLock lock;
   for (auto& r : remotes) {
     if (r.serial == serial) {
       RemoteEntry prev = r;
@@ -1667,6 +1709,7 @@ bool ConfigManager::updateRemote(unsigned long serial, const String& name, bool 
 }
 
 bool ConfigManager::removeRemote(unsigned long serial) {
+  ConfigLock lock;
   for (auto it = remotes.begin(); it != remotes.end(); ++it) {
     if (it->serial == serial) {
       RemoteEntry removed = *it;
@@ -1687,6 +1730,7 @@ bool ConfigManager::removeRemote(unsigned long serial) {
 }
 
 void ConfigManager::clearRemotes() {
+  ConfigLock lock;
   std::vector<RemoteEntry> backup = remotes;
   remotes.clear();
   String err;
@@ -1701,6 +1745,7 @@ void ConfigManager::clearRemotes() {
 }
 
 void ConfigManager::touchRemote(unsigned long serial, unsigned long counter, unsigned long seenMs) {
+  ConfigLock lock;
   for (auto& r : remotes) {
     if (r.serial == serial) {
       r.lastCounter = counter;
@@ -1711,6 +1756,7 @@ void ConfigManager::touchRemote(unsigned long serial, unsigned long counter, uns
 }
 
 bool ConfigManager::isAuthorized(unsigned long serial) const {
+  ConfigLock lock;
   for (const auto& r : remotes) {
     if (r.serial == serial && r.enabled) return true;
   }
@@ -1718,6 +1764,7 @@ bool ConfigManager::isAuthorized(unsigned long serial) const {
 }
 
 bool ConfigManager::getRemote(unsigned long serial, RemoteEntry& out) const {
+  ConfigLock lock;
   for (const auto& r : remotes) {
     if (r.serial == serial) {
       out = r;

@@ -295,6 +295,10 @@ void GateController::loop() {
           status.targetPosition = status.position;
           status.lastMoveMs = millis();
           setState(GATE_STOPPED);
+          // The fatal fault is resolved: clear the *current* fault so the UI
+          // no longer shows "fatal_fault" while the gate is usable again.
+          // History stays in lastFatalFaultCode / lastFatalFaultMs.
+          clearCurrentFaultState();
           lastHoverRestoreMs = millis();
           hoverRecoveryActive = false;
           hoverRecoverySinceMs = 0;

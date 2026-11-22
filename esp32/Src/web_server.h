@@ -24,6 +24,8 @@ typedef void(*RemoteStateCb)(JsonObject& out);
 typedef void(*DiagnosticsCb)(JsonObject& out);
 typedef bool(*GateCalibrateCb)(const char* mode);
 typedef bool(*OtaActiveCb)();
+typedef void(*OtaHttpStateCb)(bool active);
+typedef bool(*GateBusyCb)();
 
 class MotorController;
 
@@ -57,6 +59,8 @@ public:
   void setDiagnosticsCallback(DiagnosticsCb cb);
   void setRemoteStateCallback(RemoteStateCb cb);
   void setOtaActiveCallback(OtaActiveCb cb);
+  void setOtaHttpStateCallback(OtaHttpStateCb cb) { otaHttpStateCb = cb; }
+  void setGateBusyCallback(GateBusyCb cb) { gateBusyCb = cb; }
   void setMqttManager(MqttManager* mqtt);
   void setLedController(LedController* led);
   void setMotorController(MotorController* motor);
@@ -77,12 +81,22 @@ private:
   AsyncWebServer server{80};
   AsyncWebSocket ws{ "/ws" };
   bool fsMounted = false;
-  bool otaHttpUploadStarted = false;
+  // HTTP OTA upload state (written from async_tcp; watchdog in maintenance()).
+  volatile bool otaHttpUploadStarted = false;
+  AsyncWebServerRequest* otaHttpOwner = nullptr;
+  volatile uint32_t otaHttpLastChunkMs = 0;
+  bool otaHttpOk = false;
+  char otaHttpErr[48] = {0};
   WebRuntimeStats stats;
 
   void setupRoutes();
   bool isAuthorized(AsyncWebServerRequest* request) const;
   void sendUnauthorized(AsyncWebServerRequest* request) const;
+  void finishBodyRequest(AsyncWebServerRequest* request) const;
+  void handleOtaChunk(int command, const char* tag, AsyncWebServerRequest* request,
+                      const String& filename, size_t index, uint8_t* data, size_t len, bool final);
+  void handleOtaDone(AsyncWebServerRequest* request, const char* target);
+  void otaHttpFinish(bool ok, const char* err);
 
   LearnCb learnCb = nullptr;
   TestCb testCb = nullptr;
@@ -93,5 +107,7 @@ private:
   DiagnosticsCb diagnosticsCb = nullptr;
   RemoteStateCb remoteStateCb = nullptr;
   OtaActiveCb otaActiveCb = nullptr;
+  OtaHttpStateCb otaHttpStateCb = nullptr;
+  GateBusyCb gateBusyCb = nullptr;
   bool learnMode = false;
 };

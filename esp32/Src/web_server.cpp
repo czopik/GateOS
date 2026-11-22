@@ -11,6 +11,7 @@
 extern void scheduleRestart(uint32_t delayMs);
 extern void scheduleFactoryReset(uint32_t delayMs);
 extern void scheduleRuntimeConfigApply();
+extern void getFsStatsCached(uint32_t* totalBytes, uint32_t* usedBytes);
 
 void WebServerManager::setOtaActiveCallback(OtaActiveCb cb) { otaActiveCb = cb; }
 
@@ -43,6 +44,7 @@ bool isCriticalApiPath(const String& url) {
          url == "/api/fs_status" ||
          url == "/api/diagnostics" ||
          url == "/api/ota/upload" ||
+         url == "/api/ota/fs" ||
          url == "/api/factory_reset" ||
          url == "/api/factory-reset" ||
          url == "/api/reboot";
@@ -53,7 +55,10 @@ struct BodyBuffer {
   String body;
   size_t total = 0;
   bool badOffset = false;
-  // FIX A4: timestamp for stale-buffer cleanup in maintenance().
+  // Set once an error response was sent for this request; further body chunks
+  // are ignored so we never call request->send() twice.
+  bool failed = false;
+  // Creation time, used for stale-buffer cleanup.
   unsigned long startMs = 0;
 };
 
@@ -66,7 +71,13 @@ struct JsonParseDiag {
 };
 
 static JsonParseDiag g_jsonParseDiag;
+// THREADING: g_bodyBuffers is touched ONLY from the async_tcp task (request /
+// body callbacks).  Stale-entry cleanup also runs there (purgeStaleBodyBuffers
+// called from getBodyBuffer) - never from loop()/maintenance(), which used to
+// race with the web task and could corrupt the map/heap.
 static std::map<AsyncWebServerRequest*, BodyBuffer*> g_bodyBuffers;
+constexpr unsigned long kBodyBufStaleMs = 8000;
+constexpr size_t kBodyBufMaxEntries = 8;
 
 static void copyPrintable(char* dst, size_t dstSize, const char* src, size_t srcLen) {
   if (!dst || dstSize == 0) return;
@@ -98,9 +109,43 @@ void releaseBody(AsyncWebServerRequest* request) {
   }
 }
 
+// Free buffers of requests whose connection dropped before the body completed
+// (ESPAsyncWebServer gives no disconnect callback for those).  Runs in the
+// async_tcp task only.
+void purgeStaleBodyBuffers(AsyncWebServerRequest* keep) {
+  const unsigned long now = millis();
+  for (auto it = g_bodyBuffers.begin(); it != g_bodyBuffers.end(); ) {
+    if (it->first == keep) { ++it; continue; }
+    const unsigned long age = it->second ? (now - it->second->startMs) : ULONG_MAX;
+    if (age > kBodyBufStaleMs) {
+      delete it->second;
+      it = g_bodyBuffers.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  // Hard cap: drop the oldest entries if still too many.
+  while (g_bodyBuffers.size() >= kBodyBufMaxEntries) {
+    auto oldest = g_bodyBuffers.end();
+    unsigned long oldestAge = 0;
+    for (auto it = g_bodyBuffers.begin(); it != g_bodyBuffers.end(); ++it) {
+      if (it->first == keep) continue;
+      const unsigned long age = it->second ? (now - it->second->startMs) : ULONG_MAX;
+      if (oldest == g_bodyBuffers.end() || age > oldestAge) {
+        oldest = it;
+        oldestAge = age;
+      }
+    }
+    if (oldest == g_bodyBuffers.end()) break;
+    delete oldest->second;
+    g_bodyBuffers.erase(oldest);
+  }
+}
+
 BodyBuffer* getBodyBuffer(AsyncWebServerRequest* request, size_t total) {
   auto it = g_bodyBuffers.find(request);
   if (it != g_bodyBuffers.end()) return it->second;
+  purgeStaleBodyBuffers(request);
   auto* buf = new (std::nothrow) BodyBuffer();
   if (!buf) return nullptr;
   buf->total = total;
@@ -134,11 +179,36 @@ BodyAppendResult appendBody(BodyBuffer* buf, const uint8_t* data, size_t len, si
   return BodyAppendResult::Ok;
 }
 
+// Send the (single) error response for a request and mark it failed.  The map
+// entry is kept (body freed) so later chunks of the same request are ignored
+// instead of triggering a second send().
+void failBody(AsyncWebServerRequest* request, BodyBuffer* buf, int code, const char* json) {
+  request->send(code, "application/json", json);
+  if (!buf) {
+    buf = new (std::nothrow) BodyBuffer();
+    if (!buf) return;
+    buf->startMs = millis();
+    g_bodyBuffers[request] = buf;
+  }
+  buf->failed = true;
+  buf->body = String();
+}
+
 BodyBuffer* appendBodyChunk(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+  auto existing = g_bodyBuffers.find(request);
+  if (existing != g_bodyBuffers.end() && existing->second && existing->second->failed) {
+    if (index == 0) {
+      // Same pointer reused by a new request: start fresh.
+      delete existing->second;
+      g_bodyBuffers.erase(existing);
+    } else {
+      return nullptr;
+    }
+  }
   const size_t limit = apiBodyLimitForUrl(request ? request->url() : String());
   if (total > limit || index + len > limit) {
-    request->send(413, "application/json", "{\"status\":\"payload_too_large\"}");
-    releaseBody(request);
+    auto it = g_bodyBuffers.find(request);
+    failBody(request, it != g_bodyBuffers.end() ? it->second : nullptr, 413, "{\"status\":\"payload_too_large\"}");
     return nullptr;
   }
   BodyBuffer* buf = getBodyBuffer(request, total);
@@ -149,13 +219,12 @@ BodyBuffer* appendBodyChunk(AsyncWebServerRequest* request, uint8_t* data, size_
   BodyAppendResult res = appendBody(buf, data, len, index, total);
   if (res != BodyAppendResult::Ok) {
     if (res == BodyAppendResult::BadOffset) {
-      request->send(400, "application/json", "{\"status\":\"bad_body_offset\"}");
+      failBody(request, buf, 400, "{\"status\":\"bad_body_offset\"}");
     } else if (res == BodyAppendResult::NoMemory) {
-      request->send(507, "application/json", "{\"status\":\"insufficient_storage\"}");
+      failBody(request, buf, 507, "{\"status\":\"insufficient_storage\"}");
     } else {
-      request->send(400, "application/json", "{\"status\":\"bad_body\"}");
+      failBody(request, buf, 400, "{\"status\":\"bad_body\"}");
     }
-    releaseBody(request);
     return nullptr;
   }
   return buf;
@@ -304,6 +373,108 @@ void WebServerManager::sendUnauthorized(AsyncWebServerRequest* request) const {
   request->send(401, "application/json", "{\"status\":\"unauthorized\"}");
 }
 
+// Request-complete handler shared by all JSON-body endpoints.  The body handler
+// sends the real response; here we only answer the cases it never sees.
+void WebServerManager::finishBodyRequest(AsyncWebServerRequest* request) const {
+  if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+  if (request->contentLength() == 0) {
+    // ESPAsyncWebServer never calls the body handler for an empty body, so
+    // without this the client would hang until its own timeout.
+    request->send(400, "application/json", "{\"status\":\"bad_json\",\"error\":\"empty_body\"}");
+  }
+}
+
+void WebServerManager::otaHttpFinish(bool ok, const char* err) {
+  otaHttpOk = ok;
+  strncpy(otaHttpErr, err ? err : "", sizeof(otaHttpErr) - 1);
+  otaHttpErr[sizeof(otaHttpErr) - 1] = '\0';
+  const bool wasStarted = otaHttpUploadStarted;
+  otaHttpUploadStarted = false;
+  // On success keep "OTA active" (gate locked) until the scheduled restart.
+  if (wasStarted && !ok && otaHttpStateCb) otaHttpStateCb(false);
+}
+
+// Upload chunk handler for firmware (U_FLASH) and filesystem (U_SPIFFS) OTA.
+void WebServerManager::handleOtaChunk(int command, const char* tag, AsyncWebServerRequest* request,
+                                      const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
+  if (index == 0) {
+    if (otaHttpUploadStarted) {
+      // Another upload owns Update; ignore this one (handleOtaDone -> 409).
+      Serial.printf("[%s] reject: already_in_progress\n", tag);
+      return;
+    }
+    otaHttpOwner = request;
+    otaHttpOk = false;
+    otaHttpErr[0] = '\0';
+    if (!isAuthorized(request)) { strncpy(otaHttpErr, "unauthorized", sizeof(otaHttpErr) - 1); return; }
+    if (!cfg || !cfg->otaConfig.enabled) { strncpy(otaHttpErr, "ota_disabled", sizeof(otaHttpErr) - 1); return; }
+    if (gateBusyCb && gateBusyCb()) { strncpy(otaHttpErr, "gate_moving", sizeof(otaHttpErr) - 1); return; }
+    if (request->contentLength() == 0) { strncpy(otaHttpErr, "empty_upload", sizeof(otaHttpErr) - 1); return; }
+    Serial.printf("[%s] Start: %s size=%u\n", tag, filename.c_str(), (unsigned)request->contentLength());
+    if (otaHttpStateCb) otaHttpStateCb(true);   // stop gate + block commands
+    otaHttpUploadStarted = true;
+    otaHttpLastChunkMs = millis();
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN, command)) {
+      Serial.printf("[%s] begin error: %s\n", tag, Update.errorString());
+      otaHttpFinish(false, Update.errorString());
+      return;
+    }
+  }
+  if (otaHttpOwner != request || !otaHttpUploadStarted) return;
+  otaHttpLastChunkMs = millis();
+  if (len > 0 && Update.isRunning()) {
+    if (Update.write(data, len) != len) {
+      Serial.printf("[%s] write error: %s - aborting\n", tag, Update.errorString());
+      const String err = Update.errorString();
+      Update.abort();
+      otaHttpFinish(false, err.c_str());
+      return;
+    }
+  }
+  if (final) {
+    if (Update.isRunning() && Update.end(true)) {
+      Serial.printf("[%s] Done: %u B\n", tag, (unsigned)(index + len));
+      otaHttpFinish(true, "");
+    } else {
+      Serial.printf("[%s] end error: %s\n", tag, Update.errorString());
+      otaHttpFinish(false, Update.errorString());
+    }
+  }
+}
+
+// Request-complete handler for OTA uploads: exactly one response per request.
+void WebServerManager::handleOtaDone(AsyncWebServerRequest* request, const char* target) {
+  if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+  if (!cfg || !cfg->otaConfig.enabled) {
+    request->send(423, "application/json",
+                  String("{\"ok\":false,\"target\":\"") + target + "\",\"error\":\"ota_disabled\"}");
+    return;
+  }
+  if (otaHttpOwner != request) {
+    request->send(409, "application/json",
+                  String("{\"ok\":false,\"target\":\"") + target + "\",\"error\":\"" +
+                  (otaHttpUploadStarted ? "ota_busy" : "no_upload") + "\"}");
+    return;
+  }
+  otaHttpOwner = nullptr;
+  if (otaHttpOk) {
+    request->send(200, "application/json", String("{\"ok\":true,\"target\":\"") + target + "\"}");
+    // Restart from loop() after the response is flushed (no delay() in the
+    // async_tcp task).
+    scheduleRestart(1000);
+    return;
+  }
+  if (otaHttpUploadStarted) {
+    // Response handler ran without a final chunk (truncated upload).
+    if (Update.isRunning()) Update.abort();
+    otaHttpFinish(false, "incomplete_upload");
+  }
+  const int code = strcmp(otaHttpErr, "gate_moving") == 0 ? 409 : 500;
+  request->send(code, "application/json",
+                String("{\"ok\":false,\"target\":\"") + target + "\",\"error\":\"" +
+                (otaHttpErr[0] ? otaHttpErr : "update_failed") + "\"}");
+}
+
 void WebServerManager::setupRoutes() {
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
@@ -312,8 +483,15 @@ void WebServerManager::setupRoutes() {
     stats.statusReqCount++;
     stats.lastApiReqMs = millis();
     stats.lastStatusReqMs = millis();
-    StaticJsonDocument<4096> doc;
+    // Heap document with headroom (the 4 KB stack document was close to full;
+    // overflow turns /api/status into HTTP 500 and the UI looks frozen).
+    DynamicJsonDocument doc(6144);
+    if (doc.capacity() == 0) {
+      request->send(503, "application/json", "{\"status\":\"error\",\"error\":\"low_memory\"}");
+      return;
+    }
     JsonObject root = doc.to<JsonObject>();
+    ConfigLock cfgLock;
     if (statusCb) {
       statusCb(root);
     } else {
@@ -343,6 +521,7 @@ void WebServerManager::setupRoutes() {
     stats.lastApiReqMs = millis();
     StaticJsonDocument<768> doc;
     JsonObject root = doc.to<JsonObject>();
+    ConfigLock cfgLock;
     if (statusLiteCb) {
       statusLiteCb(root);
     } else if (statusCb) {
@@ -371,12 +550,20 @@ void WebServerManager::setupRoutes() {
 
 
   server.on("/api/config", HTTP_PUT, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
   }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
+    if (gateBusyCb && gateBusyCb()) {
+      // Writing flash while the motor runs stalls both CPU cores and can
+      // starve the hoverboard UART link.  Ask the client to retry later.
+      releaseBody(request);
+      request->send(409, "application/json", "{\"status\":\"busy\",\"error\":\"gate_moving\"}");
+      return;
+    }
+    ConfigLock cfgLock;  // serialise with config.load()/save() in other tasks
 
     DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
     if (!parseJsonBody(request, doc, "api_config_put")) {
@@ -420,12 +607,20 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/config", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
   }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
+    if (gateBusyCb && gateBusyCb()) {
+      // Writing flash while the motor runs stalls both CPU cores and can
+      // starve the hoverboard UART link.  Ask the client to retry later.
+      releaseBody(request);
+      request->send(409, "application/json", "{\"status\":\"busy\",\"error\":\"gate_moving\"}");
+      return;
+    }
+    ConfigLock cfgLock;  // serialise with config.load()/save() in other tasks
 
     DynamicJsonDocument doc(CONFIG_JSON_CAPACITY);
     if (!parseJsonBody(request, doc, "api_config")) {
@@ -502,12 +697,13 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/config/validate", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
   }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
+    ConfigLock cfgLock;  // serialise with config.load()/save() in other tasks
 
     String head = buf->body.length() > 80 ? buf->body.substring(0, 80) : buf->body;
 #if defined(GATE_DEBUG_CONFIG)
@@ -534,6 +730,7 @@ void WebServerManager::setupRoutes() {
 
   server.on("/api/motion/profile", HTTP_GET, [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    ConfigLock cfgLock;
     StaticJsonDocument<768> doc;
     JsonObject motion = doc.createNestedObject("motion");
     motion["profile"] = cfg->motionConfig.profile;
@@ -565,12 +762,20 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/motion/profile", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
   }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
+    if (gateBusyCb && gateBusyCb()) {
+      // Writing flash while the motor runs stalls both CPU cores and can
+      // starve the hoverboard UART link.  Ask the client to retry later.
+      releaseBody(request);
+      request->send(409, "application/json", "{\"status\":\"busy\",\"error\":\"gate_moving\"}");
+      return;
+    }
+    ConfigLock cfgLock;  // serialise with config.load()/save() in other tasks
 
     DynamicJsonDocument payload(CONFIG_JSON_CAPACITY);
     if (!parseJsonBody(request, payload, "api_motion_profile")) {
@@ -594,6 +799,9 @@ void WebServerManager::setupRoutes() {
 
     String err;
     ConfigManager updated = *cfg;
+    // Same as /api/config: a deferred save on this temporary copy would be
+    // silently lost, so always write immediately (busy state checked above).
+    updated.setSaveAllowedCallback(nullptr);
     if (!updated.validate(wrapper.as<JsonVariantConst>(), err)) {
       sendSchemaError(request, err);
       return;
@@ -612,9 +820,9 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/motion/test", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
   }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
@@ -685,9 +893,9 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/led", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
   }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     if (!led) {
       request->send(500, "application/json", "{\"status\":\"error\",\"error\":\"led_not_ready\"}");
       return;
@@ -754,6 +962,7 @@ void WebServerManager::setupRoutes() {
 
   server.on("/api/remotes", HTTP_GET, [this](AsyncWebServerRequest *request){
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    ConfigLock cfgLock;
     StaticJsonDocument<1536> doc;
     doc["antiRepeatMs"] = cfg->remoteConfig.antiRepeatMs;
     doc["antiReplay"] = cfg->remoteConfig.antiReplay;
@@ -773,9 +982,9 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/remotes", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-  }, NULL, [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
@@ -836,9 +1045,9 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/remotes", HTTP_DELETE, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-  }, NULL, [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
@@ -871,9 +1080,9 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/learn", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-  }, NULL, [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
@@ -890,14 +1099,17 @@ void WebServerManager::setupRoutes() {
     if (!isAuthorized(request)) { sendUnauthorized(request); return; }
     StaticJsonDocument<256> doc;
     JsonObject root = doc.to<JsonObject>();
-    if (remoteStateCb) remoteStateCb(root);
+    if (remoteStateCb) {
+      ConfigLock cfgLock;
+      remoteStateCb(root);
+    }
     sendJson(request, doc);
   });
 
   server.on("/api/test_remote", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-  }, NULL, [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
@@ -933,12 +1145,19 @@ void WebServerManager::setupRoutes() {
         f.close();
       }
     }
+    // LittleFS.usedBytes() walks the whole filesystem (~1.5 s per call on this
+    // device) and blocked the async web task for ~3 s.  Use cached values
+    // refreshed by the ConfigSave background task.
+    uint32_t fsTotal = 0, fsUsed = 0;
+    getFsStatsCached(&fsTotal, &fsUsed);
     doc["mounted"] = fsMounted;
-    doc["totalBytes"] = LittleFS.totalBytes();
-    doc["usedBytes"] = LittleFS.usedBytes();
-    doc["freeBytes"] = LittleFS.totalBytes() - LittleFS.usedBytes();
+    doc["totalBytes"] = fsTotal;
+    doc["usedBytes"] = fsUsed;
+    doc["freeBytes"] = fsTotal >= fsUsed ? (fsTotal - fsUsed) : 0;
+    doc["statsCached"] = true;
     doc["exists_config"] = exists;
     doc["config_size"] = (unsigned)size;
+    ConfigLock cfgLock;
     doc["last_save_ms"] = cfg ? cfg->getLastSaveMs() : 0;
     doc["last_save_error"] = cfg ? cfg->getLastSaveError() : "";
     sendJson(request, doc);
@@ -949,7 +1168,11 @@ void WebServerManager::setupRoutes() {
     stats.apiReqCount++;
     stats.lastApiReqMs = millis();
     // Diagnostics can grow over time; keep generous headroom to avoid truncation.
-    StaticJsonDocument<4096> doc;
+    DynamicJsonDocument doc(6144);
+    if (doc.capacity() == 0) {
+      request->send(503, "application/json", "{\"status\":\"error\",\"error\":\"low_memory\"}");
+      return;
+    }
     JsonObject root = doc.to<JsonObject>();
     root["uptimeMs"] = millis();
     JsonObject jsonObj = root.createNestedObject("json");
@@ -966,6 +1189,7 @@ void WebServerManager::setupRoutes() {
       ledObj["error"] = "led_not_ready";
     }
     if (diagnosticsCb) {
+      ConfigLock cfgLock;
       diagnosticsCb(root);
     }
     sendJson(request, doc);
@@ -1007,60 +1231,14 @@ void WebServerManager::setupRoutes() {
 
   // HTTP OTA upload — prześlij skompilowany .bin przez przeglądarkę.
   // Autoryzacja jak pozostałe endpointy API.
+  // HTTP OTA upload of firmware .bin (multipart field "firmware"/any name).
+  // The previous firmware stays in the other OTA slot; see ota_guard for the
+  // automatic rollback on a bad image.
   server.on("/api/ota/upload", HTTP_POST,
-    [this](AsyncWebServerRequest *request) {
-      if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-      if (!cfg || !cfg->otaConfig.enabled) {
-        request->send(423, "application/json", "{\"ok\":false,\"error\":\"ota_disabled\"}");
-        return;
-      }
-      // Odpowiedź wysyłana po zakończeniu przesyłania pliku.
-      bool ok = !Update.hasError();
-      String resp = ok
-        ? "{\"ok\":true}"
-        : String("{\"ok\":false,\"error\":\"") + Update.errorString() + "\"}";
-      request->send(200, "application/json", resp);
-      if (ok) {
-        // Restart z lekkim opóźnieniem, żeby odpowiedź dotarła do klienta.
-        delay(300);
-        ESP.restart();
-      }
-    },
+    [this](AsyncWebServerRequest *request) { handleOtaDone(request, "firmware"); },
     [this](AsyncWebServerRequest *request, const String &filename,
            size_t index, uint8_t *data, size_t len, bool final) {
-      // Sprawdź autoryzację przy pierwszym chunку.
-      if (index == 0 && !isAuthorized(request)) {
-        // Nie możemy wysłać 401 z handlera upload — przerywamy przez błąd.
-        Update.abort();
-        return;
-      }
-      if (index == 0 && (!cfg || !cfg->otaConfig.enabled)) {
-        Update.abort();
-        return;
-      }
-      if (index == 0) {
-        Serial.printf("[OTA-HTTP] Start: %s size=%u\n",
-                      filename.c_str(), request->contentLength());
-        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
-          Serial.printf("[OTA-HTTP] begin error: %s\n", Update.errorString());
-        } else {
-          otaHttpUploadStarted = true;
-        }
-      }
-      if (Update.isRunning()) {
-        if (Update.write(data, len) != len) {
-          Serial.printf("[OTA-HTTP] write error: %s\n", Update.errorString());
-        }
-      }
-      if (final) {
-        if (Update.isRunning()) {
-          if (Update.end(true)) {
-            Serial.printf("[OTA-HTTP] Done: %u B\n", index + len);
-          } else {
-            Serial.printf("[OTA-HTTP] end error: %s\n", Update.errorString());
-          }
-        }
-      }
+      handleOtaChunk(U_FLASH, "OTA-HTTP", request, filename, index, data, len, final);
     }
   );
 
@@ -1074,96 +1252,19 @@ void WebServerManager::setupRoutes() {
   // HTTP LittleFS OTA upload - upload esp32/.pio/build/esp32/littlefs.bin.
   // This updates the filesystem/data partition, not the firmware partition.
   server.on("/api/ota/fs", HTTP_POST,
-    [this](AsyncWebServerRequest *request) {
-      if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-      if (!cfg || !cfg->otaConfig.enabled) {
-        request->send(423, "application/json", "{\"ok\":false,\"target\":\"fs\",\"error\":\"ota_disabled\"}");
-        return;
-      }
-
-      bool ok = !Update.hasError();
-      String resp = ok
-        ? "{\"ok\":true,\"target\":\"fs\"}"
-        : String("{\"ok\":false,\"target\":\"fs\",\"error\":\"") + Update.errorString() + "\"}";
-
-      request->send(ok ? 200 : 500, "application/json", resp);
-
-      if (ok) {
-        delay(300);
-        ESP.restart();
-      }
-    },
+    [this](AsyncWebServerRequest *request) { handleOtaDone(request, "fs"); },
     [this](AsyncWebServerRequest *request, const String &filename,
            size_t index, uint8_t *data, size_t len, bool final) {
-      if (index == 0) {
-        if (otaHttpUploadStarted) {
-          Serial.printf("[OTA-FS] reject: already_in_progress\n");
-          Update.abort();
-          return;
-        }
-
-        if (!isAuthorized(request)) {
-          Serial.printf("[OTA-FS] abort: unauthorized\n");
-          otaHttpUploadStarted = false;
-          Update.abort();
-          return;
-        }
-
-        if (!cfg || !cfg->otaConfig.enabled) {
-          Serial.printf("[OTA-FS] abort: ota_disabled\n");
-          otaHttpUploadStarted = false;
-          Update.abort();
-          return;
-        }
-
-        if (request->contentLength() == 0) {
-          Serial.printf("[OTA-FS] abort: empty_upload\n");
-          otaHttpUploadStarted = false;
-          Update.abort();
-          return;
-        }
-
-        Serial.printf("[OTA-FS] Start: %s size=%u\n",
-                      filename.c_str(), request->contentLength());
-
-        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
-          Serial.printf("[OTA-FS] begin error: %s\n", Update.errorString());
-          otaHttpUploadStarted = false;
-          return;
-        }
-
-        otaHttpUploadStarted = true;
-      }
-
-      if (Update.isRunning()) {
-        if (Update.write(data, len) != len) {
-          Serial.printf("[OTA-FS] write error: %s - aborting\n", Update.errorString());
-          Update.abort();
-          otaHttpUploadStarted = false;
-          return;
-        }
-      }
-
-      if (final) {
-        otaHttpUploadStarted = false;
-
-        if (Update.isRunning()) {
-          if (Update.end(true)) {
-            Serial.printf("[OTA-FS] Done: %u B\n", index + len);
-          } else {
-            Serial.printf("[OTA-FS] end error: %s\n", Update.errorString());
-          }
-        }
-      }
+      handleOtaChunk(U_SPIFFS, "OTA-FS", request, filename, index, data, len, final);
     }
   );
   server.on("/api/factory_reset", HTTP_POST, factoryResetHandler);
   server.on("/api/factory-reset", HTTP_POST, factoryResetHandler);
 
   server.on("/api/gate/calibrate", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-  }, NULL, [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     BodyBuffer* buf = appendBodyChunk(request, data, len, index, total);
     if (!buf) return;
     if (index + len != total) return;
@@ -1205,9 +1306,9 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/control", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-  }, NULL, [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     if (otaActiveCb && otaActiveCb()) {
       request->send(423, "application/json", "{\"status\":\"blocked\",\"error\":\"ota_active\"}");
       return;
@@ -1250,9 +1351,9 @@ void WebServerManager::setupRoutes() {
   });
 
   server.on("/api/move", HTTP_POST, [this](AsyncWebServerRequest *request){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
-  }, NULL, [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total){
-    if (!isAuthorized(request)) { sendUnauthorized(request); return; }
+    finishBodyRequest(request);
+  }, NULL, [this](AsyncWebServerRequest* request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!isAuthorized(request)) return;  // 401 is sent once, by finishBodyRequest()
     if (otaActiveCb && otaActiveCb()) {
       request->send(423, "application/json", "{\"status\":\"blocked\",\"error\":\"ota_active\"}");
       return;
@@ -1347,10 +1448,19 @@ void WebServerManager::setupRoutes() {
     if (type == WS_EVT_CONNECT) {
       stats.lastWsConnectMs = millis();
       if (!statusCb) return;
-      StaticJsonDocument<2048> doc;
+      // Status JSON is ~3.3 KB: the old 2 KB document silently dropped fields.
+      DynamicJsonDocument doc(6144);
+      if (doc.capacity() == 0) return;
       doc["type"] = "status";
       JsonObject dataObj = doc.createNestedObject("data");
-      statusCb(dataObj);
+      {
+        ConfigLock cfgLock;
+        statusCb(dataObj);
+      }
+      if (doc.overflowed()) {
+        Serial.println("[WS] status overflow on connect - skipped");
+        return;
+      }
       String payload = serializeJsonString(doc);
       client->text(payload);
       return;
@@ -1431,10 +1541,23 @@ void WebServerManager::broadcastJson(const char* json) {
 void WebServerManager::broadcastStatus() {
   if (!statusCb) return;
   if (ws.count() == 0) return;
-  StaticJsonDocument<2048> doc;
+  // Status JSON is ~3.3 KB: the old 2 KB document silently dropped fields.
+  DynamicJsonDocument doc(6144);
+  if (doc.capacity() == 0) return;
   doc["type"] = "status";
   JsonObject data = doc.createNestedObject("data");
-  statusCb(data);
+  {
+    ConfigLock cfgLock;
+    statusCb(data);
+  }
+  if (doc.overflowed()) {
+    static uint32_t lastLogMs = 0;
+    if (millis() - lastLogMs > 10000) {
+      lastLogMs = millis();
+      Serial.println("[WS] status overflow - broadcast skipped");
+    }
+    return;
+  }
   if (data.containsKey("uptimeMs")) {
     unsigned long uptime = data["uptimeMs"] | 0UL;
     data["uptimeMs"] = (uptime / 1000UL) * 1000UL;
@@ -1456,24 +1579,16 @@ void WebServerManager::broadcastEvent(const char* level, const char* message) {
 void WebServerManager::maintenance() {
   stats.lastMaintenanceMs = millis();
   ws.cleanupClients();
+  // Body buffers are cleaned in the async_tcp task (purgeStaleBodyBuffers);
+  // touching g_bodyBuffers here raced with the web task.
 
-  // FIX A4: Remove stale BodyBuffers whose HTTP connections were dropped
-  // before the body handler completed (no onDisconnect for raw HTTP in
-  // ESPAsyncWebServer).  Buffers older than 8 s or when the map exceeds 8
-  // entries are freed unconditionally to prevent heap exhaustion under load.
-  const unsigned long now = millis();
-  constexpr unsigned long kBodyBufStaleMs = 8000;
-  constexpr size_t kBodyBufMaxEntries = 8;
-  for (auto it = g_bodyBuffers.begin(); it != g_bodyBuffers.end(); ) {
-    const unsigned long age = (it->second && it->second->startMs)
-                                ? (now - it->second->startMs)
-                                : ULONG_MAX;
-    if (age > kBodyBufStaleMs || g_bodyBuffers.size() > kBodyBufMaxEntries) {
-      delete it->second;
-      it = g_bodyBuffers.erase(it);
-    } else {
-      ++it;
-    }
+  // HTTP OTA watchdog: if the client vanished mid-upload, release Update and
+  // the "OTA active" gate lock instead of blocking the gate forever.
+  if (otaHttpUploadStarted && (millis() - otaHttpLastChunkMs) > 20000) {
+    Serial.println("[OTA-HTTP] upload stalled >20 s - aborting");
+    if (Update.isRunning()) Update.abort();
+    otaHttpFinish(false, "upload_stalled");
+    otaHttpOwner = nullptr;
   }
 }
 
