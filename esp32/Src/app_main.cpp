@@ -29,6 +29,7 @@ static const char FW_VERSION[] = __DATE__ " " __TIME__;
 #include "led_controller.h"
 #include "input_manager.h"
 #include "ota_guard.h"
+#include "crash_log.h"
 #include "position_tracker.h"
 
 ConfigManager config;
@@ -1024,6 +1025,7 @@ void syncLegacyPositionState() {
 static portMUX_TYPE eventRingMux = portMUX_INITIALIZER_UNLOCKED;
 
 void pushEvent(const char* level, const char* code, const char* message) {
+  crashLogCrumb(message ? message : "");
 #if !defined(GATE_LOG_INFO_EVENTS)
   if (level && strcmp(level, "info") == 0) return;
 #endif
@@ -1639,6 +1641,7 @@ void fillDiagnostics(JsonObject& out) {
   JsonObject runtimeObj = out.createNestedObject("runtime");
   fillRuntimeSnapshot(runtimeObj, ws, nowMs);
   otaGuardFillStatus(out.createNestedObject("otaGuard"));
+  crashLogFill(out.createNestedObject("lastCrash"));
   JsonObject linkObj = out.createNestedObject("hoverLink");
   linkObj["refLossCount"] = hoverRefLossCount;
   linkObj["refLossLastMs"] = hoverRefLossLastMs;
@@ -2132,6 +2135,11 @@ static void checkHoverLinkReference(uint32_t nowMs) {
 ControlResult handleControlCmd(const char* action) {
   if (!gate) return makeControlResult(false, false, 503, "error", "gate_not_ready");
   if (!action || action[0] == '\0') return makeControlResult(false, false, 422, "invalid", "missing_action");
+  {
+    char crumb[40];
+    snprintf(crumb, sizeof(crumb), "cmd %s", action);
+    crashLogCrumb(crumb);
+  }
 
   // FIX #4: Allow "stop" even when position is not yet referenced (safety measure).
   // Movement commands are still blocked until homing establishes position.
@@ -2270,6 +2278,7 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
     }
   }
 
+  crashLogCrumb("cfg apply start");
   ConfigLock cfgLock;
   config.load();
 #if defined(GATE_DEBUG_CONFIG)
@@ -2729,6 +2738,7 @@ void gateTask(void* pvParameters) {
 void setup() {
   Serial.begin(115200);
   delay(10);
+  crashLogBegin();
   // Must run first: rolls back to the previous OTA slot on a crash loop.
   otaGuardEarlyBoot();
   bootResetReason = esp_reset_reason();
