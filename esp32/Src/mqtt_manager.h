@@ -43,6 +43,9 @@ private:
   MQTTConfig cfg;
   String lastErrorMsg;
   unsigned long lastConnectAttemptMs = 0;
+  static constexpr unsigned long kConnectBackoffMinMs = 8000;
+  static constexpr unsigned long kConnectBackoffMaxMs = 60000;
+  unsigned long connectBackoffMs = kConnectBackoffMinMs;
   bool enabledFlag = false;
   bool connectAllowed = true;
   bool wasConnected = false;

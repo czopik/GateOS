@@ -25,6 +25,9 @@ void MqttManager::applyConfig(const MQTTConfig& cfgIn) {
 
   client.setServer(cfg.server.c_str(), cfg.port);
   client.setSocketTimeout(1);
+  // TCP connect timeout (default 3 s).  connect() blocks loop(); with the
+  // broker on the LAN 1 s is plenty and keeps loop() responsive when it is down.
+  wifiClient.setTimeout(1);
   client.disconnect();
   resetStatus();
   lastErrorMsg = "";
@@ -165,9 +168,18 @@ bool MqttManager::ensureConnected() {
     return false;
   }
   unsigned long now = millis();
-  if (now - lastConnectAttemptMs < 8000) return false;
+  if (lastConnectAttemptMs != 0 && now - lastConnectAttemptMs < connectBackoffMs) return false;
   lastConnectAttemptMs = now;
-  return connectNow();
+  const bool ok = connectNow();
+  // Exponential backoff 8 s -> 60 s while the broker is unreachable, so a dead
+  // broker does not stall loop() every few seconds.
+  if (ok) {
+    connectBackoffMs = kConnectBackoffMinMs;
+  } else {
+    connectBackoffMs = connectBackoffMs * 2;
+    if (connectBackoffMs > kConnectBackoffMaxMs) connectBackoffMs = kConnectBackoffMaxMs;
+  }
+  return ok;
 }
 
 bool MqttManager::connectNow() {
@@ -218,6 +230,7 @@ bool MqttManager::connectNow() {
 
 void MqttManager::resetStatus() {
   lastConnectAttemptMs = 0;
+  connectBackoffMs = kConnectBackoffMinMs;
   wasConnected = false;
   lastState = 0;
 }

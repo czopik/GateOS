@@ -28,6 +28,7 @@ static const char FW_VERSION[] = __DATE__ " " __TIME__;
 #include "mqtt_manager.h"
 #include "led_controller.h"
 #include "input_manager.h"
+#include "ota_guard.h"
 #include "position_tracker.h"
 
 ConfigManager config;
@@ -188,6 +189,14 @@ static SemaphoreHandle_t  emergencyStopAckSem         = nullptr;
 // Carries the obstacle active/clear state for GATE_NOTIFY_OBSTACLE; written before xTaskNotify.
 static volatile bool      obstacleNotifyActive        = false;
 static volatile bool      inputsInitialized           = false;
+// Set in setup() after inputManager.begin(); GateTask polls inputs only after.
+static volatile bool      inputsSetupDone             = false;
+// LED feedback requested from GateTask (input edges) - applied in loop() so the
+// LED controller is only touched from one task.
+static volatile uint8_t   pendingLedInputFx           = 0;
+static constexpr uint8_t  LED_FX_LIMIT_OPEN           = (1u << 0);
+static constexpr uint8_t  LED_FX_LIMIT_CLOSE          = (1u << 1);
+static constexpr uint8_t  LED_FX_CMD_REJECTED         = (1u << 2);
 
 static DebouncedInput limitOpenInput;
 static DebouncedInput limitCloseInput;
@@ -269,6 +278,19 @@ static bool homingSoftLimitsOverridden = false;
 static bool homingSoftLimitsPrev = true;
 static int homingForceCmd = 80;
 static bool homingSearchOpen = false;
+// Reference search (homing) only starts after an explicit user command
+// (remote / button / web / MQTT open|close|toggle).  Previously the gate drove
+// itself towards OPEN right after every ESP32 restart (power loss, OTA update),
+// with no user present and the photocell disabled.
+static constexpr bool kHomingRequiresCommand = true;
+static volatile bool homingAwaitCommand = kHomingRequiresCommand;
+// Hoverboard (STM32) restart detection: telemetry gap followed by a jump of the
+// odometer means the position reference is lost.
+static constexpr uint32_t kHoverRebootGapMs = 800;
+static constexpr long kHoverRebootJumpMm = 100;
+static constexpr long kHoverRebootZeroMm = 20;
+static uint32_t hoverRefLossCount = 0;
+static uint32_t hoverRefLossLastMs = 0;
 
 // === v2.1: Homing status as enums (written in GateTask, read in main loop) ===
 // Stored as volatile uint8_t: single-byte write/read is atomic on Xtensa.
@@ -308,6 +330,8 @@ enum HomingReason : uint8_t {
   HOMING_REASON_GATE_ERROR_DURING_HOMING,
   HOMING_REASON_DISTANCE_LIMIT,
   HOMING_REASON_TIMEOUT,
+  HOMING_REASON_WAIT_USER_COMMAND,
+  HOMING_REASON_HOVER_LINK_LOST,
 };
 static volatile uint8_t homingResultEnum = (uint8_t)HOMING_RESULT_IDLE;
 static volatile uint8_t homingReasonEnum = (uint8_t)HOMING_REASON_NONE;
@@ -382,10 +406,21 @@ static long readHallCountAtomic() {
 }
 
 void updateFsStats(uint32_t nowMs) {
-  if (fsLastStatsMs != 0) return;
+  // LittleFS.usedBytes() walks the whole filesystem and takes ~1.5 s on this
+  // device; it now runs only in the low-priority ConfigSave task
+  // (refreshFsStats) instead of blocking loop() / the web server.
+  (void)nowMs;
+}
+
+static void refreshFsStats() {
   fsTotalBytesCached = LittleFS.totalBytes();
   fsUsedBytesCached = LittleFS.usedBytes();
-  fsLastStatsMs = nowMs;
+  fsLastStatsMs = millis();
+}
+
+void getFsStatsCached(uint32_t* totalBytes, uint32_t* usedBytes) {
+  if (totalBytes) *totalBytes = fsTotalBytesCached;
+  if (usedBytes) *usedBytes = fsUsedBytesCached;
 }
 
 bool isSafeToSaveConfig() {
@@ -492,6 +527,8 @@ static const char* homingReasonStr(HomingReason r) {
     case HOMING_REASON_GATE_ERROR_DURING_HOMING: return "gate_error_during_homing";
     case HOMING_REASON_DISTANCE_LIMIT:           return "distance_limit";
     case HOMING_REASON_TIMEOUT:                  return "timeout";
+    case HOMING_REASON_WAIT_USER_COMMAND:        return "wait_user_command";
+    case HOMING_REASON_HOVER_LINK_LOST:          return "hover_link_lost_reference";
     default:                                     return "unknown";
   }
 }
@@ -789,6 +826,16 @@ static void runGateTaskHoming(uint32_t nowMs) {
       homingReadySinceMs = 0;
       return;
     }
+    if (homingAwaitCommand) {
+      // Position unknown: do NOT move on our own.  The first open/close/toggle
+      // command (see tryStartHomingByCommand) clears this flag.
+      if (homingReasonEnum != (uint8_t)HOMING_REASON_WAIT_USER_COMMAND) {
+        setHomingResult(HOMING_RESULT_PENDING, HOMING_REASON_WAIT_USER_COMMAND);
+        Serial.println("[HOMING] position unknown -> waiting for user command (no automatic motion)");
+      }
+      homingReadySinceMs = 0;
+      return;
+    }
     if (homingReadySinceMs == 0) homingReadySinceMs = nowMs;
     if (nowMs - homingReadySinceMs < kHomingReadyStableMs) return;
 
@@ -974,10 +1021,17 @@ void syncLegacyPositionState() {
   hallPps = positionTracker.hallPps();
 }
 
+static portMUX_TYPE eventRingMux = portMUX_INITIALIZER_UNLOCKED;
+
 void pushEvent(const char* level, const char* code, const char* message) {
 #if !defined(GATE_LOG_INFO_EVENTS)
   if (level && strcmp(level, "info") == 0) return;
 #endif
+  if (!level) level = "";
+  if (!message) message = "";
+  // Called from loop(), GateTask and async_tcp: guard the ring buffer.
+  EventEntry entry;
+  portENTER_CRITICAL(&eventRingMux);
   EventEntry& e = events[eventHead];
   e.ts = millis();
   strncpy(e.level, level, sizeof(e.level) - 1);
@@ -989,8 +1043,10 @@ void pushEvent(const char* level, const char* code, const char* message) {
   e.message[sizeof(e.message) - 1] = '\0';
   eventHead = (eventHead + 1) % kMaxEvents;
   if (eventCount < kMaxEvents) eventCount++;
+  entry = e;
+  portEXIT_CRITICAL(&eventRingMux);
   if (eventQueue) {
-    EventEntry out = e;
+    EventEntry out = entry;
     if (xQueueSend(eventQueue, &out, 0) != pdTRUE) {
       static uint32_t lastOverflowLogMs = 0;
       uint32_t now = millis();
@@ -1019,6 +1075,31 @@ void drainEventQueue() {
     webserver.broadcastEvent(e.level, e.message);
     mqttPublishEvent(e.level, e.message);
   }
+}
+
+// HTTP OTA (/api/ota/upload, /api/ota/fs) start/stop - called from the web task.
+void onHttpOtaState(bool active) {
+  if (active) {
+    otaActive = true;
+    otaProgress = 0;
+    otaError[0] = '\0';
+    pushEvent("info", "ota http start");
+    if (gateTaskHandle && emergencyStopAckSem) {
+      xTaskNotify(gateTaskHandle, GATE_NOTIFY_EMERGENCY, eSetBits);
+      if (xSemaphoreTake(emergencyStopAckSem, pdMS_TO_TICKS(100)) != pdTRUE) {
+        Serial.println("[OTA-HTTP] WARNING: emergency stop ack timeout");
+      }
+    }
+    if (gate) gate->setOtaActive(true);
+  } else {
+    otaActive = false;
+    otaProgress = -1;
+    if (gate) gate->setOtaActive(false);
+  }
+}
+
+bool isGateBusyForConfigWrite() {
+  return homingActive || (gate && gate->isMoving());
 }
 
 bool isOtaActive() {
@@ -1385,8 +1466,10 @@ void setupInputs() {
   inputManager.begin(config);
 }
 
+// Runs in GateTask (every 10 ms) so limit switches / STOP / photocell are
+// handled even when loop() is stalled by WiFi, MQTT or config reloads.
 void handleInputs() {
-  if (!gate) return;
+  if (!gate || !inputsSetupDone) return;
 
   InputEvents ev = inputManager.poll(config, millis());
   const bool photocellEnabled = config.sensorsConfig.photocell.enabled;
@@ -1422,14 +1505,14 @@ void handleInputs() {
   }
 
   if (ev.limitOpenRising) {
-    led.setOverride("limit_open_hit", 380);
+    pendingLedInputFx |= LED_FX_LIMIT_OPEN;
     // v2.1: route to GateTask via xTaskNotify — gate->onLimitOpen() mutates state machine.
     if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_LIMIT_OPEN, eSetBits);
     pushEvent("info", "limit open");
   }
 
   if (ev.limitCloseRising) {
-    led.setOverride("limit_close_hit", 380);
+    pendingLedInputFx |= LED_FX_LIMIT_CLOSE;
     // v2.1: route to GateTask via xTaskNotify — gate->onLimitClose() mutates state machine.
     if (gateTaskHandle) xTaskNotify(gateTaskHandle, GATE_NOTIFY_LIMIT_CLOSE, eSetBits);
     pushEvent("info", "limit close");
@@ -1441,7 +1524,7 @@ void handleInputs() {
       pushEvent("info", "button toggle");
     } else {
       pushEvent("warn", "button toggle throttled");
-      led.setOverride("command_rejected", 300);
+      pendingLedInputFx |= LED_FX_CMD_REJECTED;
     }
   }
   // v2: Signal GateTask that limit states are now valid (at least one poll done).
@@ -1555,6 +1638,11 @@ void fillDiagnostics(JsonObject& out) {
   const uint32_t nowMs = millis();
   JsonObject runtimeObj = out.createNestedObject("runtime");
   fillRuntimeSnapshot(runtimeObj, ws, nowMs);
+  otaGuardFillStatus(out.createNestedObject("otaGuard"));
+  JsonObject linkObj = out.createNestedObject("hoverLink");
+  linkObj["refLossCount"] = hoverRefLossCount;
+  linkObj["refLossLastMs"] = hoverRefLossLastMs;
+  linkObj["homingAwaitCommand"] = (bool)homingAwaitCommand;
 
   JsonObject hoverObj = out.createNestedObject("hoverUart");
   if (motor && motor->isHoverUart() && motor->hoverEnabled()) {
@@ -1972,6 +2060,75 @@ void fillRemoteState(JsonObject& out) {
   }
 }
 
+static bool isMoveCommand(const char* action) {
+  if (!action) return false;
+  return strcasecmp(action, "open") == 0 ||
+         strcasecmp(action, "close") == 0 ||
+         strcasecmp(action, "toggle") == 0;
+}
+
+// If the gate position is unknown and we are waiting for the user, a movement
+// command starts the slow reference search (towards OPEN) instead of being
+// rejected.  Safe to call from any task (flag is a volatile bool).
+static bool tryStartHomingByCommand(const char* action) {
+  if (!startupHomingEnabled || startupPositionCertain || startupSafetyLocked) return false;
+  if (homingActive || !isMoveCommand(action)) return false;
+  // Start when waiting for the user, or retry after a failed homing attempt
+  // (homingChecked) which would otherwise block the gate until reboot.
+  if (!homingAwaitCommand && !homingChecked) return false;
+  homingChecked = false;
+  homingAwaitCommand = false;
+  pushEvent("warn", "position unknown: reference run (homing) started by command");
+  Serial.printf("[HOMING] started by user command '%s'\n", action);
+  return true;
+}
+
+// Called from GateTask when the hoverboard odometer is no longer trustworthy
+// (STM32 restarted / link lost while the odometer moved).
+static void invalidatePositionReference(const char* reason) {
+  homingActive = false;
+  startupLimitRefDone = false;
+  homingChecked = false;
+  homingSearchOpen = true;
+  homingAwaitCommand = kHomingRequiresCommand;
+  homingReadySinceMs = 0;
+  setStartupSafetyState(false, false, reason);
+  setHomingResult(HOMING_RESULT_PENDING, HOMING_REASON_HOVER_LINK_LOST);
+}
+
+static void checkHoverLinkReference(uint32_t nowMs) {
+  static uint32_t prevTelMs = 0;
+  static long prevDistMm = 0;
+  static bool havePrev = false;
+  if (!motor || !motor->isHoverUart() || !motor->hoverEnabled()) return;
+  const HoverTelemetry& tel = motor->hoverTelemetry();
+  const uint32_t telMs = (uint32_t)tel.lastTelMs;
+  if (telMs == 0 || telMs == prevTelMs) return;  // no new frame
+  const long distMm = tel.distMm;
+  if (havePrev) {
+    const uint32_t gapMs = telMs - prevTelMs;
+    const long jumpMm = labs(distMm - prevDistMm);
+    // Signature of an STM32 restart: telemetry gap AND the odometer came back
+    // at ~0 (it starts from zero after boot) from a clearly non-zero value.
+    // A plain UART glitch while moving keeps counting and is not matched.
+    const bool odometerReset = labs(distMm) <= kHoverRebootZeroMm;
+    if (gapMs >= kHoverRebootGapMs && odometerReset && jumpMm >= kHoverRebootJumpMm) {
+      hoverRefLossCount++;
+      hoverRefLossLastMs = nowMs;
+      Serial.printf("[HOVER] telemetry gap %lums + odometer jump %ldmm (%ld -> %ld): "
+                    "STM32 restart suspected -> position reference invalid\n",
+                    (unsigned long)gapMs, jumpMm, prevDistMm, distMm);
+      pushEvent("error", "hoverboard restart detected: position reference lost");
+      if (!homingActive && startupHomingEnabled) {
+        invalidatePositionReference("hover_link_lost");
+      }
+    }
+  }
+  prevTelMs = telMs;
+  prevDistMm = distMm;
+  havePrev = true;
+}
+
 ControlResult handleControlCmd(const char* action) {
   if (!gate) return makeControlResult(false, false, 503, "error", "gate_not_ready");
   if (!action || action[0] == '\0') return makeControlResult(false, false, 422, "invalid", "missing_action");
@@ -1980,6 +2137,9 @@ ControlResult handleControlCmd(const char* action) {
   // Movement commands are still blocked until homing establishes position.
   const bool isStopCmd = (strcmp(action, "stop") == 0);
   if (startupHomingEnabled && !startupPositionCertain && !isStopCmd) {
+    if (tryStartHomingByCommand(action)) {
+      return makeControlResult(true, true, 202, "homing_started");
+    }
     pushEvent("warn", "control blocked: homing pending — stop still allowed");
 #if defined(GATE_DEBUG_UI)
     Serial.printf("[UI] control blocked: startup_safety reason=%s action=%s (stop always permitted)\n",
@@ -2074,7 +2234,11 @@ ControlResult handleControlCmd(const char* action) {
 static void processPendingRuntimeConfigApply(uint32_t nowMs) {
   if (!runtimeConfigApplyPending) return;
   if (otaActive || homingActive) return;
-    if (gate && gate->getState() != GATE_STOPPED) return;
+  // Apply whenever the gate is not moving (previously only in STOPPED, so a
+  // gate in ERROR never picked up new settings).
+  if (gate && (gate->isMoving() ||
+               gate->getState() == GATE_OPENING ||
+               gate->getState() == GATE_CLOSING)) return;
 
   runtimeConfigApplyPending = false;
   const uint32_t reqAgeMs =
@@ -2096,10 +2260,17 @@ static void processPendingRuntimeConfigApply(uint32_t nowMs) {
       vTaskDelay(pdMS_TO_TICKS(5));
     }
     if (!configApplyPaused) {
-      Serial.println("[CFG_APPLY] WARNING: GateTask pause ack timeout – proceeding anyway");
+      // Never reload config while GateTask is still running - that mutates
+      // objects it is using.  Retry on a later loop() pass.
+      Serial.println("[CFG_APPLY] GateTask pause ack timeout - apply postponed");
+      configApplyPausing = false;
+      portMEMORY_BARRIER();
+      runtimeConfigApplyPending = true;
+      return;
     }
   }
 
+  ConfigLock cfgLock;
   config.load();
 #if defined(GATE_DEBUG_CONFIG)
   Serial.printf("[CFG_APPLY] after load: gate.maxDistance=%.3f gate.position=%.3f\n",
@@ -2144,6 +2315,9 @@ ControlResult handleControlWrapper(const String& action) {
   if (!gate) return makeControlResult(false, false, 503, "error", "gate_not_ready");
   const bool isStopCmd = false;  // already handled above
   if (startupHomingEnabled && !startupPositionCertain && !isStopCmd) {
+    if (tryStartHomingByCommand(action.c_str())) {
+      return makeControlResult(true, true, 202, "homing_started");
+    }
     pushEvent("warn", "control blocked: homing pending");
     return makeControlResult(false, false, 409, "blocked", "position_not_referenced");
   }
@@ -2427,6 +2601,9 @@ static bool sendGateCommand(const char* action) {
 static void configSaveTask(void* pvParameters) {
   const TickType_t kMinIntervalTicks = pdMS_TO_TICKS(500);
   TickType_t lastSaveTick = xTaskGetTickCount() - kMinIntervalTicks;
+  // Slow LittleFS walk, done here (low priority) instead of loop()/web task.
+  vTaskDelay(pdMS_TO_TICKS(3000));
+  refreshFsStats();
   while (1) {
     xSemaphoreTake(configSaveSem, portMAX_DELAY);  // wait for signal
     const TickType_t nowTick = xTaskGetTickCount();
@@ -2434,7 +2611,9 @@ static void configSaveTask(void* pvParameters) {
     if (elapsed < kMinIntervalTicks) {
       vTaskDelay(kMinIntervalTicks - elapsed);
     }
-    config.processDeferredSave();
+    if (config.processDeferredSave()) {
+      refreshFsStats();
+    }
     lastSaveTick = xTaskGetTickCount();
   }
 }
@@ -2464,6 +2643,10 @@ void gateTask(void* pvParameters) {
       gateTaskHeartbeatMs = millis(); // refresh heartbeat after pause
       continue;                       // restart the loop (re-drain notifications)
     }
+
+    // Inputs (limits / STOP / photocell / button) polled here, not in loop().
+    // Any notification bits it raises are drained just below, same cycle.
+    handleInputs();
 
     // === v2.1: Drain all pending task notifications (non-blocking, bits OR-accumulated). ===
     // xTaskNotify(gateTaskHandle, bit, eSetBits) from any context; processed here in
@@ -2533,6 +2716,9 @@ void gateTask(void* pvParameters) {
     // gate->loop(): level-based stop, over-current, stall, status publish.
     if (gate) gate->loop();
 
+    // Detect hoverboard restarts (odometer reset) -> position no longer valid.
+    checkHoverLinkReference(nowMs);
+
     if (wdtEnabled) {
       esp_task_wdt_reset();
     }
@@ -2543,6 +2729,8 @@ void gateTask(void* pvParameters) {
 void setup() {
   Serial.begin(115200);
   delay(10);
+  // Must run first: rolls back to the previous OTA slot on a crash loop.
+  otaGuardEarlyBoot();
   bootResetReason = esp_reset_reason();
   prevRtcResetReason = rtcLastResetReason;
   rtcBootCount++;
@@ -2624,6 +2812,7 @@ void setup() {
   xTaskCreatePinnedToCore(gateTask, "GateTask", 6144, NULL, 2, &gateTaskHandle, 0);
 
   setupInputs();
+  inputsSetupDone = true;
   updateHallAttachment();
   WiFiManager.begin(&config);
   Serial.printf("[OTA] cfg enabled=%d host=%s port=%d password=%s\n",
@@ -2658,6 +2847,8 @@ void setup() {
   webserver.setLedController(&led);
   webserver.setMotorController(motor);
   webserver.setOtaActiveCallback(isOtaActive);
+  webserver.setOtaHttpStateCallback(onHttpOtaState);
+  webserver.setGateBusyCallback(isGateBusyForConfigWrite);
   webserver.begin();
 
   pushEvent("info", "setup done");
@@ -2672,7 +2863,16 @@ void loop() {
     learnCallback(false);
   }
 
-  handleInputs();
+  // handleInputs() moved to GateTask (safety inputs must not depend on loop()).
+  {
+    const uint8_t fx = pendingLedInputFx;
+    if (fx) {
+      pendingLedInputFx = 0;
+      if (fx & LED_FX_LIMIT_OPEN) led.setOverride("limit_open_hit", 380);
+      if (fx & LED_FX_LIMIT_CLOSE) led.setOverride("limit_close_hit", 380);
+      if (fx & LED_FX_CMD_REJECTED) led.setOverride("command_rejected", 300);
+    }
+  }
   syncLegacyPositionState();
   logSummary1Hz();
   updateHallAttachment();
@@ -2764,6 +2964,13 @@ void loop() {
     lastStatusMs = now;
     webserver.broadcastStatus();
   }
+  {
+    const uint32_t hb = gateTaskHeartbeatMs;
+    const bool gateAlive = hb != 0 && (millis() - hb) < 2000;
+    const uint16_t port = (config.deviceConfig.webPort >= 1 && config.deviceConfig.webPort <= 65535)
+                            ? (uint16_t)config.deviceConfig.webPort : 80u;
+    otaGuardLoop(WiFiManager.isConnected(), gateAlive, port);
+  }
   static uint32_t lastWebMaintenanceMs = 0;
   if (now - lastWebMaintenanceMs >= 250) {
     lastWebMaintenanceMs = now;
@@ -2786,6 +2993,7 @@ void loop() {
   }
   if (factoryResetPending && (int32_t)(now - factoryResetAtMs) >= 0) {
     factoryResetPending = false;
+    ConfigLock cfgLock;
     config.resetToDefaults();
     config.save(nullptr);
   }
